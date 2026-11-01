@@ -355,7 +355,8 @@
     'https://esm.run/@supabase/supabase-js@' + VER
   ];
   function host(u) { return u.split('/')[2]; }
-  function inject(src) { var el = document.createElement('script'); el.text = src; (document.head || document.documentElement).appendChild(el); }
+  function anchor() { /* webpack 打包的库需要页面里至少有一个带 src 的 script 才能确定路径，否则会报 Automatic publicPath is not supported */ if (window.__anchor) return; window.__anchor = 1; try { var d = document.createElement('script'); d.src = 'data:text/javascript,'; (document.head || document.documentElement).appendChild(d); } catch (e) {} }
+  function inject(src) { anchor(); var el = document.createElement('script'); el.text = src; (document.head || document.documentElement).appendChild(el); }
   function ok() { return !!(window.supabase && window.supabase.createClient); }
   /* 你的浏览器环境里可能存在 module / exports / define 等全局对象，会让库把自己"导出"到别处而不是挂到 window.supabase。
      所以执行时先屏蔽这些全局（强制挂 window），不行再从 module.exports 里取。 */
@@ -463,7 +464,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.3</div>
+      <div class="build">build 3.4</div>
     </div>
   </div>
 
@@ -2155,6 +2156,7 @@ function bindUI() {
       if (btn.dataset.tab === 'me') renderEnv();
     };
   });
+  setInterval(() => { try { if (!document.hidden && $('tab-me').classList.contains('active')) renderEnv(); } catch (e) {} }, 1500);   // 诊断页自动刷新：实时通道连上后会自己变绿
   let lpT = 0, lpFired = 0;
   const cl = $('conv-list');
   cl.addEventListener('click', e => { if (now() - lpFired < 700) return; const it = e.target.closest('.conv-item'); if (it) openConv(it.dataset.key, it.dataset.peer); });
