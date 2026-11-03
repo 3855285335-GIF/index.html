@@ -464,7 +464,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.4</div>
+      <div class="build">build 3.5</div>
     </div>
   </div>
 
@@ -777,13 +777,13 @@ const S = {
   online: new Set(), seen: new Set(),
   call: null, incoming: null, recalledEarly: new Set(), pendingIce: {}, callHideT: 0, incTimer: 0,
   rt: { db: false, user: false }, rtGen: 0, presGen: 0, chDb: null, chUser: null, presCh: null,
-  tm: 0, tc: 0, syncing: false, noMR: false, noPR: false, peerRead: {}, typingUntil: 0, reply: null
+  tm: 0, tc: 0, syncing: false, noMR: false, noPR: false, noSigDb: false, noPres: false, noInbox: false, fbOnline: new Set(), peerRead: {}, typingUntil: 0, reply: null
 };
 let sb = null;
 const ME = () => S.me && S.me.account_id;
 const peerName = a => (S.profiles[a] && S.profiles[a].nickname) || a;
 const avatarOf = a => (S.profiles[a] && S.profiles[a].avatar_url) || '';
-const isOnline = a => S.online.has(a);
+const isOnline = a => S.online.has(a) || (S.fbOnline && S.fbOnline.has(a));
 const convOf = k => S.convs.find(c => c.convKey === k);
 
 /* ================= 本地缓存（秒开的关键）================= */
@@ -901,8 +901,12 @@ function renderEnv() {
   ok(!!(window.AudioContext || window.webkitAudioContext), '语音录制');
   ok(!iosAppWebview(), iosAppWebview() ? 'iOS App 内置浏览器：录音/通话已禁用以防闪退，请用 Safari 打开' : '非 iOS App 内置浏览器');
   ok(!inapp, inapp ? '内置浏览器（常不支持通话/录音，请用 Safari / Chrome 打开）' : '非内置浏览器');
-  ok(S.rt.db, '实时消息通道');
-  ok(S.rt.user, '快速通道 / 通话信令');
+  if (S.rt.db) ok(true, '实时消息通道');
+  else L.push(S.noInbox ? '🟡 实时消息通道连不上 → 消息每 2 秒同步一次（运行 setup-v4.sql 后会变成即时）' : '🟡 实时消息通道连不上 → 已切换国内模式（长轮询，消息基本即时到达）');
+  if (S.rt.user) ok(true, '快速通道 / 通话信令');
+  else if (!S.noSigDb) L.push('🟡 快速通道连不上 → 通话信号改走数据库（国内模式）');
+  else ok(false, '通话信令不可用：请在 Supabase 运行 setup-v4.sql');
+  if (S.noPres) L.push('🟡 在线状态：未运行 setup-v4.sql，国内网络下可能显示离线');
   $('diag').textContent = L.join('\n');
   $('errlog').textContent = LOG.join('\n') || '（暂无错误）';
 }
@@ -1110,7 +1114,7 @@ async function deliver(m, silent) {
       const old = m.body, url = await upload(m._blob, m._ext, m._ct);
       m.body = url; m._blob = null; patchMsg(id, { body: url }); try { URL.revokeObjectURL(old); } catch (e) {}
     }
-    if (S.rt.user && m.type !== 'call') bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
+    if (S.token && m.type !== 'call') bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur };
     const { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
@@ -1142,11 +1146,13 @@ function setReply(m) {
 function clearReply() { S.reply = null; $('reply-bar').classList.remove('active'); }
 let lastTy = 0;
 function sendTyping() {
-  if (!S.conv || !S.peer || !S.rt.user || now() - lastTy < 2500) return;
-  lastTy = now(); bcast('u:' + S.peer, 'ty', { from: ME(), conv: S.conv });
+  if (!S.conv || !S.peer || !S.token || now() - lastTy < 2500) return;
+  lastTy = now(); const p = { t: 'ty', from: ME(), conv: S.conv, sq: sqOf() };
+  bcast('u:' + S.peer, 'ty', p); dbSignal(S.peer, p);
 }
 function onTyping(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
+  if (sigDup(p)) return;
   if (S.conv !== p.conv || S.peer !== p.from) return;
   S.typingUntil = now() + 4500; renderChatTitle();
   setTimeout(() => { if (S.typingUntil <= now()) renderChatTitle(); }, 4600);
@@ -1154,7 +1160,7 @@ function onTyping(p) {
 /* 已读回执 */
 let lastAck = 0;
 function sendReadAck(conv, force) {
-  if (!conv || !S.rt.user || document.hidden) return;
+  if (!conv || !S.token || document.hidden) return;
   if (!force && now() - lastAck < 400) return; lastAck = now();
   const peer = peerOf(conv, ME());
   let t = 0; if (S.conv === conv) S.msgs.forEach(m => { if (m.from_acc === peer && !m._st) t = Math.max(t, ts(m)); });
@@ -1178,7 +1184,7 @@ function onReadReq(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
   if (S.conv === p.conv && !document.hidden) { sendReadAck(p.conv, true); return; }
   const c = convOf(p.conv);
-  if (c && !(c.unread > 0) && c.last_ts && S.rt.user) bcast('u:' + p.from, 'rd', { from: ME(), conv: p.conv, ts: c.last_ts });
+  if (c && !(c.unread > 0) && c.last_ts && S.token) bcast('u:' + p.from, 'rd', { from: ME(), conv: p.conv, ts: c.last_ts });
 }
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
@@ -1249,7 +1255,7 @@ async function doRecall() {
   patchMsg(id, { type: 'recalled', body: '' });
   const { data, error } = await sb.from('messages').update({ type: 'recalled', body: '' }).eq('id', id).select('id');
   if (error || !data || !data.length) { patchMsg(id, prev); toast('撤回失败：' + (error ? error.message : '已超时')); return; }
-  if (S.rt.user) bcast('u:' + m.to_acc, 'r', { id, from: ME(), conv: m.conv });
+  if (S.token) bcast('u:' + m.to_acc, 'r', { id, from: ME(), conv: m.conv });
   saveMsgsSoon();
 }
 
@@ -1271,7 +1277,7 @@ async function openConv(key, peer) {
   $('emoji-panel').classList.remove('active');
   renderChatTitle(); chatRender(true);          // 先用缓存秒开
   markReadSoon(key); sendReadAck(key, true);
-  if (S.rt.user) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
+  if (S.token) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
   try {
     const rows = await fetchMsgs(key);
     if (S.conv !== key) return;
@@ -1473,7 +1479,27 @@ function envProblem() {
   if (typeof RTCPeerConnection === 'undefined') return '当前浏览器不支持 WebRTC 通话';
   return '';
 }
-const sig = (peer, t, data) => bcast('u:' + peer, 'sig', Object.assign({ t, from: ME(), name: S.me.nickname }, data));
+let sigSeq = 0;
+const sqOf = () => ME() + ':' + now().toString(36) + ':' + (++sigSeq);
+function dbSignal(peer, payload) {
+  if (S.noSigDb || !sb) return Promise.resolve(false);
+  return sb.rpc('send_signal', { p_to: peer, p_payload: payload }).then(r => {
+    if (r && r.error) { if (isMissingFn(r.error)) S.noSigDb = true; logErr('send_signal', r.error); return false; }
+    return true;
+  }, e => { logErr('send_signal', e); return false; });
+}
+async function sig(peer, t, data) {
+  const p = Object.assign({ t, from: ME(), name: S.me.nickname, sq: sqOf() }, data);
+  const [a, b] = await Promise.all([bcast('u:' + peer, 'sig', p), dbSignal(peer, p)]);
+  return a || b;
+}
+const sigSeen = new Set();
+function sigDup(p) {
+  if (!p || typeof p.sq !== 'string') return false;
+  if (sigSeen.has(p.sq)) return true;
+  sigSeen.add(p.sq); if (sigSeen.size > 600) { const a = Array.from(sigSeen).slice(-300); sigSeen.clear(); a.forEach(x => sigSeen.add(x)); }
+  return false;
+}
 const QUAL = { hd1080: { w: 1920, h: 1080, fps: 30, br: 4000000, name: '超清' }, hd: { w: 1280, h: 720, fps: 30, br: 2500000, name: '清晰' }, sd: { w: 854, h: 480, fps: 30, br: 1000000, name: '流畅' } };
 function loadQ() { const q = LS.get('callq', 'hd'); return QUAL[q] ? q : 'hd'; }
 function vcons(call, facing) {
@@ -1684,7 +1710,7 @@ function onPcState(call) {
 async function startCall(video) {
   if (S.call || S.incoming || !S.peer) return;
   const pr = envProblem(); if (pr) { toast(pr); return; }
-  if (!S.rt.user) { toast('通话通道还没连上，请稍后再试（我的 → 环境诊断）'); return; }
+  if (!S.rt.user && S.noSigDb) { toast('实时通道连不上，且还没有运行 setup-v4.sql，暂时不能通话（我的 → 环境诊断）'); return; }
   const call = mkCall(S.peer, !!video, true); S.call = call;
   showCallUI(call, '正在呼叫…'); SFX.backStart();
   try {
@@ -1699,6 +1725,7 @@ async function startCall(video) {
 function onInvite(p) {
   if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
   if (S.incoming && S.incoming.id === p.id) return;
+  if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(peerName(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
@@ -1749,6 +1776,7 @@ async function onIce(p) {
 }
 function onSig(p) {
   if (!p || typeof p !== 'object' || typeof p.from !== 'string' || typeof p.id !== 'string' || !S.friends.includes(p.from)) return;
+  if (sigDup(p)) return;
   switch (p.t) {
     case 'invite': return onInvite(p);
     case 'accept': return onAccept(p);
@@ -1810,7 +1838,7 @@ function startRealtime() {
       if (gen !== S.rtGen) return;
       S.rt.db = st === 'SUBSCRIBED';
       if (st === 'SUBSCRIBED') { if (!first) resyncSoon(); first = false; }
-      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') logErr('rt-db', err || st);
+      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') rtFailLog('rt-db', err || st);
     });
   S.chUser = sb.channel('u:' + acc, { config: { private: true } })
     .on('broadcast', { event: 'm' }, ({ payload }) => onFastMsg(payload))
@@ -1824,9 +1852,101 @@ function startRealtime() {
       if (gen !== S.rtGen) return;
       S.rt.user = st === 'SUBSCRIBED';
       if (st === 'SUBSCRIBED') showBanner('');
-      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') { logErr('rt-user', err || st); showBanner('实时通道未授权：通话/极速消息不可用。请重新执行最新的 setup.sql（含 realtime.messages 策略）'); }
+      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') {
+        rtFailLog('rt-user', err || st);
+        const why = String((err && (err.message || err)) || '');
+        if (st === 'CHANNEL_ERROR' && /unauthori|permission|denied|policy|not allowed/i.test(why)) showBanner('实时通道没有权限：请重新执行最新的 setup.sql（含 realtime.messages 策略）');
+      }
     });
 }
+const rtFailSeen = {};
+function rtFailLog(tag, e) { if (rtFailSeen[tag]) return; rtFailSeen[tag] = 1; logErr(tag, (e && (e.message || e)) || e); }   // 国内网络会反复失败：只记一次，避免刷屏
+
+/* ================= 国内模式：实时通道连不上时，用普通请求顶替 ================= */
+let fbT = 0, fbRun = 0, msgCursor = 0, lastMsgPoll = 0, lastSigPoll = 0, lastSeenPoll = 0, lastReadPoll = 0;
+const pollTypes = new Map();
+function fbSchedule(ms) { clearTimeout(fbT); fbT = setTimeout(fbLoop, ms); }
+function fbStart() { fbRun++; msgCursor = 0; lastSeenPoll = 0; pollTypes.clear(); fbSchedule(800); }
+function fbStop() { fbRun++; clearTimeout(fbT); }
+function fbKick() { fbRun++; clearTimeout(fbT); fbT = setTimeout(fbLoop, 50); }   // 立刻重启循环（旧的那轮会自己退出）
+async function fbLoop() {
+  const run = fbRun;
+  if (!S.started || !sb || !S.me) return;
+  if (document.hidden) { fbSchedule(3000); return; }
+  let next = 1000;
+  try {
+    const need = !S.rt.db || !S.rt.user;
+    if (need && !S.noInbox) { await pollInbox(); next = 30; }   // 长轮询：服务器一有新内容立刻返回，没有就等 2.5 秒
+    else if (need) {                                            // 没运行 setup-v4.sql：退回普通轮询
+      const t = now();
+      if (!S.rt.user && !S.noSigDb && t - lastSigPoll >= 2000) { lastSigPoll = t; await pollSignals(); }
+      if (!S.rt.db && t - lastMsgPoll >= 2000) { lastMsgPoll = t; await pollMsgs(); }
+    }
+    if (run !== fbRun) return;
+    const t = now();
+    if (!S.rt.user && S.conv && t - lastReadPoll >= 4000) { lastReadPoll = t; fetchPeerRead(S.conv); }
+    if (t - lastSeenPoll >= 30000) { lastSeenPoll = t; heartbeat(true); pollSeen(); if (S.rt.user && !S.noSigDb) { lastSigPoll = t; await pollSignals(); } }
+  } catch (e) { if (e && e.abort) next = 30; else { logErr('fb', (e && e.message) || e); next = 2000; } }   // 卡住被放弃：马上重发；其他错误：等 2 秒
+  if (run !== fbRun) return;
+  fbSchedule(next);
+}
+async function pollInbox() {
+  let base = 0;
+  if (!msgCursor) { S.convs.forEach(c => { base = Math.max(base, Date.parse(c.last_ts || 0) || 0); }); msgCursor = base || (now() - 60000); }
+  const ctl = window.AbortController ? new AbortController() : null, tm = ctl ? setTimeout(() => ctl.abort(), 10000) : 0;   // 国内网络偶尔会让请求卡住：10 秒没回就放弃重发
+  let q = sb.rpc('poll_inbox', { p_since: new Date(msgCursor).toISOString(), p_wait_ms: base ? 0 : 2500 });
+  if (ctl && q && typeof q.abortSignal === 'function') q = q.abortSignal(ctl.signal);
+  let res; try { res = await q; } finally { clearTimeout(tm); }
+  const { data, error } = res || {};
+  if (error) { if (isMissingFn(error)) S.noInbox = true; const er = new Error('poll_inbox ' + (error.message || error.code)); er.abort = /abort/i.test(String(error.message || '')); throw er; }
+  const d = data || {};
+  handleMsgRows(d.msgs || [], base);
+  handleSigRows(d.sigs || []);
+}
+function handleSigRows(rows) {
+  rows.slice().sort((a, b) => a.id - b.id).forEach(r => {
+    const p = Object.assign({}, r.payload || {}, { from: r.from_acc });   // 发信人以服务器记录为准
+    try { if (p.t === 'ty') onTyping(p); else onSig(p); } catch (e) { logErr('sig-db', e); }
+  });
+}
+function handleMsgRows(rows, base) {
+  rows.forEach(r => {
+    const m = rowToMsg(r); const t = Date.parse(m.created_at) || 0; if (t > msgCursor) msgCursor = t;
+    if (pollTypes.get(m.id) === m.type) return;
+    pollTypes.set(m.id, m.type); if (pollTypes.size > 500) pollTypes.delete(pollTypes.keys().next().value);
+    if (base && t <= base) { S.seen.add(m.id); return; }   // 第一次：会话列表里已有的消息，只登记、不当新消息提醒
+    if (m.type === 'recalled' && S.seen.has(m.id)) { if (S.conv === m.conv) upsertMsg(m); return; }
+    onIncoming(m);
+  });
+}
+async function pollSignals() {
+  const { data, error } = await sb.rpc('take_signals');
+  if (error) { if (isMissingFn(error)) S.noSigDb = true; logErr('take_signals', error); return; }
+  handleSigRows(data || []);
+}
+async function pollMsgs() {
+  let base = 0;
+  if (!msgCursor) { S.convs.forEach(c => { base = Math.max(base, Date.parse(c.last_ts || 0) || 0); }); msgCursor = base || (now() - 60000); }
+  const since = new Date(msgCursor - 15000).toISOString();   // 往回多看 15 秒，防止漏掉同一时刻提交的消息
+  const { data, error } = await sb.from('messages').select('*').eq('to_acc', ME()).gt('created_at', since).order('created_at', { ascending: true }).limit(100);
+  if (error) { logErr('pollMsgs', error); return; }
+  handleMsgRows(data || [], base);
+}
+async function heartbeat(on) {
+  if (S.noPres || !sb || !S.me) return;
+  try { const r = await sb.rpc('heartbeat', { p_online: on !== false }); if (r && r.error && isMissingFn(r.error)) S.noPres = true; } catch (e) {}
+}
+async function pollSeen() {
+  if (S.noPres || !sb || !S.me) return;
+  try {
+    const { data, error } = await sb.rpc('friends_seen');
+    if (error) { if (isMissingFn(error)) S.noPres = true; return; }
+    const n = new Set(); (data || []).forEach(r => { if (r && r.online) n.add(r.account_id); });
+    const same = n.size === S.fbOnline.size && Array.from(n).every(x => S.fbOnline.has(x));
+    if (!same) { S.fbOnline = n; sched('list'); sched('contacts'); sched('title'); }
+  } catch (e) {}
+}
+
 let resyncT = 0;
 function resyncSoon() { clearTimeout(resyncT); resyncT = setTimeout(resync, 300); }
 function setupPresence() {
@@ -1845,15 +1965,16 @@ function startTimers() {
   S.tm = setInterval(() => {
     if (document.hidden || !sb || !S.me) return;
     n++;
-    if (!(S.rt.db && S.rt.user) || n % 5 === 0) resync();       // 实时正常：每 30 秒校对一次；异常：每 6 秒
-    if (!S.rt.db && S.conv) syncChat();
+    const lp = !S.noInbox;                                         // 国内模式的长轮询在工作：新消息已经即时到达，补漏校对放慢到 18 秒
+    if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 30 秒校对一次；异常：6 秒（长轮询时 18 秒）
+    if (!S.rt.db && S.conv && (!lp || n % 3 === 0)) syncChat();
     retryFailed();
     if (S.conv && n % 5 === 0) fetchPeerRead(S.conv);
   }, 6000);
 }
 function teardown() {
   S.started = false;
-  clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer);
+  clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer); fbStop(); if (S.me) heartbeat(false);
   S.rtGen++; S.presGen++;
   [S.chDb, S.chUser, S.presCh].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
   S.chDb = S.chUser = S.presCh = null; S.rt.db = S.rt.user = false;
@@ -1862,7 +1983,7 @@ function teardown() {
   S.incoming = null; hideCallUI(); $('incoming-ui').classList.remove('active');
   recAbort(); stopAudio();
   document.body.classList.remove('chat-open');
-  S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
+  S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -1881,7 +2002,7 @@ async function start(user) {
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
   }
   S.started = true;
-  startRealtime(); startTimers();
+  startRealtime(); startTimers(); fbStart();
   setTimeout(setupPresence, 1200);
 }
 async function onAuth(ev, session) {
@@ -1934,7 +2055,7 @@ let actOpenAt = 0;
 function closeActs() { $('act-backdrop').classList.remove('active'); $('act-sheet').classList.remove('active'); }
 
 /* ================= 账号：头像 / 昵称 / 密码 ================= */
-function notifyFriends() { if (!S.rt.user) return; S.friends.forEach(a => bcast('u:' + a, 'fr', { from: ME() })); }
+function notifyFriends() { if (!S.token) return; S.friends.forEach(a => bcast('u:' + a, 'fr', { from: ME() })); }
 function editNick() {
   openForm('修改昵称', [{ ph: '新昵称（1-20 个字）', val: S.me.nickname, max: 20 }], async ([v]) => {
     v = (v || '').trim(); if (!v) return '昵称不能为空'; if (v.length > 20) return '最多 20 个字';
@@ -2287,7 +2408,7 @@ function bindUI() {
     if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) recAbort(); else { stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); if (!S.call) heartbeat(false); } else { heartbeat(true); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
 }
 
