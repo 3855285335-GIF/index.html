@@ -12,5 +12,5 @@ const { chromium } = require('playwright'); const fs = require('fs');
       return { ok: true, servers: ice.length };
     } catch (e) { return { ok: false, err: String(e) }; }
   }, m[0]);
-  console.log(JSON.stringify(r)); await b.close(); process.exit(r.ok ? 0 : 1);
+  console.log((r.ok ? 'PASS' : 'FAIL') + ' 浏览器接受全部 STUN/TURN 地址格式：' + JSON.stringify(r)); await b.close(); process.exit(r.ok ? 0 : 1);
 })();

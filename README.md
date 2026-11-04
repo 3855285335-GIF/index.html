@@ -5,7 +5,7 @@
 - **线上地址**：<https://3855285335-gif.github.io/index.html/>
 - **当前版本**：build 3.6（2026-11-04 完成）。线上在用户上传前还是 build 3.5，进 App 的“我”页面可以看到版本号。
 - **本仓库的两个分支**
-  - `main`：网站本身，只有根目录的 `index.html`，GitHub Pages 从这里发布。**只放网页文件。**
+  - `main`：网站本身，只有根目录的 `index.html`（图标已经内嵌在页面里），GitHub Pages 从这里发布。**只放网页文件。** `sw.js` 和单独的图标文件从来没放到 `main` 上，所以网站实际没有启用离线缓存（Service Worker）。
   - `source`：全部源码、SQL、测试和这份说明。不会触发网站重新部署，也不会出现在网站上。
 
 ---
@@ -51,8 +51,8 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 
 发布（用户在 iPhone 上操作）：
 1. 如果有新的 SQL，先在 Supabase 运行：<https://supabase.com/dashboard/project/uaoiqbxptnbrvkzjwguc/sql/new>
-2. 打开 <https://github.com/3855285335-gif/index.html/upload/main>，上传 `site/index.html`，**只提交一次**，然后等“操作”（Actions）页面变绿。`sw.js` 和图标没改过就不用传。
-3. 手机上把 App 彻底关掉、再打开**两次**：`sw.js` 先用缓存、后台再更新，所以第二次打开才是新版。进“我”看版本号确认。
+2. 把 `site/index.html` 放到 `main` 分支根目录的 `index.html`。用户已决定由 Claude 直接推送，不再手动上传。如果要手动上传，就用 <https://github.com/3855285335-gif/index.html/upload/main>，**只提交一次**。然后等“操作”（Actions）页面变绿。
+3. 手机上把 App 彻底关掉、再打开，GitHub Pages 本身有几分钟的缓存，可能要多开一两次。进“我”看版本号确认。
 4. 两个人的手机都要换成新版，新旧版本混用可能互相收不到通话信号。
 
 注意：GitHub Pages 同时有两个部署时可能卡住。每次只提交一次，等变绿后再做下一次。
@@ -96,7 +96,8 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 - WebRTC：默认画质“清晰”720p 约 2.5Mbps，可选“超清”1080p 约 4Mbps、“流畅”480p 约 1Mbps，选择会被记住；可以前后摄像头切换、大小画面互换，“通话信息”里显示分辨率、帧率、码率、延迟、丢包、直连还是中转。
 - **STUN**（iPhone 5G 真机实测能用）：`stun.miwifi.com`、`stun.hitv.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`（都是 3478 端口）、`stun.l.google.com:19302`。`stun.qq.com` 实测不通，不用。
 - **中转服务器（TURN）**：两台手机能直连时不走中转、不花额度；直连失败才走中转，按流量计费。
-  - 主力是 ExpressTURN（`turn:free.expressturn.com:3478`，UDP 和 TCP 各一个），备用是 Metered。
+  - 主力是 ExpressTURN（`turn:free.expressturn.com:3478`，UDP 和 TCP 各一个），备用是 Metered（**只放 TLS 443**：`turns:global.relay.metered.ca:443?transport=tcp`）。
+  - ⚠️ 浏览器（WebRTC）选中转时按协议定优先级：**UDP 2 > TCP 1 > TLS 0**，列表顺序只在同一种协议之间起作用（[WebRTC 源码评审记录：port.h](https://codereview.webrtc.org/2568833002/diff/1/webrtc/p2p/base/port.h)、[turnport.cc](https://codereview.webrtc.org/2568833002/diff/20001/webrtc/p2p/base/turnport.cc)）。用户实测国内不开 VPN（Wi-Fi 和 5G 一样）：ExpressTURN UDP ✗、TCP ✓，Metered UDP 80 ✓、TLS 443 ✓；开 VPN 全部 ✓。如果 Metered 留着 UDP，国内会优先走 Metered，很快用完它的 500MB。所以**除了主力，其他中转都不能放 UDP 地址**，`tests/configcheck.js` 会检查这一点。
   - 配置读取顺序：先读数据库 `app_config` 表里 key=`ice` 的那一行，读不到用 `src/app.js` 里的 `TURN_DEFAULT`。
   - 换账号或服务商：改 `sql/update-turn.sql` 再运行，**网页不用重传**。
 - **“中转省流量”默认关**：走中转时不降画质，画质由用户自己选。用户在“我 → 📶 中转省流量”打开后，走中转时视频限制在约 300kbps、分辨率减半，语音约 24kbps；直连时不受影响。是否走中转每 4 秒复查一次。
@@ -128,7 +129,7 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 
 ### 网页端
 ```bash
-bash tests/runall.sh 2      # 需要 Node 和 Playwright（自带 Chromium）
+bash tests/runall.sh 2      # 需要 Node 和 Playwright（自带 Chromium）；最后会打印一共跑了几项、失败几项
 ```
 用 `tests/fakelib.js` 代替真的 Supabase，两个浏览器页面分别扮演 alice 和 bob。主要的测试组：
 
@@ -141,6 +142,9 @@ bash tests/runall.sh 2      # 需要 Node 和 Playwright（自带 Chromium）
 | skew / difftest / pptest | 手机时间不准、诊断页自动刷新、依赖库加载与缓存 |
 | cntest / mix1-3 / hangtest | 国内模式：消息延迟、通话、一边开 VPN 一边不开、两条通道重复到达去重、没运行 SQL 时退回、请求被卡住后自动恢复 |
 | relaytest / prtest / defaulttest | 中转配置来自数据库、省流量默认关、中转测试、在线状态即时推送、内置默认的服务器列表 |
+| configcheck / icecheck / pptest | 网页内置的中转列表和两份 SQL 完全一致、除主力外没有 UDP、STUN 列表；浏览器接受全部服务器地址；依赖库加载 |
+
+目前每遍是 17 组网页测试，加 1 组国内网络下的在线状态测试，最后再跑 3 项检查。`runall.sh 2` 一共 2×18+3 = 39 项。
 
 ### SQL
 ```bash
@@ -181,4 +185,4 @@ bash tests/sql/run-sql-tests.sh   # 需要本机 PostgreSQL 16（initdb / pg_ctl
 - **3.3**：改头像 / 昵称 / 密码、清空聊天记录、删除会话、草稿、搜索。
 - **3.4**：诊断页自动刷新、依赖库缓存（修复 publicPath 报错）。
 - **3.5**：国内模式（长轮询、数据库信号信箱、在线状态，需要 `3-setup-v5.sql` 的第一部分）。
-- **3.6**：中转服务器配置放进数据库（ExpressTURN 主力、Metered 备用）、中转测试、“中转省流量”开关（默认关）、在线状态变化即时推送、页面关闭时报离线、STUN 按真机实测核对。
+- **3.6**：中转服务器配置放进数据库（ExpressTURN 主力、Metered 备用且只留 TLS 443）、中转测试、“中转省流量”开关（默认关）、在线状态变化即时推送、页面关闭时报离线、STUN 按真机实测核对。
