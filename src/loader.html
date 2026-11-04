@@ -1,0 +1,97 @@
+<script>
+/* 依赖库加载：先读本地缓存（二次打开零网络）；没有缓存则同时请求多个来源，谁先到用谁，并缓存下来。
+   来源包含 esm.sh（上一版就是用它，你的网络能通），失败原因会记录并显示在登录框下面。 */
+(function () {
+  var VER = '2.45.4', KEY = 'ch2lib:' + VER, ERR = window.__libErr = [];
+  var TXT = [
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
+    'https://fastly.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
+    'https://gcore.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
+    'https://unpkg.com/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
+    'https://registry.npmmirror.com/@supabase/supabase-js/' + VER + '/files/dist/umd/supabase.js',
+    'https://cdn.bootcdn.net/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js'
+  ];
+  var ESM = [
+    'https://esm.sh/@supabase/supabase-js@' + VER + '?bundle',
+    'https://esm.sh/@supabase/supabase-js@2',
+    'https://esm.run/@supabase/supabase-js@' + VER
+  ];
+  function host(u) { return u.split('/')[2]; }
+  function anchor() { /* webpack 打包的库需要页面里至少有一个带 src 的 script 才能确定路径，否则会报 Automatic publicPath is not supported */ if (window.__anchor) return; window.__anchor = 1; try { var d = document.createElement('script'); d.src = 'data:text/javascript,'; (document.head || document.documentElement).appendChild(d); } catch (e) {} }
+  function inject(src) { anchor(); var el = document.createElement('script'); el.text = src; (document.head || document.documentElement).appendChild(el); }
+  function ok() { return !!(window.supabase && window.supabase.createClient); }
+  /* 你的浏览器环境里可能存在 module / exports / define 等全局对象，会让库把自己"导出"到别处而不是挂到 window.supabase。
+     所以执行时先屏蔽这些全局（强制挂 window），不行再从 module.exports 里取。 */
+  function run(code) {
+    var errs = [], onerr = function (e) { errs.push(String(e && e.message || e).slice(0, 80)); };
+    window.addEventListener('error', onerr);
+    try {
+      window.supabase = undefined; try { delete window.supabase; } catch (e) {}
+      inject('(function(module,exports,define,require){' + code + '\n}).call(window,undefined,undefined,undefined,undefined);');
+      if (ok()) return;
+      window.__m = { exports: {} };
+      inject('(function(module,exports,define,require){' + code + '\n}).call(window,window.__m,window.__m.exports,undefined,undefined);');
+      var ex = window.__m.exports;
+      if (ok()) return;
+      if (ex && ex.createClient) { window.supabase = ex; return; }
+      if (ex && ex.default && ex.default.createClient) { window.supabase = ex.default; return; }
+      throw new Error('库内容无效 len=' + code.length + ' head=' + code.slice(0, 50).replace(/\s+/g, ' ') + (errs.length ? ' err=' + errs[0] : ''));
+    } finally { window.removeEventListener('error', onerr); }
+  }
+  function fetchOne(u) {
+    return new Promise(function (res, rej) {
+      var ctl = window.AbortController ? new AbortController() : null, t = setTimeout(function () { if (ctl) ctl.abort(); rej(new Error('timeout')); }, 25000);
+      fetch(u, ctl ? { signal: ctl.signal } : {}).then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
+        .then(function (txt) { clearTimeout(t); if (txt.indexOf('createClient') < 0 || txt.length < 20000) throw new Error('bad body'); res({ text: txt }); }, function (e) { clearTimeout(t); rej(e); });
+    });
+  }
+  function scriptOne(u) {
+    return new Promise(function (res, rej) {
+      var el = document.createElement('script'), t = setTimeout(function () { rej(new Error('timeout')); }, 25000);
+      el.src = u; el.async = true;
+      el.onload = function () { clearTimeout(t); if (window.supabase && window.supabase.createClient) res({ global: true }); else rej(new Error('no global')); };
+      el.onerror = function () { clearTimeout(t); rej(new Error('script error')); };
+      (document.head || document.documentElement).appendChild(el);
+    });
+  }
+  function importOne(u) {
+    return new Promise(function (res, rej) {
+      var t = setTimeout(function () { rej(new Error('timeout')); }, 30000);
+      try {
+        import(u).then(function (m) {
+          clearTimeout(t); var c = m.createClient || (m.default && m.default.createClient);
+          if (!c) throw new Error('no createClient'); res({ create: c });
+        }).catch(function (e) { clearTimeout(t); rej(e); });
+      } catch (e) { clearTimeout(t); rej(e); }
+    });
+  }
+  var won = false;
+  function race() {
+    var jobs = [];
+    TXT.forEach(function (u, i) { jobs.push({ u: u, d: i * 120, f: function (x) { return fetchOne(x).then(function (r) { if (won) throw new Error('skip'); run(r.text); return r; }); } }); });
+    TXT.slice(0, 5).forEach(function (u, i) { jobs.push({ u: u, d: 200 + i * 300, f: scriptOne }); });
+    ESM.forEach(function (u, i) { jobs.push({ u: u, d: 300 + i * 400, f: importOne }); });
+    return new Promise(function (res, rej) {
+      var left = jobs.length;
+      jobs.forEach(function (j) {
+        setTimeout(function () {
+          if (won) return;
+          j.f(j.u).then(function (r) { if (won) return; won = true; res(r); }, function (e) {
+            if (!won && !(e && e.message === 'skip')) ERR.push(host(j.u) + ': ' + ((e && e.message) || e));
+            if (--left === 0 && !won) rej(new Error('all failed'));
+          });
+        }, j.d);
+      });
+    });
+  }
+  var cached = null; try { cached = localStorage.getItem(KEY); } catch (e) {}
+  if (cached) {
+    try { run(cached); window.__lib = Promise.resolve(); return; } catch (e) { try { localStorage.removeItem(KEY); } catch (x) {} }
+  }
+  window.__lib = race().then(function (r) {
+    if (r.text) { try { localStorage.setItem(KEY, r.text); } catch (e) {} }
+    else if (r.create) window.supabase = { createClient: r.create };
+  });
+})();
+</script>

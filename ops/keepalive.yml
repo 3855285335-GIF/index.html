@@ -1,0 +1,40 @@
+# Chatter 保活：每天自动访问一次 Supabase，防止免费项目因 7 天不活跃被暂停
+# 放在一个【私有】仓库里：私有仓库的定时任务不会因为 60 天没提交而被 GitHub 自动停用
+name: Supabase 保活
+
+on:
+  schedule:
+    - cron: '23 1 * * *'   # 每天 UTC 01:23（北京时间 09:23）自动运行一次
+  workflow_dispatch:        # 允许在 Actions 页面手动点 “Run workflow” 立即测试
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SB_URL: https://uaoiqbxptnbrvkzjwguc.supabase.co
+      SB_KEY: sb_publishable_2FQ9q01lGWiDntr7VUrzcQ_SkgIo8uf
+    steps:
+      - name: 访问 Supabase（签到）
+        run: |
+          ping() {
+            curl -sS --retry 3 --retry-delay "${RETRY_DELAY:-15}" --retry-all-errors -m 30 \
+              -o resp.txt -w '%{http_code}' -X POST "$SB_URL/rest/v1/rpc/keepalive" \
+              -H "apikey: $SB_KEY" -H "Content-Type: application/json" "$@" -d '{}'
+          }
+          code=$(ping) || true
+          if [ "$code" != "200" ]; then
+            echo "第一次返回 HTTP ${code:-000}，换一种请求头再试一次"
+            code=$(ping -H "Authorization: Bearer $SB_KEY") || true
+          fi
+          echo "HTTP ${code:-000}"
+          cat resp.txt 2>/dev/null || true
+          echo
+          if [ "$code" = "404" ]; then
+            echo "::error::找不到 keepalive 函数：请先在 Supabase 的 SQL Editor 运行 setup-keepalive.sql"
+          elif [ "$code" = "540" ] || [ "$code" = "503" ]; then
+            echo "::error::Supabase 项目可能已经被暂停：请到 Supabase 控制台点 Resume project 恢复"
+          fi
+          [ "$code" = "200" ]

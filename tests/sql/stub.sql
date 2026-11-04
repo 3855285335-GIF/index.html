@@ -1,0 +1,17 @@
+create role anon nologin; create role authenticated nologin; create role service_role nologin;
+create schema auth; create schema storage; create schema realtime;
+create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('app.uid', true), '')::uuid $$;
+create table auth.users (id uuid primary key);
+create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint);
+create table storage.objects (id uuid default gen_random_uuid() primary key, bucket_id text, name text, metadata jsonb, created_at timestamptz default now());
+alter table storage.objects enable row level security;
+create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$;
+create table realtime.messages (id bigserial primary key, topic text);
+alter table realtime.messages enable row level security;
+create function realtime.topic() returns text language sql stable as $$ select current_setting('app.topic', true) $$;
+create publication supabase_realtime;
+grant usage on schema public, auth, storage, realtime to anon, authenticated;
+alter default privileges in schema public grant all on tables to anon, authenticated;
+alter default privileges in schema public grant execute on functions to anon, authenticated, public;
+grant all on storage.objects, storage.buckets, realtime.messages to authenticated;
+grant usage, select on all sequences in schema realtime to authenticated;
