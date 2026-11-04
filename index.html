@@ -220,6 +220,8 @@
 
   .store-info { font-size: 13.5px; line-height: 1.55; color: var(--muted); margin: 0 2px 10px; }
   #store-box .btns button:disabled { opacity: .45; }
+  #btn-relaytest:disabled { opacity: .45; }
+  .relay-res { white-space: pre-wrap; font-size: 13px; line-height: 1.6; background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 0; }
   .imgfail { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; width: 160px; height: 110px; border-radius: 18px; background: var(--surface2); color: var(--muted); font-size: 14px; text-align: center; cursor: pointer; }
   .imgfail small { font-size: 11.5px; opacity: .8; padding: 0 10px; }
   .sheet-bd { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2700; display: none; }
@@ -464,7 +466,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.5</div>
+      <div class="build">build 3.6</div>
     </div>
   </div>
 
@@ -493,7 +495,8 @@
           <div class="btns" style="margin-bottom:16px"><button id="btn-avatar" type="button">🖼 修改头像</button><button id="btn-nick" type="button">✏️ 修改昵称</button><button id="btn-pass" type="button">🔑 修改密码</button></div>
           <input id="avatar-input" type="file" accept="image/*" hidden>
           <div class="section-title">设置</div>
-          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button></div>
+          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-relaytest" type="button">🛰 中转测试</button></div>
+          <div id="relay-box" style="display:none;margin-bottom:16px"><div class="store-info">分别测试每个 STUN 和每家中转服务器能不能连上（大约 8 秒）。请先关掉 VPN 再测，结果才代表国内网络。</div><pre id="relay-res" class="relay-res"></pre></div>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
@@ -598,18 +601,38 @@ const API_URL = PROXY_URL || SUPABASE_URL;
 const canon = u => (PROXY_URL && typeof u === 'string' && u.indexOf(PROXY_URL + '/') === 0) ? SUPABASE_URL + u.slice(PROXY_URL.length) : u;
 const disp = u => (PROXY_URL && typeof u === 'string' && u.indexOf(SUPABASE_URL + '/') === 0) ? PROXY_URL + u.slice(SUPABASE_URL.length) : u;
 const AUTH_KEY_REF = (function () { try { return new URL(API_URL).hostname.split('.')[0]; } catch (e) { return PROJECT_REF; } })();
-// 通话 TURN：国内手机网络（运营商 NAT）下只靠 STUN 经常打不通。
-// 有自己的 TURN 服务器就填在这里，例如：{ urls: 'turn:your.host:3478', username: 'user', credential: 'pass' }
-const TURN_USER = '8e04f6769d4effbe70fb66f7', TURN_PASS = 'z8AVqW5ZnBQ0zgNV';   // Metered 免费 TURN 凭据（国内手机互拨需要）
-const TURN_SERVERS = [
-  { urls: 'turn:global.relay.metered.ca:80', username: TURN_USER, credential: TURN_PASS },
-  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: TURN_USER, credential: TURN_PASS },
-  { urls: 'turn:global.relay.metered.ca:443', username: TURN_USER, credential: TURN_PASS },
-  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: TURN_USER, credential: TURN_PASS }
+// 通话中转（TURN）：两台手机能直连时不经过中转、不花额度；直连失败才走中转，按流量算额度。
+// 中转服务商列表优先读数据库 app_config 表里的 'ice'（换服务商、换密码只要跑 SQL，不用重新上传网页）；读不到时用下面的内置默认值。
+// STUN：只放 iPhone 5G 真机实测能用的（stun.qq.com 实测不通，不用）
+const STUN_SERVER = { urls: ['stun:stun.miwifi.com:3478', 'stun:stun.hitv.com:3478', 'stun:stun.chat.bilibili.com:3478', 'stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] };
+const TURN_DEFAULT = [
+  { name: 'ExpressTURN', username: '000000002109207283', credential: 'F2O3wiOhufam3ieQHr7cTrp77u0=', urls: ['turn:free.expressturn.com:3478?transport=udp', 'turn:free.expressturn.com:3478?transport=tcp'] },
+  { name: 'Metered', username: '8e04f6769d4effbe70fb66f7', credential: 'z8AVqW5ZnBQ0zgNV', urls: ['turns:global.relay.metered.ca:443?transport=tcp'] }
 ];
-const ICE_SERVERS = [{ urls: ['stun:stun.miwifi.com:3478', 'stun:stun.cloudflare.com:3478', 'stun:stun.chat.bilibili.com:3478', 'stun:stun.l.google.com:19302'] }].concat(TURN_SERVERS);
+// 注意：浏览器（WebRTC）选中转时按协议定优先级：UDP 2 > TCP 1 > TLS 0，列表顺序只在同一种协议之间起作用。
+// 国内不开 VPN 时 ExpressTURN 的 UDP 不通、TCP 通；如果 Metered 留着 UDP，手机会优先走 Metered（每月只有 500MB）。
+// 所以 Metered 只留 TLS 443：国内顺序变成 ExpressTURN TCP（1）> Metered TLS（0）。
 const RECALL_MS = 2 * 60 * 1000;
 const PAGE = 40;
+
+function validTurn(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(p => p && typeof p.username === 'string' && typeof p.credential === 'string' && p.username && p.credential && !/[<>]/.test(p.username + p.credential) &&
+      Array.isArray(p.urls) && p.urls.length && p.urls.every(u => typeof u === 'string' && /^turns?:[a-z0-9.\-]+(:\d+)?(\?transport=(udp|tcp))?$/i.test(u)))
+    .slice(0, 4).map(p => ({ name: String(p.name || '中转').slice(0, 20), username: p.username, credential: p.credential, urls: p.urls.slice(0, 4) }));
+}
+let turnList = null, turnFrom = '内置';
+function turns() { if (!turnList) { const c = validTurn(LS.get('ch2ice', null)); if (c.length) { turnList = c; turnFrom = '数据库（缓存）'; } else turnList = TURN_DEFAULT; } return turnList; }
+function iceServers() { return [STUN_SERVER].concat(turns().map(p => ({ urls: p.urls, username: p.username, credential: p.credential }))); }
+async function loadIceConfig() {
+  if (!sb || !S.me) return;
+  try {
+    const { data, error } = await sb.from('app_config').select('value').eq('key', 'ice').maybeSingle();
+    if (error) { logErr('ice-config', error.message || error.code); return; }
+    const l = validTurn(data && data.value && data.value.turn);
+    if (l.length) { turnList = l; turnFrom = '数据库'; LS.set('ch2ice', l); }
+  } catch (e) { logErr('ice-config', e); }
+}
 
 /* ================= 工具 ================= */
 const $ = id => document.getElementById(id);
@@ -907,6 +930,7 @@ function renderEnv() {
   else if (!S.noSigDb) L.push('🟡 快速通道连不上 → 通话信号改走数据库（国内模式）');
   else ok(false, '通话信令不可用：请在 Supabase 运行 setup-v4.sql');
   if (S.noPres) L.push('🟡 在线状态：未运行 setup-v4.sql，国内网络下可能显示离线');
+  L.push('ℹ️ 中转服务器：' + turns().map(p => p.name).join('、') + '（来自' + turnFrom + '）');
   $('diag').textContent = L.join('\n');
   $('errlog').textContent = LOG.join('\n') || '（暂无错误）';
 }
@@ -1081,11 +1105,11 @@ function onFastRecall(p) {
 }
 
 /* ---- 发送 ---- */
-async function bcast(topic, event, payload) {
+async function bcast(topic, event, payload, keep) {
   if (!S.token) return false;
   try {
     const r = await fetch(API_URL + '/realtime/v1/api/broadcast', {
-      method: 'POST',
+      method: 'POST', keepalive: !!keep,
       headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + S.token },
       body: JSON.stringify({ messages: [{ topic, event, payload, private: true }] })
     });
@@ -1132,7 +1156,7 @@ async function deliver(m, silent) {
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
-  input.value = ''; draftSave(S.conv, '');
+  input.value = ''; draftSave(S.conv, ''); lastTy = 0;   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
   let body = v.replace(/\u2063/g, '').slice(0, 5000);
   if (!body) return;
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
@@ -1146,7 +1170,7 @@ function setReply(m) {
 function clearReply() { S.reply = null; $('reply-bar').classList.remove('active'); }
 let lastTy = 0;
 function sendTyping() {
-  if (!S.conv || !S.peer || !S.token || now() - lastTy < 2500) return;
+  if (!S.conv || !S.peer || !S.token || now() - lastTy < 3000) return;
   lastTy = now(); const p = { t: 'ty', from: ME(), conv: S.conv, sq: sqOf() };
   bcast('u:' + S.peer, 'ty', p); dbSignal(S.peer, p);
 }
@@ -1480,18 +1504,41 @@ function envProblem() {
   return '';
 }
 let sigSeq = 0;
-const sqOf = () => ME() + ':' + now().toString(36) + ':' + (++sigSeq);
-function dbSignal(peer, payload) {
+const sqOf = () => ME() + ':' + now().toString(36) + (++sigSeq).toString(36);
+function dbSignal(peer, payload, keep) {
   if (S.noSigDb || !sb) return Promise.resolve(false);
+  if (keep) return restRpc('send_signal', { p_to: peer, p_payload: payload });   // 页面关闭时：用 keepalive 请求，关掉也能发出去
   return sb.rpc('send_signal', { p_to: peer, p_payload: payload }).then(r => {
     if (r && r.error) { if (isMissingFn(r.error)) S.noSigDb = true; logErr('send_signal', r.error); return false; }
     return true;
   }, e => { logErr('send_signal', e); return false; });
 }
 async function sig(peer, t, data) {
-  const p = Object.assign({ t, from: ME(), name: S.me.nickname, sq: sqOf() }, data);
+  const p = Object.assign({ t, from: ME(), sq: sqOf() }, data);
   const [a, b] = await Promise.all([bcast('u:' + peer, 'sig', p), dbSignal(peer, p)]);
   return a || b;
+}
+function restRpc(fn, body) {   // 直接发 HTTP（带 keepalive），用于页面关闭的那一刻
+  if (!S.token) return Promise.resolve(false);
+  try {
+    return fetch(API_URL + '/rest/v1/rpc/' + fn, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + S.token }, body: JSON.stringify(body || {}) })
+      .then(r => r.ok, () => false);
+  } catch (e) { return Promise.resolve(false); }
+}
+let lastPr = null;
+function announcePresence(on, keep) {   // 在线状态变化了才发：上线 / 下线各通知好友一次
+  if (!S.me || !S.token || lastPr === on) return;
+  lastPr = on;
+  const p = { t: 'pr', from: ME(), on: on ? 1 : 0, n: now(), sq: sqOf() };
+  S.friends.forEach(a => { bcast('u:' + a, 'pr', p, keep); dbSignal(a, p, keep); });
+}
+const prLast = {}, prAt = {};
+function onPresence(p) {
+  if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || sigDup(p)) return;
+  const n = +p.n || 0; if (n && prLast[p.from] && n <= prLast[p.from]) return;   // 两条路到达顺序可能颠倒：只认更新的
+  prLast[p.from] = n; prAt[p.from] = { on: !!p.on, t: now() };
+  if (p.on) S.fbOnline.add(p.from); else { S.fbOnline.delete(p.from); S.online.delete(p.from); }
+  sched('list'); sched('contacts'); sched('title');
 }
 const sigSeen = new Set();
 function sigDup(p) {
@@ -1561,6 +1608,19 @@ async function getMedia(call) {
   return await gum({ audio, video: false }, 30000);
 }
 function vSender(call) { return call.pc && call.pc.getSenders().find(x => x.track && x.track.kind === 'video'); }
+const relaySave = () => LS.get('ch2relaysave2', false) === true;   // 默认关：走中转也不降画质，想省流量由用户自己打开
+const saving = call => !!(call && call.relay && relaySave());
+function aSender(call) { return call.pc && call.pc.getSenders().find(x => x.track && x.track.kind === 'audio'); }
+async function applyAudioParams(call) {
+  const sd = aSender(call); if (!sd || !sd.getParameters || !sd.setParameters) return;
+  try {
+    const pr = sd.getParameters();
+    if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
+    if (saving(call)) pr.encodings[0].maxBitrate = 24000; else delete pr.encodings[0].maxBitrate;
+    await sd.setParameters(pr);
+  } catch (e) { logErr('setParameters-a', e); }
+}
+async function applyCallParams(call) { await applyAudioParams(call); await applyVideoParams(call); }
 async function applyVideoParams(call) {
   if (!call.video || !call.pc) return;
   const q = QUAL[call.q] || QUAL.hd;
@@ -1570,8 +1630,13 @@ async function applyVideoParams(call) {
   try {
     const pr = sd.getParameters();
     if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
-    pr.encodings[0].maxBitrate = q.br; pr.encodings[0].maxFramerate = q.fps;
-    try { pr.degradationPreference = call.q === 'sd' ? 'balanced' : 'maintain-resolution'; } catch (e) {}
+    if (saving(call)) {                                         // 走中转：约 300kbps、分辨率减半，节省中转额度
+      pr.encodings[0].maxBitrate = 300000; pr.encodings[0].scaleResolutionDownBy = 2; pr.encodings[0].maxFramerate = Math.min(q.fps, 24);
+      try { pr.degradationPreference = 'balanced'; } catch (e) {}
+    } else {                                                    // 直连：按画质设置，不限
+      pr.encodings[0].maxBitrate = q.br; pr.encodings[0].scaleResolutionDownBy = 1; pr.encodings[0].maxFramerate = q.fps;
+      try { pr.degradationPreference = call.q === 'sd' ? 'balanced' : 'maintain-resolution'; } catch (e) {}
+    }
     await sd.setParameters(pr);
   } catch (e) { logErr('setParameters', e); }
 }
@@ -1626,8 +1691,9 @@ async function pollStats(call) {
   rep.forEach(r => {
     if (r.type === 'inbound-rtp') { cur.rx += r.bytesReceived || 0; cur.lost += r.packetsLost || 0; cur.rcv += r.packetsReceived || 0; if (r.kind === 'video') inV = r; }
     else if (r.type === 'outbound-rtp') { cur.tx += r.bytesSent || 0; if (r.kind === 'video') outV = r; }
-    else if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded') pair = r;
+    else if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded' && (!pair || (r.bytesReceived || 0) + (r.bytesSent || 0) > (pair.bytesReceived || 0) + (pair.bytesSent || 0))) pair = r;
   });
+  rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId && byId[r.selectedCandidatePairId]) pair = byId[r.selectedCandidatePairId]; });
   const pv = call.prevStats; call.prevStats = cur;
   let rxK = null, txK = null, lossP = null;
   if (pv && cur.t > pv.t) {
@@ -1642,6 +1708,14 @@ async function pollStats(call) {
     const lc = byId[pair.localCandidateId], rc = byId[pair.remoteCandidateId];
     route = (lc && lc.candidateType === 'relay') || (rc && rc.candidateType === 'relay') ? '中转' : '直连';
   }
+  if (route && now0 - (call.relayChk || 0) >= 4000) {         // 每 4 秒复查一次是否走中转
+    call.relayChk = now0;
+    const relay = route === '中转';
+    if (relay !== !!call.relay) {
+      call.relay = relay; applyCallParams(call);
+      if (relay && relaySave() && !call.relayTold) { call.relayTold = true; toast('正在走中转服务器：已自动降低码率，节省中转流量'); }
+    }
+  }
   call.stat = { rxK, txK, lossP, rtt, route, rxRes: inV && inV.frameWidth ? inV.frameWidth + '×' + inV.frameHeight : '', rxFps: inV && inV.framesPerSecond != null ? Math.round(inV.framesPerSecond) : null, txRes: outV && outV.frameWidth ? outV.frameWidth + '×' + outV.frameHeight : '', txFps: outV && outV.framesPerSecond != null ? Math.round(outV.framesPerSecond) : null, limit: outV && outV.qualityLimitationReason && outV.qualityLimitationReason !== 'none' ? outV.qualityLimitationReason : '' };
   const lv = pv ? sigLevel(lossP, rtt) : 4;
   const sg = $('call-sig'); sg.className = 'l' + lv;
@@ -1655,10 +1729,12 @@ function renderStats(call) {
   if (call.video) t += '收 ' + (x.rxRes || '-') + ' · ' + (x.rxFps == null ? '-' : x.rxFps) + 'fps · ' + k(x.rxK) + '\n发 ' + (x.txRes || '-') + ' · ' + (x.txFps == null ? '-' : x.txFps) + 'fps · ' + k(x.txK) + (x.limit ? '（' + (lim[x.limit] || x.limit) + '）' : '') + '\n';
   else t += '收 ' + k(x.rxK) + ' · 发 ' + k(x.txK) + '\n';
   t += '延迟 ' + (x.rtt == null ? '-' : x.rtt + 'ms') + ' · 丢包 ' + (x.lossP == null ? '-' : x.lossP.toFixed(1) + '%') + ' · ' + (x.route || '-');
+  if (saving(call)) t += '\n中转省流量中：视频约 300kbps、分辨率减半，语音约 24kbps';
+  else if (call.relay) t += '\n走中转：保持你选的画质（会用中转额度；想省流量可在“我 → 中转省流量”打开）';
   const el = $('call-stats'); el.textContent = t; el.style.whiteSpace = 'pre-line';
 }
 function makePC(call) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' });
+  const pc = new RTCPeerConnection({ iceServers: iceServers(), bundlePolicy: 'max-bundle' });
   call.pc = pc;
   pc.onicecandidate = e => { if (e.candidate) queueCand(call, e.candidate.toJSON ? e.candidate.toJSON() : e.candidate); else flushCand(call); };
   pc.ontrack = e => {
@@ -1693,7 +1769,7 @@ function onPcState(call) {
       SFX.backStop(); SFX.connect(); $('call-ui').classList.add('connected');
       const tick = () => setCallStatus(fmtDur(Math.floor((now() - call.startedAt) / 1000)));
       tick(); call.clock = setInterval(tick, 500);
-      applyVideoParams(call); clearInterval(call.statsT); call.statsT = setInterval(() => pollStats(call), 2000);
+      applyCallParams(call); clearInterval(call.statsT); call.statsT = setInterval(() => pollStats(call), 2000); setTimeout(() => pollStats(call), 600);
     }
   } else if (st === 'disconnected') {
     if (call.connected) setCallStatus('网络不稳定，重连中…');
@@ -1846,6 +1922,7 @@ function startRealtime() {
     .on('broadcast', { event: 'ty' }, ({ payload }) => { try { onTyping(payload); } catch (e) { logErr('ty', e); } })
     .on('broadcast', { event: 'rd' }, ({ payload }) => { try { onReadAck(payload); } catch (e) { logErr('rd', e); } })
     .on('broadcast', { event: 'rq' }, ({ payload }) => { try { onReadReq(payload); } catch (e) { logErr('rq', e); } })
+    .on('broadcast', { event: 'pr' }, ({ payload }) => { try { onPresence(payload); } catch (e) { logErr('pr', e); } })
     .on('broadcast', { event: 'fr' }, () => resyncSoon())
     .on('broadcast', { event: 'sig' }, ({ payload }) => { try { onSig(payload); } catch (e) { logErr('sig', e); } })
     .subscribe((st, err) => {
@@ -1885,7 +1962,7 @@ async function fbLoop() {
     if (run !== fbRun) return;
     const t = now();
     if (!S.rt.user && S.conv && t - lastReadPoll >= 4000) { lastReadPoll = t; fetchPeerRead(S.conv); }
-    if (t - lastSeenPoll >= 30000) { lastSeenPoll = t; heartbeat(true); pollSeen(); if (S.rt.user && !S.noSigDb) { lastSigPoll = t; await pollSignals(); } }
+    if (t - lastSeenPoll >= 40000) { lastSeenPoll = t; heartbeat(true); pollSeen(); if (S.rt.user && !S.noSigDb) { lastSigPoll = t; await pollSignals(); } }
   } catch (e) { if (e && e.abort) next = 30; else { logErr('fb', (e && e.message) || e); next = 2000; } }   // 卡住被放弃：马上重发；其他错误：等 2 秒
   if (run !== fbRun) return;
   fbSchedule(next);
@@ -1906,7 +1983,7 @@ async function pollInbox() {
 function handleSigRows(rows) {
   rows.slice().sort((a, b) => a.id - b.id).forEach(r => {
     const p = Object.assign({}, r.payload || {}, { from: r.from_acc });   // 发信人以服务器记录为准
-    try { if (p.t === 'ty') onTyping(p); else onSig(p); } catch (e) { logErr('sig-db', e); }
+    try { if (p.t === 'ty') onTyping(p); else if (p.t === 'pr') onPresence(p); else onSig(p); } catch (e) { logErr('sig-db', e); }
   });
 }
 function handleMsgRows(rows, base) {
@@ -1942,6 +2019,7 @@ async function pollSeen() {
     const { data, error } = await sb.rpc('friends_seen');
     if (error) { if (isMissingFn(error)) S.noPres = true; return; }
     const n = new Set(); (data || []).forEach(r => { if (r && r.online) n.add(r.account_id); });
+    Object.keys(prAt).forEach(a => { const x = prAt[a]; if (now() - x.t < 10000) { if (x.on) n.add(a); else n.delete(a); } });   // 10 秒内刚收到的上下线推送比数据库更新，以推送为准
     const same = n.size === S.fbOnline.size && Array.from(n).every(x => S.fbOnline.has(x));
     if (!same) { S.fbOnline = n; sched('list'); sched('contacts'); sched('title'); }
   } catch (e) {}
@@ -1974,7 +2052,7 @@ function startTimers() {
 }
 function teardown() {
   S.started = false;
-  clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer); fbStop(); if (S.me) heartbeat(false);
+  clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer); fbStop(); if (S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } lastPr = null;
   S.rtGen++; S.presGen++;
   [S.chDb, S.chUser, S.presCh].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
   S.chDb = S.chUser = S.presCh = null; S.rt.db = S.rt.user = false;
@@ -2002,7 +2080,7 @@ async function start(user) {
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
   }
   S.started = true;
-  startRealtime(); startTimers(); fbStart();
+  startRealtime(); startTimers(); fbStart(); loadIceConfig(); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
 }
 async function onAuth(ev, session) {
@@ -2189,6 +2267,50 @@ async function stClean(days, btn) {
   await loadStore();
 }
 
+/* ================= 中转测试：每家中转服务器单独测，看关掉 VPN 时能不能连上 ================= */
+function turnLabel(u) {
+  const m = /^(turns?):([^:?]+)(?::(\d+))?(?:\?transport=(\w+))?/i.exec(u) || [];
+  const tls = /^turns$/i.test(m[1] || ''), port = m[3] || (tls ? '5349' : '3478');
+  return (tls ? 'TLS' : (m[4] || 'udp').toUpperCase()) + ' ' + port;
+}
+function probeIce(server, policy, want, ms) {
+  return new Promise(res => {
+    let pc = null, done = false, tm = 0; const t0 = now();
+    const fin = r => { if (done) return; done = true; clearTimeout(tm); try { if (pc) pc.close(); } catch (e) {} res(r); };
+    try { pc = new RTCPeerConnection({ iceServers: [server], iceTransportPolicy: policy }); } catch (e) { fin({ ok: false }); return; }
+    pc.onicecandidate = e => {
+      if (!e.candidate) { fin({ ok: false }); return; }                  // 收集结束还没拿到 = 失败
+      if ((e.candidate.candidate || '').indexOf(' typ ' + want) >= 0) fin({ ok: true, ms: now() - t0 });
+    };
+    tm = setTimeout(() => fin({ ok: false, timeout: true }), ms || 8000);
+    try { pc.createDataChannel('probe'); pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin({ ok: false })); } catch (e) { fin({ ok: false }); }
+  });
+}
+let relayTesting = false;
+async function runRelayTest() {
+  if (relayTesting) return;
+  if (typeof RTCPeerConnection === 'undefined') { $('relay-res').textContent = '当前浏览器不支持 WebRTC，无法测试'; return; }
+  relayTesting = true; $('btn-relaytest').disabled = true;
+  const rows = STUN_SERVER.urls.map(u => ({ k: 'stun', title: 'STUN · ' + u.replace(/^stun:/, ''), server: { urls: u }, policy: 'all', want: 'srflx' }));
+  turns().forEach(p => p.urls.forEach(u => rows.push({ k: p.name, title: p.name + ' · ' + turnLabel(u), server: { urls: u, username: p.username, credential: p.credential }, policy: 'relay', want: 'relay' })));
+  const st = rows.map(() => '⏳ 测试中…');
+  const paint = (summary) => {
+    $('relay-res').textContent = rows.map((r, i) => r.title + '：' + st[i]).join('\n') + (summary ? '\n\n' + summary : '');
+  };
+  paint('');
+  const res = await Promise.all(rows.map((r, i) => probeIce(r.server, r.policy, r.want, 8000).then(x => {
+    st[i] = x.ok ? '✅ ' + (r.k === 'stun' ? '能拿到公网地址' : '可用') + '（' + (x.ms / 1000).toFixed(1) + ' 秒）' : '❌ ' + (x.timeout ? '连不上（超时）' : '连不上');
+    paint(''); return x.ok;
+  })));
+  const okNames = []; turns().forEach(p => { if (rows.some((r, i) => r.k === p.name && res[i])) okNames.push(p.name); });
+  const stunOk = rows.some((r, i) => r.k === 'stun' && res[i]);
+  const sum = (stunOk ? '能拿到公网地址：两台手机有机会直连（直连不花中转额度）；能不能真打通要两台手机实际通话才知道。' : 'STUN 都拿不到公网地址，通话多半要走中转。') + '\n' +
+    (okNames.length ? '能连上的中转：' + okNames.join('、') + (okNames[0] !== turns()[0].name ? '（排第一的 ' + turns()[0].name + ' 连不上，会自动用后面能用的）' : '') : '所有中转都连不上：直连失败时通话会接不通。') +
+    '\n说明：拿到中转地址只代表服务器连得上、账号正确。关掉 VPN 再测，结果才代表国内网络。';
+  paint(sum);
+  relayTesting = false; $('btn-relaytest').disabled = false;
+}
+
 /* ================= 图片查看器 / 引用跳转 ================= */
 let lbList = [], lbIdx = 0;
 function lbShow() {
@@ -2327,6 +2449,14 @@ function bindUI() {
   box.addEventListener('touchstart', e => { const b = mineBubble(e); if (!b) return; clearTimeout(pressT); pressT = setTimeout(() => { showMsgMenu(b.closest('.msg').dataset.id); try { if (navigator.vibrate) navigator.vibrate(40); } catch (x) {} }, 550); }, { passive: true });
   ['touchend', 'touchmove', 'touchcancel'].forEach(ev => box.addEventListener(ev, () => clearTimeout(pressT), { passive: true }));
   bindLightbox();
+  const paintRS = () => { $('btn-relaysave').textContent = relaySave() ? '📶 中转省流量：开' : '📶 中转省流量：关'; };
+  paintRS();
+  $('btn-relaysave').onclick = () => {
+    LS.set('ch2relaysave2', !relaySave()); paintRS();
+    toast(relaySave() ? '已开启：通话走中转时降低码率省流量（直连时不受影响）' : '已关闭：走中转时保持你选的画质');
+    if (S.call && S.call.connected) applyCallParams(S.call);
+  };
+  $('btn-relaytest').onclick = () => { $('relay-box').style.display = 'block'; runRelayTest(); };
   $('btn-nick').onclick = editNick; $('btn-pass').onclick = editPass;
   $('btn-avatar').onclick = () => $('avatar-input').click();
   $('avatar-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; setAvatar(f).catch(x => { logErr('avatar', x); toast('头像上传失败：' + ((x && x.message) || '请重试')); }); };
@@ -2383,7 +2513,7 @@ function bindUI() {
   $('btn-decline').onclick = () => declineCall();
   $('btn-mute').onclick = e => { e.stopPropagation(); const c = S.call; if (!c || !c.local) return; c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); $('btn-mute').classList.toggle('off', c.muted); };
   $('btn-flip').onclick = e => { e.stopPropagation(); flipCam(S.call); };
-  $('btn-q').onclick = e => { e.stopPropagation(); const c = S.call; if (!c) return; const order = ['hd', 'hd1080', 'sd']; setQuality(c, order[(order.indexOf(c.q) + 1) % 3]); toast('画质：' + QUAL[c.q].name + '（对方看到的画面）'); };
+  $('btn-q').onclick = e => { e.stopPropagation(); const c = S.call; if (!c) return; if (saving(c)) { toast('现在走中转服务器，已限制为省流量画质；可在“我 → 中转省流量”关闭'); return; } const order = ['hd', 'hd1080', 'sd']; setQuality(c, order[(order.indexOf(c.q) + 1) % 3]); toast('画质：' + QUAL[c.q].name + '（对方看到的画面）'); };
   $('btn-info').onclick = e => { e.stopPropagation(); const el = $('call-stats'); el.classList.toggle('show'); if (el.classList.contains('show') && S.call) renderStats(S.call); };
   $('local-video').onclick = () => { const u = $('call-ui'); if (!u.classList.contains('swap')) u.classList.add('swap'); };
   $('remote-video').onclick = () => { const u = $('call-ui'); if (u.classList.contains('swap')) u.classList.remove('swap'); };
@@ -2408,7 +2538,8 @@ function bindUI() {
     if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); if (!S.call) heartbeat(false); } else { heartbeat(true); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  window.addEventListener('pagehide', () => { if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
 }
 
