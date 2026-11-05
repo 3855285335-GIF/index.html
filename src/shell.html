@@ -367,7 +367,7 @@ __LOGO_SYMBOL__
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.6</div>
+      <div class="build">build 3.7</div>
     </div>
   </div>
 
@@ -396,11 +396,12 @@ __LOGO_SYMBOL__
           <div class="btns" style="margin-bottom:16px"><button id="btn-avatar" type="button">🖼 修改头像</button><button id="btn-nick" type="button">✏️ 修改昵称</button><button id="btn-pass" type="button">🔑 修改密码</button></div>
           <input id="avatar-input" type="file" accept="image/*" hidden>
           <div class="section-title">设置</div>
-          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-relaytest" type="button">🛰 中转测试</button></div>
-          <div id="relay-box" style="display:none;margin-bottom:16px"><div class="store-info">分别测试每个 STUN 和每家中转服务器能不能连上（大约 8 秒）。请先关掉 VPN 再测，结果才代表国内网络。</div><pre id="relay-res" class="relay-res"></pre></div>
+          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button></div>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
+          <div class="btns" style="margin:10px 0 12px"><button id="btn-relaytest" type="button">🛰 中转测试</button></div>
+          <div id="relay-box" style="display:none;margin-bottom:12px"><div class="store-info">分别测试每个 STUN 和每家中转服务器能不能连上（大约 8 秒）。请先关掉 VPN 再测，结果才代表国内网络。</div><pre id="relay-res" class="relay-res"></pre></div>
           <div class="section-title">最近错误</div>
           <pre id="errlog"></pre>
           <div class="btns"><button id="btn-copylog" type="button">复制诊断信息</button><button id="btn-logout" class="btn-danger" type="button">退出登录</button></div>
