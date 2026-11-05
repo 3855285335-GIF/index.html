@@ -204,9 +204,52 @@
   @keyframes recw { 0%, 100% { height: 20%; } 50% { height: 100%; } }
   #record-overlay.cancel .rec-bars i { background: #fff; animation-play-state: paused; }
 
-  #emoji-panel { position: absolute; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); background: var(--surface); border-radius: 20px; padding: 10px; display: none; flex-wrap: wrap; gap: 4px; max-height: 190px; overflow-y: auto; box-shadow: 0 10px 40px rgba(20,10,60,.22); z-index: 5; }
+  #emoji-panel { position: absolute; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); background: var(--surface); border-radius: 20px; padding: 10px; display: none; flex-direction: column; gap: 8px; box-shadow: 0 10px 40px rgba(20,10,60,.22); z-index: 5; }
   body.kb #emoji-panel { bottom: 66px; }
   #emoji-panel.active { display: flex; animation: pop .18s ease; }
+  .ep-top input { width: 100%; padding: 8px 14px; border-radius: 16px; background: var(--surface2); border: 1.5px solid var(--line); font-size: 16px; }   /* 小于 16px 时 iPhone 一点输入框就会自动放大页面 */
+  .ep-tabs { display: flex; gap: 6px; }
+  .ep-tabs button { flex: 1; padding: 7px 4px; border-radius: 12px; background: none; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+  .ep-tabs button.on { background: var(--surface2); color: var(--ink); }
+  #emoji-panel.finding .ep-tabs { display: none; }
+  .ep-pane { display: none; flex-wrap: wrap; gap: 4px; max-height: 230px; overflow-y: auto; -webkit-overflow-scrolling: touch; align-content: flex-start; }
+  .ep-pane.on { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); justify-items: center; align-content: start; }
+  #ep-emoji.on { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); }
+  .ep-pane .ep-cat, .ep-pane .ep-empty { grid-column: 1 / -1; justify-self: stretch; }
+  .ep-cat { width: 100%; font-size: 12px; color: var(--muted); padding: 6px 4px 2px; }
+  .stk-e { font-size: 38px; width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; border-radius: 12px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .stk-m, .stk-add { width: 70px; height: 70px; border-radius: 12px; background: var(--surface2); display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .stk-m img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .stk-add { font-size: 30px; color: var(--muted); border: 2px dashed var(--line); background: none; }
+  .stk-e:active, .stk-m:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .ep-empty { width: 100%; padding: 22px 8px; text-align: center; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+  .ep-empty small { font-size: 12px; opacity: .8; }
+  body.kb #emoji-panel { bottom: 66px; }
+  .ep-pane { max-height: min(230px, calc(var(--vvh, 800px) * .4)); }
+  #ep-emoji span { font-size: 28px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 12px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  #ep-emoji span:active { background: var(--surface2); }
+  .stk-it { width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; border-radius: 14px; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overflow: hidden; }
+  .stk-it:active, .stk-m:active { background: var(--surface2); }
+  .stk-it .emo { font-size: 42px; line-height: 1; }
+  .stk-it img { max-width: 64px; max-height: 64px; object-fit: contain; pointer-events: none; }
+  .stk-bad { font-size: 12px; color: var(--muted); padding: 6px 10px; display: inline-block; }
+  /* 文字贴纸（自己画的） */
+  .tstk { --c1: #a594ff; --c2: #6c5ce7; width: 112px; height: 112px; border-radius: 30px; background: linear-gradient(150deg, var(--c1), var(--c2)); color: #fff; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transform: rotate(var(--r, -4deg)); box-shadow: inset 0 -6px 0 rgba(0,0,0,.12), 0 0 0 3px #fff, 0 8px 18px rgba(30,20,70,.22); user-select: none; -webkit-user-select: none; }
+  .tstk i { font-style: normal; font-size: 42px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
+  .tstk b { font-size: 21px; font-weight: 900; line-height: 1.1; letter-spacing: .5px; padding: 0 6px; text-align: center; text-shadow: 0 2px 0 rgba(0,0,0,.2); }
+  .tstk.l4 b { font-size: 17px; }
+  .tstk.dk { color: #5b3800; } .tstk.dk b { text-shadow: 0 1px 0 rgba(255,255,255,.45); }
+  .tstk.sm { width: 60px; height: 60px; border-radius: 17px; gap: 1px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12), 0 0 0 2px #fff, 0 3px 8px rgba(30,20,70,.18); }
+  .tstk.sm i { font-size: 22px; } .tstk.sm b { font-size: 12.5px; padding: 0 3px; } .tstk.sm.l4 b { font-size: 10.5px; }
+  .bubble.sticker .tstk { margin: 6px; }
+  /* 联想表情：输入框上方的一排 */
+  #stk-suggest { position: absolute; right: 10px; bottom: calc(64px + env(safe-area-inset-bottom)); display: none; gap: 4px; padding: 6px; background: var(--surface); border-radius: 18px; box-shadow: 0 10px 30px rgba(20,10,60,.22); z-index: 6; max-width: calc(100% - 20px); }
+  #stk-suggest.active { display: flex; animation: pop .16s ease; }
+  #stk-suggest .stk-it { width: 54px; height: 54px; }
+  #stk-suggest .stk-it .emo { font-size: 34px; }
+  #stk-suggest .tstk.sm { width: 46px; height: 46px; border-radius: 14px; } #stk-suggest .tstk.sm i { font-size: 17px; } #stk-suggest .tstk.sm b { font-size: 10px; } #stk-suggest .tstk.sm.l4 b { font-size: 8.5px; }
+  #stk-suggest .stk-it img { max-width: 50px; max-height: 50px; }
+  body.kb #stk-suggest { bottom: 64px; }
   #emoji-panel span { font-size: 25px; cursor: pointer; padding: 5px; border-radius: 10px; }
   #emoji-panel span:active { background: var(--surface2); }
 
@@ -220,8 +263,6 @@
 
   .store-info { font-size: 13.5px; line-height: 1.55; color: var(--muted); margin: 0 2px 10px; }
   #store-box .btns button:disabled { opacity: .45; }
-  #btn-relaytest:disabled { opacity: .45; }
-  .relay-res { white-space: pre-wrap; font-size: 13px; line-height: 1.6; background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 0; }
   .imgfail { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; width: 160px; height: 110px; border-radius: 18px; background: var(--surface2); color: var(--muted); font-size: 14px; text-align: center; cursor: pointer; }
   .imgfail small { font-size: 11.5px; opacity: .8; padding: 0 10px; }
   .sheet-bd { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2700; display: none; }
@@ -268,6 +309,29 @@
   #lightbox button { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 64px; background: rgba(255,255,255,.14); color: #fff; font-size: 34px; padding: 0; border-radius: 14px; }
   #lb-prev { left: 8px; } #lb-next { right: 8px; }
   #lb-count { position: absolute; top: calc(16px + env(safe-area-inset-top)); left: 0; right: 0; text-align: center; color: #fff; font-size: 14px; opacity: .85; pointer-events: none; }
+  .bubble.sticker, .msg.mine .bubble.sticker { background: none !important; box-shadow: none !important; padding: 0; }
+  .bubble.sticker img { max-width: 140px; max-height: 140px; min-width: 40px; min-height: 40px; display: block; border-radius: 10px; }
+  .bubble.sticker .emo { font-size: 64px; line-height: 1.1; display: block; }
+  .bubble.video { padding: 0; overflow: hidden; background: #000 !important; position: relative; border-radius: 18px; }
+  .bubble.video video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
+  .bubble.video .vlen { position: absolute; right: 8px; top: 8px; font-size: 11px; color: #fff; background: rgba(0,0,0,.5); padding: 1px 6px; border-radius: 8px; pointer-events: none; }
+  .bubble a { color: inherit; text-decoration: underline; word-break: break-all; }
+  .bubble.video .vup { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; background: rgba(0,0,0,.55); padding: 5px 12px; border-radius: 12px; pointer-events: none; }
+  .vfail { color: #fff; padding: 22px 16px; font-size: 14px; line-height: 1.5; text-align: center; max-width: 230px; }
+  .vfail small { display: block; font-size: 11.5px; opacity: .75; margin-top: 4px; }
+  .bubble.file { display: flex; align-items: center; gap: 11px; min-width: 200px; max-width: 250px; padding: 11px 13px; cursor: pointer; white-space: normal; }
+  .bubble.file .fic { flex-shrink: 0; width: 42px; height: 50px; border-radius: 9px; background: rgba(255,255,255,.9); color: #6c5ce7; font-size: 11px; font-weight: 800; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; box-shadow: inset 0 0 0 1.5px rgba(108,92,231,.25); letter-spacing: .3px; }
+  .msg.theirs .bubble.file .fic { background: var(--surface2); }
+  .bubble.file .fm { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .bubble.file .fm b { font-size: 14.5px; font-weight: 600; line-height: 1.35; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bubble.file .fm small { font-size: 12px; opacity: .72; }
+  .conv-item.pinned { background: var(--surface2); }
+  .mute-ic { width: 14px; height: 14px; margin-left: 5px; vertical-align: -2px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .badge.mute { background: #b9b4cc; box-shadow: none; }
+  #as-title { white-space: pre-line; }
+  #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #msg-menu { max-height: 86vh; overflow-y: auto; }
+  #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
   #lightbox { position: fixed; inset: 0; background: rgba(8,5,20,.94); z-index: 2600; display: none; align-items: center; justify-content: center; }
   #lightbox.active { display: flex; }
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -466,7 +530,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.7</div>
+      <div class="build">build 3.8</div>
     </div>
   </div>
 
@@ -499,8 +563,6 @@
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
-          <div class="btns" style="margin:10px 0 12px"><button id="btn-relaytest" type="button">🛰 中转测试</button></div>
-          <div id="relay-box" style="display:none;margin-bottom:12px"><div class="store-info">分别测试每个 STUN 和每家中转服务器能不能连上（大约 8 秒）。请先关掉 VPN 再测，结果才代表国内网络。</div><pre id="relay-res" class="relay-res"></pre></div>
           <div class="section-title">最近错误</div>
           <pre id="errlog"></pre>
           <div class="btns"><button id="btn-copylog" type="button">复制诊断信息</button><button id="btn-logout" class="btn-danger" type="button">退出登录</button></div>
@@ -528,8 +590,16 @@
     <div id="chat-search"><div class="cs-bar"><input id="cs-input" type="text" placeholder="搜索聊天记录" autocomplete="off" enterkeyhint="search"><button id="cs-close" type="button">取消</button></div><div id="cs-list"></div></div>
     <div id="chat-messages"></div>
     <div id="emoji-panel">
-      <span>😀</span><span>😂</span><span>🥹</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span>
+      <div class="ep-top"><input id="ep-search" type="search" placeholder="搜索表情（比如：笑、猫、加油）" autocomplete="off" enterkeyhint="search"></div>
+      <div class="ep-tabs"><button type="button" data-ep="emoji" class="on">😀 表情</button><button type="button" data-ep="lib">🎭 表情库</button><button type="button" data-ep="mine">⭐ 我的</button></div>
+      <div id="ep-emoji" class="ep-pane on"><span>😀</span><span>😂</span><span>🥹</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span></div>
+      <div id="ep-lib" class="ep-pane"></div>
+      <div id="ep-mine" class="ep-pane"></div>
+      <div id="ep-find" class="ep-pane"></div>
     </div>
+    <div id="stk-suggest"></div>
+    <input id="stk-input" type="file" accept="image/*" multiple hidden>
+    <input id="doc-input" type="file" multiple hidden>
     <div id="reply-bar"><div id="reply-text"></div><button id="reply-x" type="button" aria-label="取消回复">×</button></div>
     <div id="chat-input-bar">
       <button id="btn-emoji" type="button" class="icon-btn" title="表情"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2c.9 1.3 2.1 2 3.5 2s2.6-.7 3.5-2"/><path d="M9 9.8h.01M15 9.8h.01" stroke-width="2.6"/></svg></button>
@@ -541,7 +611,7 @@
       </div>
       <button id="btn-send" type="button" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5.5M6 11.5l6-6 6 6"/></svg></button>
     </div>
-    <input id="file-input" type="file" accept="image/*" multiple hidden>
+    <input id="file-input" type="file" accept="image/*,video/*" multiple hidden>
   </div>
 </div>
 
@@ -554,11 +624,14 @@
   <div class="menu-title" id="msg-menu-title">消息</div>
   <button id="msg-menu-reply" type="button" class="menu-item plain">回复</button>
   <button id="msg-menu-copy" type="button" class="menu-item plain">复制</button>
+  <button id="msg-menu-fwd" type="button" class="menu-item plain">转发</button>
+  <button id="msg-menu-stk" type="button" class="menu-item plain">添加到表情</button>
+  <button id="msg-menu-save" type="button" class="menu-item plain">保存到手机</button>
   <button id="msg-menu-recall" type="button" class="menu-item">撤回</button>
   <button id="msg-menu-del" type="button" class="menu-item">删除（仅自己）</button>
 </div>
 <div id="record-overlay"><div class="rec-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div id="record-text">手指上滑，取消发送</div></div>
-<div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><div id="lb-count"></div></div>
+<div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><button id="lb-save" type="button">保存</button><div id="lb-count"></div></div>
 
 <div id="call-ui">
   <video id="remote-video" autoplay playsinline></video>
@@ -682,7 +755,8 @@ function saveHidden() { const a = Array.from(hidden).slice(-3000); LS.set('ch2de
 const peerReadOf = conv => (S.peerRead && S.peerRead[conv]) || 0;
 function loadPeerRead() { S.peerRead = LS.get('ch2rd:' + (S.uid || ''), {}) || {}; }
 function isRead(m) { return m.from_acc === ME() && !m._st && m.type !== 'call' && m.type !== 'recalled' && peerReadOf(m.conv) >= Date.parse(m.created_at); }
-const previewOf = m => m.type === 'text' ? parseQ(m.body).text : m.type === 'image' ? '[图片]' : m.type === 'voice' ? '[语音]' : m.type === 'call' ? '[通话]' : m.type === 'recalled' ? '[已撤回]' : '[消息]';
+const PREV = { image: '[图片]', voice: '[语音]', call: '[通话]', recalled: '[已撤回]', sticker: '[表情]', video: '[视频]' };
+const previewOf = m => m.type === 'text' ? parseQ(m.body).text : m.type === 'file' ? '[文件] ' + cpSlice((parseFile(m.body) || {}).n || '', 60) : PREV[m.type] || '[消息]';
 
 const LOG = [];
 function logErr(tag, e) {
@@ -855,7 +929,7 @@ function flashTitle() {
 }
 function stopFlash() { if (flashI) { clearInterval(flashI); flashI = 0; } document.title = baseTitle; }
 function updateTitle() {
-  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c)) n += c.unread || 0; });
+  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
   baseTitle = (n ? '(' + (n > 99 ? '99+' : n) + ') ' : '') + 'Chatter';
   if (!flashI) document.title = baseTitle;
   try { if (navigator.setAppBadge) { if (n) navigator.setAppBadge(n).catch(() => {}); else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); } } catch (e) {}
@@ -886,13 +960,13 @@ function renderMe() {
 function renderAll() { renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 function renderList() {
   const el = $('conv-list');
-  const shown = S.convs.filter(c => !convGone(c));
+  const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   if (!shown.length) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   el.innerHTML = shown.map(c => {
-    const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0);
-    return '<div class="conv-item" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, avatarOf(c.peer_acc), isOnline(c.peer_acc), c.peer_acc) +
-      '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(parseQ(c.last_body).text || '开始聊天吧')) + '</span>' + (un ? '<span class="badge">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
+    const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey);
+    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, avatarOf(c.peer_acc), isOnline(c.peer_acc), c.peer_acc) +
+      '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(parseQ(c.last_body).text || '开始聊天吧')) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
 function renderContacts() {
@@ -931,6 +1005,9 @@ function renderEnv() {
   else if (!S.noSigDb) L.push('🟡 快速通道连不上 → 通话信号改走数据库（国内模式）');
   else ok(false, '通话信令不可用：请在 Supabase 运行 setup-v4.sql');
   if (S.noPres) L.push('🟡 在线状态：未运行 setup-v4.sql，国内网络下可能显示离线');
+  if (S.v6 === true) ok(true, '表情包 / 视频 / 文件');
+  else if (S.v6 === false) L.push('🟡 表情包 / 视频 / 文件：要先在 Supabase 运行 setup-v6.sql');
+  else L.push('⏳ 正在检查表情包 / 视频 / 文件功能…');
   L.push('ℹ️ 中转服务器：' + turns().map(p => p.name).join('、') + '（来自' + turnFrom + '）');
   $('diag').textContent = L.join('\n');
   $('errlog').textContent = LOG.join('\n') || '（暂无错误）';
@@ -1012,7 +1089,7 @@ async function ensureProfile(user) {
 async function resync() {
   if (S.syncing || !sb || !S.me) return;
   S.syncing = true;
-  try { const b = await bootstrap(); if (b) applyBoot(b); if (S.conv) await syncChat(); }
+  try { const b = await bootstrap(); if (b) applyBoot(b); if (S.conv) await syncChat(); if (S.v6 !== true) checkSchema(); }
   catch (e) { logErr('resync', e); }
   finally { S.syncing = false; }
 }
@@ -1024,9 +1101,12 @@ function msgHTML(m) {
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
     case 'image': body = '<div class="bubble img"><img src="' + esc(disp(m.body)) + '" alt="" decoding="async"></div>'; break;
+    case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
+    case 'video': body = '<div class="bubble video"><video src="' + esc(disp(m.body)) + '#t=0.1" preload="metadata" playsinline webkit-playsinline controls></video>' + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + (m._st === 'sending' ? '<span class="vup">上传中…</span>' : '') + '</div>'; break;
+    case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　上传中…' : m._st ? '' : '　点开查看') + '</small></span></div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + '">' + qh + esc(pq.text) + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + '">' + qh + linkify(pq.text) + '</div>'; }
   }
   const st = m._st === 'sending' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
@@ -1075,7 +1155,7 @@ function onIncoming(m) {
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
   const open = S.conv === m.conv;
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call') { SFX.recv(open); if (document.hidden) flashTitle(); }
+  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
@@ -1091,10 +1171,12 @@ function onFastMsg(p) {
     const me = ME();
     if (p.to !== me || typeof p.from !== 'string' || !S.friends.includes(p.from)) return;
     if (typeof p.id !== 'string' || p.conv !== convKeyOf(p.from, p.to)) return;
-    if (['text', 'image', 'voice'].indexOf(p.type) < 0) return;
+    if (['text', 'image', 'voice', 'sticker', 'video', 'file'].indexOf(p.type) < 0) return;
     let body = typeof p.body === 'string' ? p.body : '';
     if (p.type === 'text') body = body.slice(0, 5200);
-    else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音只接受本项目存储的地址
+    else if (p.type === 'sticker') { if (!validStk(body)) return; }
+    else if (p.type === 'file') { const f = parseFile(body); if (!f || !isStoreUrl(f.u) || body.length > 1000) return; }
+    else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音/视频只接受本项目存储的地址
     onIncoming({ id: p.id, conv: p.conv, from_acc: p.from, to_acc: me, type: p.type, body, dur: p.dur | 0 || null, created_at: stampAfterClr(p.conv) });
   } catch (e) { logErr('fast', e); }
 }
@@ -1126,8 +1208,8 @@ function addLocal(m) {
   touchConv(m.conv, previewOf(m), m.created_at, false);
   deliver(m); SFX.send();
 }
-async function upload(blob, ext, ct) {
-  const path = ME() + '/' + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+async function upload(blob, ext, ct, pre) {
+  const path = ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
   const { error } = await sb.storage.from('chat-media').upload(path, blob, { contentType: ct, cacheControl: '31536000' });
   if (error) throw error;
   return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
@@ -1137,7 +1219,9 @@ async function deliver(m, silent) {
   try {
     if (m._blob) {
       const old = m.body, url = await upload(m._blob, m._ext, m._ct);
-      m.body = url; m._blob = null; patchMsg(id, { body: url }); try { URL.revokeObjectURL(old); } catch (e) {}
+      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : url;
+      m.body = nb; m._blob = null; patchMsg(id, { body: nb });
+      try { URL.revokeObjectURL(m._fm ? (parseFile(old) || {}).u : old); } catch (e) {}
     }
     if (S.token && m.type !== 'call') bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur };
@@ -1150,14 +1234,17 @@ async function deliver(m, silent) {
     saveMsgsSoon();
   } catch (e) {
     logErr('send', e);
-    m._st = 'failed'; if (e && e.code === '42501') m._fatal = true; patchMsg(id, { _st: 'failed' });
-    if (!silent || m._fatal) toast(e && e.code === '42501' ? '发送失败：对方不是你的好友' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
+    const em = String((e && (e.message || '')) || '') + ' ' + String((e && (e.statusCode || e.status)) || '');
+    const noType = /invalid message type/i.test(em), tooBig = /maximum allowed size|exceeded|too large|413/i.test(em);
+    if (noType) S.v6 = false;
+    m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' });
+    if (!silent || m._fatal) toast(e && e.code === '42501' ? '发送失败：对方不是你的好友' : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
   }
 }
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
-  input.value = ''; draftSave(S.conv, ''); lastTy = 0;   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
+  input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
   let body = v.replace(/\u2063/g, '').slice(0, 5000);
   if (!body) return;
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
@@ -1213,15 +1300,9 @@ function onReadReq(p) {
 }
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
-  if (file.size > 20 * 1024 * 1024) { toast('有图片超过 20MB，已跳过（' + Math.round(file.size / 1048576) + 'MB）'); return; }
+  if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
   const ext = ((file.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
   addLocal(newMsg('image', URL.createObjectURL(file), null, { _blob: file, _ext: ext, _ct: file.type }));
-}
-async function sendImages(files) {
-  const list = Array.from(files || []).filter(f => /^image\//.test(f.type));
-  if (!list.length) { if (files && files.length) toast('只能发送图片'); return; }
-  if (list.length > 9) toast('一次最多 9 张，已发送前 9 张');
-  for (const f of list.slice(0, 9)) { if (!S.conv) break; await sendImage(f); await new Promise(r => setTimeout(r, 60)); }
 }
 function sendVoice(blob, dur) {
   if (!S.conv) return;
@@ -1249,6 +1330,9 @@ function showMsgMenu(id) {
   const canRecall = mine && plain && now() - ts(m) <= RECALL_MS;
   $('msg-menu-reply').style.display = plain ? '' : 'none';
   $('msg-menu-copy').style.display = plain && m.type === 'text' ? '' : 'none';
+  $('msg-menu-fwd').style.display = plain ? '' : 'none';
+  $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
+  $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-recall').style.display = canRecall ? '' : 'none';
   $('msg-menu-del').style.display = '';
   $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
@@ -1265,6 +1349,9 @@ function menuAction(kind) {
   const id = menuId, m = S.msgs.find(x => x.id === id); closeMenu(); if (!m) return;
   if (kind === 'reply') setReply(m);
   else if (kind === 'copy') copyText(parseQ(m.body).text);
+  else if (kind === 'fwd') setTimeout(() => openForward(m), 50);
+  else if (kind === 'stk') addToStickers(m);
+  else if (kind === 'save') saveMsg(m);
   else if (kind === 'del') {
     hidden.add(id); saveHidden(); S.out.delete(id);
     const el = msgElOf(id); if (el) el.remove();
@@ -1299,7 +1386,7 @@ async function openConv(key, peer) {
   S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
   document.body.classList.add('chat-open');
   if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
-  $('emoji-panel').classList.remove('active');
+  $('emoji-panel').classList.remove('active'); hideSuggest();
   renderChatTitle(); chatRender(true);          // 先用缓存秒开
   markReadSoon(key); sendReadAck(key, true);
   if (S.token) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
@@ -1316,7 +1403,7 @@ async function openConv(key, peer) {
 function closeChat() {
   recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs();
   S.conv = null; S.peer = null; S.msgs = []; S.hist = false; S.typingUntil = 0; clearReply();
-  document.body.classList.remove('chat-open'); $('emoji-panel').classList.remove('active'); closeMenu();
+  document.body.classList.remove('chat-open'); $('emoji-panel').classList.remove('active'); hideSuggest(); closeMenu();
   sched('list');
 }
 async function syncChat() {
@@ -2063,12 +2150,14 @@ function teardown() {
   recAbort(); stopAudio();
   document.body.classList.remove('chat-open');
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
+  S.v6 = undefined; S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; hideSuggest(); $('emoji-panel').classList.remove('active');
 }
 
 /* ================= 登录 / 启动 ================= */
 async function start(user) {
   S.started = true; S.uid = user.id;
   if (!S.me) { const c = LS.get(ck(user.id)); if (c && c.me) hydrate(c); }
+  S.stk = LS.get(stkKey(), null); stkOk = false;
   showApp(); renderAll();                       // 有缓存就先显示（秒开）
   try {
     let b = await bootstrap();
@@ -2081,7 +2170,7 @@ async function start(user) {
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
   }
   S.started = true;
-  startRealtime(); startTimers(); fbStart(); loadIceConfig(); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
+  startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
 }
 async function onAuth(ev, session) {
@@ -2234,18 +2323,21 @@ function stCutoff(days) { return days ? now() - days * 86400000 : Infinity; }
 function stPick(days) { const c = stCutoff(days); return (stFiles || []).filter(f => fileTs(f) < c); }
 function stRenderInfo() {
   const all = stFiles || [], size = all.reduce((a, f) => a + ((f.metadata && f.metadata.size) || 0), 0);
-  $('store-info').textContent = all.length ? '你发送的图片/语音共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是你们两个人共用的）。' : '你还没有发送过图片或语音。';
+  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是你们两个人共用的）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。';
   [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
 }
 async function loadStore() {
   $('store-box').style.display = 'block'; $('store-info').textContent = '统计中…'; stArm = null;
   try {
+    if (S.v6 !== false) await loadStickers(true);
+    if (S.v6 !== false && !stkOk) throw new Error('“我的表情”列表没读到，为了不误删正在用的表情，先不清理，请稍后再试');
+    const keep = new Set((S.stk || []).map(x => { const m = /\/chat-media\/([^?#]+)/.exec(x.url); return m ? decodeURIComponent(m[1]) : ''; }));
     const all = [];
     for (let off = 0; off < 10000; off += 100) {
       const { data, error } = await sb.storage.from('chat-media').list(ME(), { limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } });
       if (error) throw error;
       if (!data || !data.length) break;
-      data.forEach(f => { if (f && f.name && f.id !== null && f.name.indexOf('avatar_') !== 0) all.push(f); });
+      data.forEach(f => { if (f && f.name && f.id !== null && f.name.indexOf('avatar_') !== 0 && !keep.has(ME() + '/' + f.name)) all.push(f); });
       if (data.length < 100) break;
     }
     stFiles = all; stRenderInfo();
@@ -2253,7 +2345,7 @@ async function loadStore() {
 }
 async function stClean(days, btn) {
   const list = stPick(days); if (!list.length) return;
-  if (stArm !== btn.id) { stArm = btn.id; btn.textContent = '再点一次确认删除 ' + list.length + ' 个（对方也将看不到这些图片/语音）'; setTimeout(() => { if (stArm === btn.id) { stArm = null; stRenderInfo(); } }, 5000); return; }
+  if (stArm !== btn.id) { stArm = btn.id; btn.textContent = '再点一次确认删除 ' + list.length + ' 个（对方也将看不到这些图片/语音/视频/文件）'; setTimeout(() => { if (stArm === btn.id) { stArm = null; stRenderInfo(); } }, 5000); return; }
   stArm = null; ['st-30', 'st-7', 'st-all'].forEach(id => { $(id).disabled = true; });
   let done = 0, fail = 0;
   try {
@@ -2268,48 +2360,376 @@ async function stClean(days, btn) {
   await loadStore();
 }
 
-/* ================= 中转测试：每家中转服务器单独测，看关掉 VPN 时能不能连上 ================= */
-function turnLabel(u) {
-  const m = /^(turns?):([^:?]+)(?::(\d+))?(?:\?transport=(\w+))?/i.exec(u) || [];
-  const tls = /^turns$/i.test(m[1] || ''), port = m[3] || (tls ? '5349' : '3478');
-  return (tls ? 'TLS' : (m[4] || 'udp').toUpperCase()) + ' ' + port;
+/* ================= 表情包 / 视频 / 文件 / 保存到手机 / 转发 ================= */
+const NEED_V6 = '要先在 Supabase 运行 setup-v6.sql，才能发表情包、视频和文件';
+const MB = 1048576, FILE_MAX = 50 * MB, OLD_MAX = 20 * MB, STK_MAX = 10 * MB, STK_LIMIT = 500;
+const fileMax = () => S.v6 === false ? OLD_MAX : FILE_MAX;
+const isStoreUrl = u => typeof u === 'string' && u.length <= 500 && u.indexOf(SUPABASE_URL + '/storage/v1/object/public/chat-media/') === 0;
+const fmtSize = b => b >= MB ? (b / MB).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+const cpSlice = (s, n) => Array.from(String(s || '')).slice(0, n).join('');   // 按字数截断（和数据库的 left() 一致）
+function parseFile(body) {
+  try {
+    const j = JSON.parse(body);
+    if (!j || typeof j !== 'object' || typeof j.u !== 'string' || !j.u) return null;
+    if (!isStoreUrl(j.u) && j.u.indexOf('blob:') !== 0) return null;
+    return { u: j.u, n: cpSlice(typeof j.n === 'string' && j.n ? j.n : '文件', 120), s: Math.max(0, +j.s || 0) };
+  } catch (e) { return null; }
 }
-function probeIce(server, policy, want, ms) {
+const extOfName = n => { const m = /\.([a-z0-9]{1,8})$/i.exec(String(n || '')); return m ? m[1].toLowerCase() : ''; };
+const extOfUrl = u => { const m = /\.([a-z0-9]{1,8})(?:[?#]|$)/i.exec(String(u || '').split('/').pop() || ''); return m ? m[1].toLowerCase() : ''; };
+const extOfType = (t, d) => { const s = String(t || '').split('/')[1] || ''; return ({ jpeg: 'jpg', 'svg+xml': 'svg', quicktime: 'mov', 'x-m4v': 'm4v', 'x-matroska': 'mkv' })[s] || (/^[a-z0-9]{1,5}$/i.test(s) ? s.toLowerCase() : d); };
+
+/* ---- 表情数据：emoji + 中文关键词（用于搜索和联想） ---- */
+const EMO_SRC = [
+  ['笑脸', '😀 笑 开心 哈哈|😃 笑 开心 高兴|😄 笑 开心 哈哈哈|😁 嘿嘿 笑 呲牙|😆 哈哈 大笑 乐|😅 尴尬 汗 苦笑|🤣 笑死 笑哭 哈哈哈 打滚|😂 笑哭 笑死 哈哈 破涕为笑|🙂 微笑 呵呵 嗯|🙃 倒脸 无奈 调皮|😉 眨眼 调皮|😊 害羞 开心 微笑|😇 天使 乖 无辜|🥰 喜欢 爱 幸福|😍 花痴 喜欢 爱|🤩 星星眼 崇拜 哇 厉害|😘 亲亲 么么哒 飞吻|😗 亲 啵|😚 亲亲 害羞|😋 好吃 馋 美味|😛 吐舌 调皮|😜 调皮 吐舌 眨眼|🤪 疯 搞怪 傻|😝 调皮 略略略|🤑 钱 发财 财迷|🤗 抱抱 拥抱 抱|🤭 偷笑 捂嘴 嘻嘻|🤫 嘘 安静 保密|🤔 想 思考 疑问|🤐 闭嘴 不说|🤨 怀疑 疑惑 挑眉|😐 无语 面无表情|😑 无语 呵呵 无奈|😶 无言 沉默|😏 得意 坏笑 哼|😒 不爽 嫌弃|🙄 白眼 无语 翻白眼|😬 尴尬 龇牙|😌 放松 欣慰 满足|😔 失落 难过 沮丧|😪 困 瞌睡|🤤 流口水 馋 想吃|😴 睡觉 困 晚安 睡了|😷 口罩 生病 感冒|🤒 发烧 生病|🤕 受伤 疼|🤢 恶心 想吐|🤮 吐 恶心|🤧 打喷嚏 感冒|🥵 热 好热|🥶 冷 好冷|🥴 晕 醉 迷糊|😵 晕 头晕|🤯 炸裂 震惊 崩溃|🤠 牛仔 帅|🥳 庆祝 派对 生日 耶|😎 酷 帅 墨镜 得意|🤓 学霸 书呆子 眼镜|🧐 观察 研究|😕 困惑 疑惑 不解|😟 担心 忧虑|🙁 不开心 难过|😮 哇 惊讶|😯 惊讶 哦|😲 震惊 惊讶 吃惊|😳 脸红 害羞 尴尬 啊这|🥺 可怜 委屈 求求 拜托|🥹 感动 忍泪 委屈|🥲 含泪微笑 苦笑|😨 害怕 吓|😰 冷汗 紧张 焦虑|😥 失望 唉|😢 哭 难过 伤心|😭 大哭 哭 伤心 呜呜|😱 惊恐 吓死 尖叫 震惊|😖 纠结 难受|😣 忍 坚持 难受|😞 失望 失落|😓 汗 累|😩 累 疲惫 崩溃|😫 累死 好累|🥱 打哈欠 困 无聊|😤 生气 哼 气|😡 生气 愤怒 气死|😠 生气 怒|🤬 骂人 暴怒|😈 坏 恶魔 坏笑|💀 骷髅 死了 笑死|💩 便便 屎|🤡 小丑|👻 鬼 幽灵 吓|👽 外星人|🤖 机器人|😺 猫 笑|😹 猫 笑哭|😻 猫 喜欢 花痴|🙈 不看 害羞 捂眼 猴子|🙉 不听 猴子|🙊 不说 捂嘴 猴子|🫠 融化 无语|🫡 敬礼 收到 遵命|🫣 偷看 害羞|🫢 捂嘴 惊讶'],
+  ['手势', '👍 赞 好 棒 点赞 可以 好的|👎 差 踩 不行|👌 好的 ok 可以 没问题 收到|✌️ 耶 胜利 剪刀手|🤞 好运 祈祷|🤟 爱你|🤘 摇滚|🤙 打电话 联系|👈 左|👉 右 你|👆 上|👇 下|☝️ 一 注意|✋ 停 举手|🖐️ 手掌 五|👋 你好 拜拜 再见 嗨 挥手|👏 鼓掌 厉害 棒 拍手|🙌 欢呼 万岁 太好了|👐 张开手|🤲 捧|🙏 谢谢 拜托 求 祈祷 感谢|🤝 握手 合作 成交|💪 加油 厉害 强壮 努力|✍️ 写 记录|💅 美甲 优雅|👀 看 偷看 围观 眼睛|🫶 比心 爱你|🫰 比心'],
+  ['爱心', '❤️ 爱心 爱 红心 喜欢|🧡 橙心|💛 黄心|💚 绿心|💙 蓝心|💜 紫心|🖤 黑心|🤍 白心|🤎 棕心|💔 心碎 伤心 失恋|❣️ 爱|💕 爱心 喜欢|💞 爱心|💓 心跳|💗 心动|💖 闪亮爱心|💘 一箭穿心 丘比特|💝 礼物 爱心|💋 吻 亲 红唇|💯 一百分 满分 完美'],
+  ['动物和自然', '🐶 狗 小狗 汪|🐱 猫 小猫 喵|🐭 老鼠|🐹 仓鼠|🐰 兔子 兔|🦊 狐狸|🐻 熊|🐼 熊猫 国宝|🐨 考拉|🐯 老虎 虎|🦁 狮子|🐮 牛 奶牛|🐷 猪 小猪|🐸 青蛙 蛙|🐵 猴子|🐔 鸡|🐧 企鹅|🐦 鸟|🐤 小鸡|🦆 鸭子 鸭|🦉 猫头鹰|🐺 狼|🐴 马|🦄 独角兽|🐝 蜜蜂|🦋 蝴蝶|🐌 蜗牛 慢|🐢 乌龟 慢|🐍 蛇|🐙 章鱼|🐟 鱼 摸鱼|🐠 热带鱼|🐳 鲸鱼|🐬 海豚|🦈 鲨鱼|🐊 鳄鱼|🦖 恐龙|🐉 龙|🐾 爪印 脚印|🌹 玫瑰 花|🌸 樱花 花|🌻 向日葵|🌷 郁金香|🍀 四叶草 幸运|🌲 树|🌈 彩虹|☀️ 太阳 晴天 早安|🌙 月亮 晚安|⭐ 星星|✨ 闪亮 闪闪|⚡ 闪电|🔥 火 厉害 火爆|❄️ 雪 冷|☁️ 云|🌧️ 下雨 雨|☔ 雨伞 下雨|🌊 浪 海'],
+  ['吃喝', '🍎 苹果|🍊 橘子|🍋 柠檬 酸|🍉 西瓜 吃瓜|🍇 葡萄|🍓 草莓|🍑 桃子|🍒 樱桃|🥭 芒果|🍍 菠萝|🥝 猕猴桃|🍌 香蕉|🍅 番茄 西红柿|🥑 牛油果|🌽 玉米|🌶️ 辣椒 辣|🍞 面包|🥐 可颂|🧀 奶酪|🍳 煎蛋 做饭|🍔 汉堡 饿了|🍟 薯条|🍕 披萨|🌭 热狗|🍜 面 拉面 吃面|🍝 意面|🍚 米饭 吃饭 饭|🍛 咖喱|🍣 寿司|🍱 便当|🥟 饺子|🍤 炸虾|🍙 饭团|🍦 冰淇淋|🍰 蛋糕|🎂 生日蛋糕 生日 生日快乐|🍫 巧克力|🍬 糖 糖果|🍭 棒棒糖|🍩 甜甜圈|🍪 饼干|🍿 爆米花 看戏|🥤 饮料|🧋 奶茶 珍珠奶茶|☕ 咖啡|🍵 茶|🍺 啤酒 喝酒|🍻 干杯 喝酒 碰杯|🥂 干杯 庆祝 香槟|🍷 红酒'],
+  ['生活', '🎉 庆祝 恭喜 撒花 耶|🎊 彩球 庆祝|🎈 气球|🎁 礼物|🏆 奖杯 冠军 第一|🥇 金牌 第一|⚽ 足球|🏀 篮球|🎮 游戏 打游戏|🎵 音乐|🎶 音乐 唱歌|🎤 唱歌 麦克风|🎧 耳机 听歌|📷 拍照 相机|📱 手机|💻 电脑 工作 上班|⌚ 手表 时间|⏰ 闹钟 起床|⏳ 等待 稍等|📚 书 学习 看书|✏️ 笔 写|💡 灯泡 主意 想法 灵感|💰 钱 发财|💸 花钱|🧧 红包|🏠 家 回家|🚗 车 开车 出发|🚌 公交|🚇 地铁|✈️ 飞机 出差 旅行|🚀 火箭 冲 起飞|🏃 跑 跑步 马上到|🚶 走路|🛏️ 睡觉 床|🛁 洗澡|💤 睡觉 困|💬 聊天 说话|💭 想 想法|📣 喇叭 打call 通知|🔔 铃 提醒|🎯 目标|🧸 玩具熊|🎀 蝴蝶结|👑 皇冠 王|💎 钻石'],
+  ['符号', '✅ 对 好的 完成 收到|❌ 错 不行 不|❓ 问号 疑问 什么|❗ 感叹号 注意|⚠️ 警告 注意|💢 生气 怒|💥 爆炸 砰|🆗 ok 好的|🆒 酷|🆘 救命 求救|🌟 星星 闪亮|⭕ 圈 对|➕ 加']
+];
+const EMOJI = [];
+EMO_SRC.forEach(([c, s]) => s.split('|').forEach(x => { const p = x.trim().split(/\s+/); if (p[0]) EMOJI.push({ e: p[0], k: p.slice(1), c }); }));
+const BIG = '😂 🤣 😭 🥺 🥹 😍 🥰 😘 😎 🤔 😏 🙄 😤 😡 😱 🤯 😴 🥱 😋 🤤 😳 🫠 🫡 🙈 🤗 🤭 🤫 😇 🤡 💩 👍 👌 🙏 👏 💪 🎉 🔥 💯 ❤️ 💔 🐶 🐱 🐷 🌹 🧋 🎂'.split(' ');
+/* 文字贴纸：自己画的（不用别人的图），发出去只占几个字节 */
+const PAL = { pink: ['#ff8fb4', '#ff3d77'], violet: ['#a594ff', '#6c5ce7'], orange: ['#ffb46b', '#ff6f3c'], teal: ['#4fd8cf', '#159e98'], blue: ['#6cc0ff', '#3a74f5'], green: ['#86dc6e', '#2fa84a'], yellow: ['#ffe27a', '#ffb31f', 1], red: ['#ff7f7f', '#e3364a'], grey: ['#a9b0c2', '#69728a'] };
+const TSTK = [
+  ['ok', '收到', '👌', 'green', '收到 好的 ok 知道了'], ['hd', '好的', '👍', 'blue', '好的 好 行 可以 ok'], ['wa', '晚安', '🌙', 'violet', '晚安 睡觉 睡了'],
+  ['za', '早安', '☀️', 'orange', '早安 早上好 早'], ['zm', '在吗', '👀', 'teal', '在吗 在不在 人呢'], ['hh', '哈哈哈', '😂', 'yellow', '哈哈哈 哈哈 笑死 好笑'],
+  ['xx', '谢谢', '🙏', 'pink', '谢谢 感谢 谢了 多谢'], ['xk', '辛苦了', '💪', 'orange', '辛苦了 辛苦 累'], ['jy', '加油', '🔥', 'red', '加油 冲 努力'],
+  ['an', '爱你', '❤️', 'pink', '爱你 爱 喜欢你'], ['bb', '抱抱', '🤗', 'orange', '抱抱 拥抱 抱'], ['xn', '想你', '🥺', 'violet', '想你 想 思念'],
+  ['sq', '生气', '😤', 'red', '生气 哼 气死 怒'], ['wq', '委屈', '🥹', 'blue', '委屈 呜呜 难过'], ['wy', '无语', '😑', 'grey', '无语 呵呵 服了'],
+  ['zj', '震惊', '😱', 'teal', '震惊 吓 天哪'], ['hy', '好耶', '🎉', 'yellow', '好耶 耶 太好了 庆祝'], ['cy', '冲鸭', '🚀', 'blue', '冲鸭 冲 出发 加油'],
+  ['sd', '稍等', '⏳', 'grey', '稍等 等等 等一下 等我'], ['md', '马上到', '🏃', 'green', '马上到 马上 快到了 在路上'], ['cl', '吃了吗', '🍚', 'orange', '吃了吗 吃饭 饭'],
+  ['xb', '下班啦', '🎈', 'teal', '下班啦 下班 下班了 放学'], ['dq', '对不起', '🙇', 'violet', '对不起 抱歉 不好意思'], ['mw', '没问题', '👌', 'green', '没问题 可以 ok 行'],
+  ['lh', '厉害', '👏', 'orange', '厉害 牛 太强了 棒'], ['kl', '哭了', '😭', 'blue', '哭了 哭 呜呜 伤心'], ['ee', '嗯嗯', '🙂', 'teal', '嗯嗯 嗯 好'],
+  ['by', '拜拜', '👋', 'pink', '拜拜 再见 拜'], ['dc', '打call', '📣', 'violet', '打call 支持 应援'], ['kx', '开心', '😊', 'yellow', '开心 高兴 快乐'],
+  ['my', '摸鱼', '🐟', 'teal', '摸鱼 划水 偷懒'], ['kn', '好困', '🥱', 'grey', '好困 困 困了'], ['el', '饿了', '🍔', 'orange', '饿了 饿 想吃'],
+  ['sr', '生日快乐', '🎂', 'pink', '生日快乐 生日 祝福'], ['gx', '恭喜', '🧧', 'red', '恭喜 恭喜发财 祝贺'], ['hk', '好看', '😍', 'pink', '好看 漂亮 美 帅'],
+  ['ns', '你说得对', '🫡', 'blue', '你说得对 对 是的 有道理'], ['bx', '不想上班', '😩', 'grey', '不想上班 上班 累'], ['dd', '等等我', '🐢', 'green', '等等我 等我 慢'],
+  ['tn', '太难了', '🤯', 'violet', '太难了 难 崩溃']
+];
+const TMAP = {}; TSTK.forEach((t, i) => { t.i = i; TMAP[t[0]] = t; });
+const validStk = b => typeof b === 'string' && (/^e:[^\s]{1,16}$/u.test(b) || (/^t:[a-z0-9]{1,8}$/.test(b) && !!TMAP[b.slice(2)]) || isStoreUrl(b));
+function tstkHTML(t, small) {
+  const c = PAL[t[3]] || PAL.violet;
+  return '<span class="tstk' + (small ? ' sm' : '') + (c[2] ? ' dk' : '') + (Array.from(t[1]).length >= 4 ? ' l4' : '') + '" style="--c1:' + c[0] + ';--c2:' + c[1] + ';--r:' + (t.i % 2 ? '3deg' : '-4deg') + '"><i>' + t[2] + '</i><b>' + esc(t[1]) + '</b></span>';
+}
+function stkInner(body, small) {
+  body = String(body || '');
+  if (body.indexOf('e:') === 0) return '<span class="emo">' + esc(body.slice(2, 20)) + '</span>';
+  if (body.indexOf('t:') === 0) { const t = TMAP[body.slice(2)]; return t ? tstkHTML(t, small) : '<span class="emo">🙂</span>'; }
+  if (isStoreUrl(body) || body.indexOf('blob:') === 0) return '<img src="' + esc(disp(body)) + '" alt="" decoding="async"' + (small ? ' loading="lazy"' : '') + '>';
+  return '<span class="stk-bad">[表情]</span>';
+}
+
+/* ---- 后端版本：setup-v6.sql 有没有运行过 ---- */
+let schemaAt = 0;
+async function checkSchema(force) {
+  if (!sb || !S.me || S.v6 === true || (!force && now() - schemaAt < (S.v6 === false ? 5000 : 30000))) return;   // 还没运行 SQL 时 5 秒内可以再查（运行完回来马上能用）
+  schemaAt = now();
+  try {
+    const { data, error } = await sb.rpc('chatter_schema');
+    if (error) { if (isMissingFn(error)) S.v6 = false; else logErr('schema', error); }
+    else S.v6 = (+data || 0) >= 6;
+  } catch (e) { logErr('schema', e); }
+  if ($('emoji-panel').classList.contains('active')) { renderEp(); if (S.v6) loadStickers(true); }   // 表情列表等打开面板时再读，省流量
+}
+
+/* ---- 我的表情（存在数据库 stickers 表，文件在自己的文件夹 sticker_ 开头） ---- */
+let stkLoading = null, stkOk = false;
+const stkKey = () => 'ch2stk:' + (S.uid || ''), recKey = () => 'ch2stkr:' + (S.uid || '');
+function stkSave() { LS.set(stkKey(), S.stk || []); }
+async function loadStickers(force) {
+  if (!sb || !S.me || S.v6 === false) return;
+  if (!force && stkOk && S.stkAt && now() - S.stkAt < 60000) return;
+  if (stkLoading) return stkLoading;
+  stkLoading = (async () => {
+    try {
+      const { data, error } = await sb.from('stickers').select('id,url,kw,created_at').eq('owner_acc', ME()).order('created_at', { ascending: false }).limit(STK_LIMIT);
+      if (error) { if (isMissingFn(error)) S.v6 = false; else logErr('stk', error); return; }
+      S.stk = data || []; S.stkAt = now(); stkOk = true; stkSave();
+      if ($('emoji-panel').classList.contains('active')) renderEp();
+    } catch (e) { logErr('stk', e); }
+  })().finally(() => { stkLoading = null; });
+  return stkLoading;
+}
+function recentList() { return (LS.get(recKey(), []) || []).filter(validStk); }
+function pushRecent(b) { const r = recentList().filter(x => x !== b); r.unshift(b); LS.set(recKey(), r.slice(0, 16)); }
+function dropRecent(b) { LS.set(recKey(), recentList().filter(x => x !== b)); }
+
+async function addStickerBlob(blob, kw) {
+  if (S.v6 === false) throw new Error(NEED_V6);
+  if ((S.stk || []).length >= STK_LIMIT) throw new Error('“我的表情”最多 ' + STK_LIMIT + ' 个，先删掉一些再加');
+  const ct = blob.type || 'image/png';
+  const url = await upload(blob, extOfType(ct, 'png'), ct, 'sticker_');
+  try { return await insertSticker(url, kw); }
+  catch (e) {   // 记录没存上：把刚传的文件删掉，免得白占空间
+    try { const m = /\/chat-media\/([^?#]+)/.exec(url); if (m) sb.storage.from('chat-media').remove([decodeURIComponent(m[1])]); } catch (x) {}
+    throw e;
+  }
+}
+async function insertSticker(url, kw) {
+  const { data, error } = await sb.from('stickers').insert({ owner_acc: ME(), url, kw: cpSlice((kw || '').trim(), 60) }).select('id,url,kw,created_at').single();
+  if (error) { if (isMissingFn(error)) S.v6 = false; throw error; }
+  S.stk = [data].concat(S.stk || []); stkSave(); return data;
+}
+async function addStickerFiles(files) {
+  const list = Array.from(files || []).filter(f => /^image\//.test(f.type));
+  if (!list.length) { if (files && files.length) toast('请选择图片（GIF 动图也可以）'); return; }
+  let ok = 0, big = 0, fail = 0, err = '';
+  toast('正在添加 ' + list.length + ' 个表情…');
+  for (const f of list) {
+    if (f.size > STK_MAX) { big++; continue; }
+    try { await addStickerBlob(f, ''); ok++; renderEp(); }
+    catch (e) { fail++; err = (e && e.message) || ''; logErr('stk-add', e); if (S.v6 === false || /最多/.test(err)) break; }
+  }
+  renderEp();
+  toast((ok ? '已添加 ' + ok + ' 个表情（原图），长按可以设置搜索关键词' : '没有添加成功') + (big ? '；' + big + ' 个超过 10MB 已跳过' : '') + (fail ? '；' + fail + ' 个失败' + (err ? '：' + err : '') : ''));
+}
+async function addToStickers(m) {
+  if (S.v6 === false) { toast(NEED_V6); return; }
+  const url = m.body;
+  if (m.type === 'sticker' && !isStoreUrl(url)) { toast('这是表情库里的表情，在“表情库”里就能找到'); return; }
+  if (!isStoreUrl(url)) { toast('这条消息还没发送完成'); return; }
+  if (!stkOk) await loadStickers(true);
+  if ((S.stk || []).some(s => s.url === url)) { toast('已经在“我的表情”里了'); return; }
+  try {
+    toast('正在添加到表情…');
+    if (url.indexOf('/chat-media/' + ME() + '/') > 0) await insertSticker(url, '');   // 自己发的图：直接用同一个文件，不重复占空间
+    else {                                                                          // 对方发的图：复制一份到自己文件夹，对方清理空间也不影响
+      const r = await fetch(disp(url)); if (!r.ok) throw new Error('图片读取失败（HTTP ' + r.status + '）');
+      const b = await r.blob();
+      if (!/^image\//.test(b.type || '')) throw new Error('这个文件不是图片');
+      if (b.size > STK_MAX) throw new Error('图片超过 10MB，不能做表情');
+      await addStickerBlob(b, '');
+    }
+    renderEp(); toast('已添加到“我的表情”，长按可以设置搜索关键词');
+  } catch (e) { logErr('stk-from', e); toast('添加失败：' + ((e && e.message) || '请重试')); }
+}
+function stkActs(id) {
+  const s = (S.stk || []).find(x => x.id === id); if (!s) return;
+  openActs('我的表情' + (s.kw ? '\n搜索关键词：' + s.kw : '\n还没有搜索关键词'), [
+    { label: s.kw ? '修改搜索关键词' : '设置搜索关键词', fn: () => setTimeout(() => editStkKw(s), 50) },
+    { label: '移到最前面', fn: () => stkTop(s) },
+    { label: '删除这个表情', danger: true, fn: () => stkDel(s) },
+    { label: '取消', fn: null }]);
+}
+function editStkKw(s) {
+  openForm('搜索关键词（多个用空格隔开）', [{ ph: '比如：猫 可爱 摸头', val: s.kw || '', max: 60 }], async ([v]) => {
+    v = cpSlice(String(v || '').replace(/\s+/g, ' ').trim(), 60);
+    if (v === (s.kw || '')) return null;
+    const { data, error } = await sb.from('stickers').update({ kw: v }).eq('id', s.id).select('id');
+    if (error || !data || !data.length) return '保存失败：' + ((error && error.message) || '没有权限');
+    s.kw = v; stkSave(); renderEp(); toast(v ? '关键词已保存，搜索“' + v.split(' ')[0] + '”就能找到' : '关键词已清除'); return null;
+  }, '保存');
+}
+async function stkTop(s) {
+  const t = new Date().toISOString();
+  const { data, error } = await sb.from('stickers').update({ created_at: t }).eq('id', s.id).select('id');
+  if (error || !data || !data.length) { toast('操作失败，请重试'); return; }
+  s.created_at = t; S.stk = [s].concat(S.stk.filter(x => x.id !== s.id)); stkSave(); renderEp();
+}
+async function stkDel(s) {
+  const { data, error } = await sb.from('stickers').delete().eq('id', s.id).select('id');
+  if (error || !data || !data.length) { toast('删除失败，请重试'); return; }
+  S.stk = S.stk.filter(x => x.id !== s.id); stkSave(); dropRecent(s.url); renderEp();
+  // 文件不删：已经发出去的这个表情在聊天记录里还要能看到。以后在“存储空间”里按时间清理时会一起清掉。
+  toast('已从“我的表情”删除（已经发出的不受影响）');
+}
+
+/* ---- 表情面板 ---- */
+let epTabNow = 'emoji';
+function epItem(b) { return '<div class="stk-it' + (b.indexOf('e:') === 0 ? ' e' : '') + '" data-b="' + esc(b) + '">' + stkInner(b, true) + '</div>'; }
+function epNeed() { return '<div class="ep-empty">' + NEED_V6 + '<br><small>（运行一次就好，运行前图片、语音、文字照常能发）</small></div>'; }
+function renderEp() {
+  const q = $('ep-search').value.trim();
+  $('emoji-panel').classList.toggle('finding', !!q);
+  document.querySelectorAll('#emoji-panel .ep-tabs button').forEach(b => b.classList.toggle('on', b.dataset.ep === epTabNow));
+  ['emoji', 'lib', 'mine', 'find'].forEach(k => $('ep-' + k).classList.toggle('on', q ? k === 'find' : k === epTabNow));
+  if (q) { $('ep-find').innerHTML = renderFind(q); return; }
+  if (epTabNow === 'emoji') {
+    const el = $('ep-emoji'); if (el.dataset.full) return;
+    let cat = '', h = '';
+    EMOJI.forEach(x => { if (x.c !== cat) { cat = x.c; h += '<div class="ep-cat">' + esc(cat) + '</div>'; } h += '<span data-e="' + esc(x.e) + '">' + x.e + '</span>'; });
+    el.innerHTML = h; el.dataset.full = '1'; return;
+  }
+  if (S.v6 === false) { $('ep-' + epTabNow).innerHTML = epNeed(); return; }
+  if (epTabNow === 'lib') {
+    const rec = recentList();
+    $('ep-lib').innerHTML = (rec.length ? '<div class="ep-cat">最近使用</div>' + rec.map(epItem).join('') : '') +
+      '<div class="ep-cat">文字贴纸</div>' + TSTK.map(t => epItem('t:' + t[0])).join('') +
+      '<div class="ep-cat">大表情</div>' + BIG.map(e => epItem('e:' + e)).join('');
+    return;
+  }
+  const list = S.stk || [];
+  if (!S.stk && !stkOk) { $('ep-mine').innerHTML = '<div class="ep-empty">加载中…</div>'; return; }
+  $('ep-mine').innerHTML = '<div class="ep-cat">我的表情 ' + list.length + ' / ' + STK_LIMIT + '　点一下发送，长按可设关键词或删除</div>' +
+    '<div class="stk-add" role="button" aria-label="添加表情">＋</div>' +
+    list.map(s => '<div class="stk-m" data-b="' + esc(s.url) + '" data-sid="' + esc(s.id) + '"><img src="' + esc(disp(s.url)) + '" alt="" loading="lazy" decoding="async"></div>').join('') +
+    (list.length ? '' : '<div class="ep-empty">点 ＋ 从相册选图片做成表情（原图不压缩，GIF 动图也行）<br>聊天里长按对方的图片，也能“添加到表情”</div>');
+}
+function kwMatch(words, q) { return words.some(w => w.toLowerCase().indexOf(q) >= 0); }
+function findStk(q, exact) {
+  q = q.trim().toLowerCase(); if (!q) return { mine: [], txt: [], emo: [] };
+  const hit = ws => exact ? ws.some(w => { w = w.toLowerCase(); return w === q || (q.length >= 2 && w.indexOf(q) === 0); }) : kwMatch(ws, q);
+  const mine = (S.stk || []).filter(s => s.kw && hit(s.kw.split(' '))).map(s => s.url);
+  const txt = TSTK.filter(t => hit([t[1]].concat(t[4].split(' ')))).map(t => 't:' + t[0]);
+  const seen = new Set(), emo = [];
+  EMOJI.forEach(x => { if (!seen.has(x.e) && (x.e === q || hit(x.k))) { seen.add(x.e); emo.push('e:' + x.e); } });
+  return { mine, txt, emo };
+}
+function renderFind(q) {
+  if (S.v6 === false) return epNeed();
+  const r = findStk(q, false);
+  if (!r.mine.length && !r.txt.length && !r.emo.length) return '<div class="ep-empty">没有找到“' + esc(q) + '”相关的表情<br><small>自己的表情可以长按设置关键词，就能搜到了</small></div>';
+  return (r.mine.length ? '<div class="ep-cat">我的表情</div>' + r.mine.map(epItem).join('') : '') +
+    (r.txt.length ? '<div class="ep-cat">文字贴纸</div>' + r.txt.map(epItem).join('') : '') +
+    (r.emo.length ? '<div class="ep-cat">大表情（点一下直接发送）</div>' + r.emo.slice(0, 80).map(epItem).join('') : '');
+}
+function openEp() {
+  const p = $('emoji-panel'); hideSuggest();
+  if (p.classList.contains('active')) { p.classList.remove('active'); return; }
+  p.classList.add('active'); renderEp();
+  if (S.v6 !== true) checkSchema(); else loadStickers();
+}
+function epTab(k) { epTabNow = k; LS.set('ch2eptab', k); $('ep-search').value = ''; renderEp(); const el = $('ep-' + k); if (el) el.scrollTop = 0; if (k === 'mine') loadStickers(); }
+function sendSticker(b) {
+  if (!S.conv || !validStk(b)) return;
+  if (S.v6 === false) { toast(NEED_V6); return; }
+  addLocal(newMsg('sticker', b)); pushRecent(b);
+  if (epTabNow === 'lib' && !$('ep-search').value.trim() && $('emoji-panel').classList.contains('active')) renderEp();
+}
+
+/* ---- 联想表情：输入框里打的字刚好是关键词时，上面冒出几个表情（和微信一样） ---- */
+function stkSuggest(v) {
+  v = String(v || '').trim();
+  if (!v || Array.from(v).length > 6 || S.v6 === false || !S.conv || $('emoji-panel').classList.contains('active')) { hideSuggest(); return; }
+  const r = findStk(v, true), list = r.mine.concat(r.txt, r.emo).slice(0, 6);
+  if (!list.length) { hideSuggest(); return; }
+  const el = $('stk-suggest'); el.innerHTML = list.map(epItem).join(''); el.classList.add('active');
+}
+function hideSuggest() { const el = $('stk-suggest'); if (el.classList.contains('active')) { el.classList.remove('active'); el.innerHTML = ''; } }
+function sendSuggest(b) {
+  const input = $('chat-input'); input.value = ''; draftSave(S.conv, ''); hideSuggest(); sendSticker(b);
+}
+
+/* ---- 发视频 / 发文件（原文件上传，不压缩） ---- */
+function videoDur(file) {
   return new Promise(res => {
-    let pc = null, done = false, tm = 0; const t0 = now();
-    const fin = r => { if (done) return; done = true; clearTimeout(tm); try { if (pc) pc.close(); } catch (e) {} res(r); };
-    try { pc = new RTCPeerConnection({ iceServers: [server], iceTransportPolicy: policy }); } catch (e) { fin({ ok: false }); return; }
-    pc.onicecandidate = e => {
-      if (!e.candidate) { fin({ ok: false }); return; }                  // 收集结束还没拿到 = 失败
-      if ((e.candidate.candidate || '').indexOf(' typ ' + want) >= 0) fin({ ok: true, ms: now() - t0 });
-    };
-    tm = setTimeout(() => fin({ ok: false, timeout: true }), ms || 8000);
-    try { pc.createDataChannel('probe'); pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin({ ok: false })); } catch (e) { fin({ ok: false }); }
+    let done = false, u = '';
+    const v = document.createElement('video');
+    const fin = d => { if (done) return; done = true; clearTimeout(t); try { v.removeAttribute('src'); v.load(); } catch (e) {} try { URL.revokeObjectURL(u); } catch (e) {} res(d > 0 && isFinite(d) ? Math.min(86400, Math.round(d)) : null); };
+    const t = setTimeout(() => fin(0), 5000);
+    v.preload = 'metadata'; v.muted = true; v.onloadedmetadata = () => fin(v.duration); v.onerror = () => fin(0);
+    try { u = URL.createObjectURL(file); v.src = u; } catch (e) { fin(0); }
   });
 }
-let relayTesting = false;
-async function runRelayTest() {
-  if (relayTesting) return;
-  if (typeof RTCPeerConnection === 'undefined') { $('relay-res').textContent = '当前浏览器不支持 WebRTC，无法测试'; return; }
-  relayTesting = true; $('btn-relaytest').disabled = true;
-  const rows = STUN_SERVER.urls.map(u => ({ k: 'stun', title: 'STUN · ' + u.replace(/^stun:/, ''), server: { urls: u }, policy: 'all', want: 'srflx' }));
-  turns().forEach(p => p.urls.forEach(u => rows.push({ k: p.name, title: p.name + ' · ' + turnLabel(u), server: { urls: u, username: p.username, credential: p.credential }, policy: 'relay', want: 'relay' })));
-  const st = rows.map(() => '⏳ 测试中…');
-  const paint = (summary) => {
-    $('relay-res').textContent = rows.map((r, i) => r.title + '：' + st[i]).join('\n') + (summary ? '\n\n' + summary : '');
-  };
-  paint('');
-  const res = await Promise.all(rows.map((r, i) => probeIce(r.server, r.policy, r.want, 8000).then(x => {
-    st[i] = x.ok ? '✅ ' + (r.k === 'stun' ? '能拿到公网地址' : '可用') + '（' + (x.ms / 1000).toFixed(1) + ' 秒）' : '❌ ' + (x.timeout ? '连不上（超时）' : '连不上');
-    paint(''); return x.ok;
-  })));
-  const okNames = []; turns().forEach(p => { if (rows.some((r, i) => r.k === p.name && res[i])) okNames.push(p.name); });
-  const stunOk = rows.some((r, i) => r.k === 'stun' && res[i]);
-  const sum = (stunOk ? '能拿到公网地址：两台手机有机会直连（直连不花中转额度）；能不能真打通要两台手机实际通话才知道。' : 'STUN 都拿不到公网地址，通话多半要走中转。') + '\n' +
-    (okNames.length ? '能连上的中转：' + okNames.join('、') + (okNames[0] !== turns()[0].name ? '（排第一的 ' + turns()[0].name + ' 连不上，会自动用后面能用的）' : '') : '所有中转都连不上：直连失败时通话会接不通。') +
-    '\n说明：拿到中转地址只代表服务器连得上、账号正确。关掉 VPN 再测，结果才代表国内网络。';
-  paint(sum);
-  relayTesting = false; $('btn-relaytest').disabled = false;
+async function sendVideo(file) {
+  const dur = await videoDur(file);
+  if (!S.conv) return;
+  addLocal(newMsg('video', URL.createObjectURL(file), dur, { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' }));
+}
+function sendDoc(file) {
+  const n = cpSlice(file.name || '文件', 120), lu = URL.createObjectURL(file);
+  let ct = file.type || 'application/octet-stream';
+  if (/html|xml|javascript|ecmascript|svg/i.test(ct)) ct = 'text/plain';      // 网页类文件按纯文本存，打开时不会被当成网页运行
+  addLocal(newMsg('file', JSON.stringify({ u: lu, n, s: file.size }), null, { _blob: file, _ext: extOfName(n) || 'bin', _ct: ct, _fm: { n, s: file.size } }));
+}
+const kindOf = f => /^image\//.test((f && f.type) || '') ? 'image' : /^video\//.test((f && f.type) || '') ? 'video' : 'file';
+async function sendFiles(files) {
+  const list = Array.from(files || []).filter(f => f && f.size > 0);
+  if (!list.length) { if (files && files.length) toast('这个文件是空的'); return; }
+  if (list.length > 9) toast('一次最多 9 个，已发送前 9 个');
+  if (S.v6 === false && list.some(f => kindOf(f) !== 'image')) await checkSchema();   // 也许刚运行完 setup-v6.sql
+  let big = 0, need = 0;
+  for (const f of list.slice(0, 9)) {
+    if (!S.conv) break;
+    const k = kindOf(f);
+    if (k !== 'image' && S.v6 === false) { need++; continue; }
+    if (f.size > fileMax()) { big++; continue; }
+    if (k === 'image') await sendImage(f); else if (k === 'video') await sendVideo(f); else sendDoc(f);
+    await new Promise(r => setTimeout(r, 60));
+  }
+  if (need) toast(NEED_V6);
+  else if (big) toast(big + ' 个文件超过 ' + (fileMax() / MB) + 'MB，已跳过（这是 Supabase 免费版单个文件的上限）');
+}
+
+/* ---- 保存到手机：先下载好，再调出系统的“存储图像 / 存储视频 / 存储到文件” ---- */
+const stampName = t => { const d = new Date(t || now()); return 'Chatter_' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '_' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()); };
+function dlFile(f) {
+  const u = URL.createObjectURL(f), a = document.createElement('a');
+  a.href = u; a.download = f.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已开始下载');
+}
+function shareFile(f, second) {
+  navigator.share({ files: [f] }).catch(e => {
+    if (e && e.name === 'AbortError') return;
+    if (e && e.name === 'NotAllowedError' && !second) { openActs('文件准备好了（' + fmtSize(f.size) + '）', [{ label: '保存 / 分享', fn: () => shareFile(f, true) }, { label: '取消', fn: null }]); return; }
+    logErr('share', e); dlFile(f);
+  });
+}
+let saving2 = false;
+async function saveToPhone(url, name) {
+  if (!url || saving2) return;
+  if (url.indexOf('blob:') === 0) { toast('还在发送中，等发完再保存'); return; }
+  saving2 = true; toast('正在准备…');
+  let f = null;
+  try {
+    const r = await fetch(disp(url)); if (!r.ok) throw new Error('HTTP ' + r.status);
+    const b = await r.blob(); f = new File([b], name, { type: b.type || 'application/octet-stream' });
+  } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
+  saving2 = false; if (!f) return;
+  let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
+  if (can) shareFile(f); else dlFile(f);
+}
+function saveMsg(m) {
+  if (m.type === 'file') { const f = parseFile(m.body); if (f) saveToPhone(f.u, f.n); return; }
+  const def = m.type === 'video' ? 'mp4' : 'jpg';
+  saveToPhone(m.body, stampName(m.created_at) + '.' + (extOfUrl(m.body) || def));
+}
+
+/* ---- 转发 ---- */
+function openForward(m) {
+  if (!S.friends.length) { toast('还没有好友'); return; }
+  openActs('转发给', S.friends.map(a => ({ label: peerName(a) + (a === S.peer ? '（当前聊天）' : ''), fn: () => forwardTo(m, a) })).concat([{ label: '取消', fn: null }]));
+}
+function forwardTo(m, acc) {
+  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
+  const conv = convKeyOf(ME(), acc);
+  const fm = { id: uuid(), conv, from_acc: ME(), to_acc: acc, type: m.type, body: m.type === 'text' ? parseQ(m.body).text : m.body, dur: m.dur || null, created_at: stampAfterClr(conv), _st: 'sending' };
+  if (conv === S.conv) addLocal(fm);
+  else { S.out.set(fm.id, fm); touchConv(conv, previewOf(fm), fm.created_at, false); deliver(fm); SFX.send(); }
+  toast('已转发给 ' + peerName(acc));
+}
+
+/* ---- 会话置顶 / 消息免打扰（只记在这台手机上） ---- */
+let pins = {}, mutes = {}, pmUid = null;
+function pmLoad() { if (pmUid !== S.uid) { pins = LS.get('ch2pin:' + (S.uid || ''), {}) || {}; mutes = LS.get('ch2mute:' + (S.uid || ''), {}) || {}; pmUid = S.uid; } }
+const isPinned = k => { pmLoad(); return !!pins[k]; };
+const isMuted = k => { pmLoad(); return !!mutes[k]; };
+function togglePin(k) { pmLoad(); if (pins[k]) delete pins[k]; else pins[k] = now(); LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); toast(pins[k] ? '已置顶' : '已取消置顶'); }
+function toggleMute(k) { pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1; LS.set('ch2mute:' + (S.uid || ''), mutes); sched('list'); sched('title'); toast(mutes[k] ? '已开启消息免打扰：不响铃、不计入未读总数' : '已关闭消息免打扰'); }
+function convActs(it) {
+  const k = it.dataset.key;
+  openActs(peerName(it.dataset.peer), [
+    { label: isPinned(k) ? '取消置顶' : '置顶聊天', fn: () => togglePin(k) },
+    { label: isMuted(k) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(k) },
+    { label: '删除会话', danger: true, fn: () => setTimeout(() => confirmClear(k, true), 50) },
+    { label: '取消', fn: null }]);
+}
+
+/* ---- 文字里的网址变成可以点的链接 ---- */
+const URL_RE = /(https?:\/\/[^\s<>"'，。！？、；：（）【】《》「」]+|www\.[a-z0-9-]+\.[^\s<>"'，。！？、；：（）【】《》「」]+)/gi;
+function linkify(t) {
+  t = String(t == null ? '' : t); let out = '', last = 0;
+  String(t).replace(URL_RE, (m, g, off) => {
+    const u = m.replace(/[.,!?;:)\]}>]+$/, ''); if (!u) return m;
+    out += esc(t.slice(last, off)) + '<a href="' + esc(/^www\./i.test(u) ? 'https://' + u : u) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + '</a>';
+    last = off + u.length; return m;
+  });
+  return out + esc(t.slice(last));
 }
 
 /* ================= 图片查看器 / 引用跳转 ================= */
@@ -2321,6 +2741,7 @@ function lbShow() {
 }
 function openLightbox(id) {
   lbList = S.msgs.filter(m => m.type === 'image' && !isHidden(m) && m.body).map(m => ({ id: m.id, url: disp(m.body) }));
+  $('lb-save').style.display = '';
   lbIdx = Math.max(0, lbList.findIndex(x => x.id === id));
   if (!lbList.length) return;
   lbShow(); $('lightbox').classList.add('active');
@@ -2334,7 +2755,12 @@ function bindLightbox() {
     const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { swiped = true; lbMove(dx < 0 ? 1 : -1); }
   }, { passive: true });
-  lb.addEventListener('click', e => { if (swiped) { swiped = false; return; } if (e.target.closest('#lb-prev')) { lbMove(-1); return; } if (e.target.closest('#lb-next')) { lbMove(1); return; } closeLightbox(); });
+  lb.addEventListener('click', e => {
+    if (swiped) { swiped = false; return; }
+    if (e.target.closest('#lb-prev')) { lbMove(-1); return; } if (e.target.closest('#lb-next')) { lbMove(1); return; }
+    if (e.target.closest('#lb-save')) { const it = lbList[lbIdx], m = it && S.msgs.find(x => x.id === it.id); if (m) saveMsg(m); return; }
+    closeLightbox();
+  });
   document.addEventListener('keydown', e => { if (!lb.classList.contains('active')) return; if (e.key === 'ArrowLeft') lbMove(-1); else if (e.key === 'ArrowRight') lbMove(1); else if (e.key === 'Escape') closeLightbox(); });
 }
 function jumpTo(id) {
@@ -2404,7 +2830,7 @@ function bindUI() {
   let lpT = 0, lpFired = 0;
   const cl = $('conv-list');
   cl.addEventListener('click', e => { if (now() - lpFired < 700) return; const it = e.target.closest('.conv-item'); if (it) openConv(it.dataset.key, it.dataset.peer); });
-  const lpOpen = it => { lpFired = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} confirmClear(it.dataset.key, true); };
+  const lpOpen = it => { lpFired = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} convActs(it); };
   cl.addEventListener('contextmenu', e => { const it = e.target.closest('.conv-item'); if (!it) return; e.preventDefault(); lpOpen(it); });
   cl.addEventListener('touchstart', e => { const it = e.target.closest('.conv-item'); if (!it) return; clearTimeout(lpT); lpT = setTimeout(() => lpOpen(it), 600); }, { passive: true });
   ['touchend', 'touchmove', 'touchcancel'].forEach(ev => cl.addEventListener(ev, () => clearTimeout(lpT), { passive: true }));
@@ -2431,18 +2857,28 @@ function bindUI() {
   const box = $('chat-messages');
   box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
   box.addEventListener('error', e => {
-    const im = e.target; if (!im || im.tagName !== 'IMG' || !im.closest || !im.closest('.bubble.img')) return;
+    const el = e.target; if (!el || !el.closest) return;
+    if (el.tagName === 'VIDEO' && el.closest('.bubble.video')) { const u = el.getAttribute('src') || ''; if (/^blob:/.test(u)) return; el.closest('.bubble.video').innerHTML = '<div class="vfail">视频无法在这里播放<small>可能已被清理，或这个浏览器不支持这种格式；可以长按“保存到手机”再看</small></div>'; return; }
+    if (el.tagName === 'IMG' && el.closest('.bubble.sticker')) { el.outerHTML = '<span class="stk-bad">表情已失效</span>'; return; }
+    const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
     const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
     const holder = im.parentNode; if (!holder) return;
     holder.innerHTML = '<div class="imgfail" data-src="' + esc(u.replace(/[?&]r=\d+$/, '')) + '">图片无法显示<small>可能已被清理，点一下重试</small></div>';
   }, true);
   box.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG' && S.stick) box.scrollTop = box.scrollHeight; }, true);
+  box.addEventListener('loadedmetadata', e => { if (e.target && e.target.tagName === 'VIDEO' && S.stick) box.scrollTop = box.scrollHeight; }, true);
   box.addEventListener('click', e => {
     const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
     const v = e.target.closest('.bubble.voice'); if (v) { togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
     const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; const holder = bad.parentNode; holder.innerHTML = '<img src="' + esc(u + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now()) + '" alt="" decoding="async">'; return; }
-    const im = e.target.closest('.bubble.img img'); if (im) openLightbox(im.closest('.msg').dataset.id);
+    const im = e.target.closest('.bubble.img img'); if (im) { openLightbox(im.closest('.msg').dataset.id); return; }
+    const fb = e.target.closest('.bubble.file'); if (fb) { const u = fb.dataset.u || ''; if (u && !/^blob:/.test(u)) { try { window.open(disp(u), '_blank', 'noopener'); } catch (x) {} } return; }
+    const sk = e.target.closest('.bubble.sticker img'); if (sk) {
+      const m = S.msgs.find(x => x.id === sk.closest('.msg').dataset.id); if (!m || m._st || !isStoreUrl(m.body)) return;
+      const have = (S.stk || []).some(x => x.url === m.body);
+      openActs('表情', [{ label: have ? '已在“我的表情”里' : '添加到我的表情', fn: have ? null : () => addToStickers(m) }, { label: '保存到手机', fn: () => saveMsg(m) }, { label: '取消', fn: null }]);
+    }
   });
   let pressT = 0;
   const mineBubble = e => e.target.closest && e.target.closest('.msg .bubble');
@@ -2457,7 +2893,6 @@ function bindUI() {
     toast(relaySave() ? '已开启：通话走中转时降低码率省流量（直连时不受影响）' : '已关闭：走中转时保持你选的画质');
     if (S.call && S.call.connected) applyCallParams(S.call);
   };
-  $('btn-relaytest').onclick = () => { $('relay-box').style.display = 'block'; runRelayTest(); };
   $('btn-nick').onclick = editNick; $('btn-pass').onclick = editPass;
   $('btn-avatar').onclick = () => $('avatar-input').click();
   $('avatar-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; setAvatar(f).catch(x => { logErr('avatar', x); toast('头像上传失败：' + ((x && x.message) || '请重试')); }); };
@@ -2465,7 +2900,7 @@ function bindUI() {
   $('form-sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && fsOk && !$('fs-ok').disabled) { e.preventDefault(); fsOk(); } });
   $('as-items').onclick = e => { const b = e.target.closest('button[data-i]'); if (!b) return; const it = actItems[+b.dataset.i]; closeActs(); if (it && it.fn) it.fn(); };
   $('act-backdrop').onclick = () => { if (now() - actOpenAt > 350) closeActs(); };
-  $('btn-more').onclick = () => { if (!S.conv) return; const key = S.conv; openActs('聊天选项', [{ label: '搜索聊天记录', fn: openSearch }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]); };
+  $('btn-more').onclick = () => { if (!S.conv) return; const key = S.conv; openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '搜索聊天记录', fn: openSearch }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]); };
   $('cs-close').onclick = closeSearch;
   $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
   $('cs-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); clearTimeout(csT); runChatSearch($('cs-input').value); } });
@@ -2475,6 +2910,7 @@ function bindUI() {
   $('msg-menu-backdrop').onclick = () => { if (now() - menuOpenAt > 350) closeMenu(); };
   $('msg-menu-recall').onclick = doRecall;
   $('msg-menu-reply').onclick = () => menuAction('reply'); $('msg-menu-copy').onclick = () => menuAction('copy'); $('msg-menu-del').onclick = () => menuAction('del');
+  $('msg-menu-fwd').onclick = () => menuAction('fwd'); $('msg-menu-stk').onclick = () => menuAction('stk'); $('msg-menu-save').onclick = () => menuAction('save');
   $('reply-x').onclick = clearReply;
 
   /* 输入栏 */
@@ -2485,16 +2921,39 @@ function bindUI() {
   sendBtn.addEventListener('click', e => { e.preventDefault(); sendText(); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } });
   input.addEventListener('focus', () => $('emoji-panel').classList.remove('active'));
-  input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); });
+  input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); });
   let audioMode = false;
   $('btn-audio-toggle').onclick = () => {
     audioMode = !audioMode; input.style.display = audioMode ? 'none' : 'block'; $('btn-audio').style.display = audioMode ? 'block' : 'none';
     $('btn-audio-toggle').classList.toggle('audio-mode', audioMode);
   };
-  $('btn-emoji').onclick = () => $('emoji-panel').classList.toggle('active');
-  document.querySelectorAll('#emoji-panel span').forEach(s => { s.onclick = () => { input.value += s.textContent; draftSave(S.conv, input.value); }; });
+  $('btn-emoji').onclick = openEp;
+  epTabNow = ['emoji', 'lib', 'mine'].indexOf(LS.get('ch2eptab', 'emoji')) >= 0 ? LS.get('ch2eptab', 'emoji') : 'emoji';
+  const ep = $('emoji-panel'); let stkLpT = 0, stkLpAt = 0;
+  ep.addEventListener('click', e => {
+    if (now() - stkLpAt < 700) return;
+    const tab = e.target.closest('.ep-tabs button'); if (tab) { epTab(tab.dataset.ep); return; }
+    const em = e.target.closest('#ep-emoji span[data-e]'); if (em) { input.value += em.dataset.e; draftSave(S.conv, input.value); return; }
+    if (e.target.closest('.stk-add')) { if (S.v6 === false) { toast(NEED_V6); return; } if ((S.stk || []).length >= STK_LIMIT) { toast('“我的表情”最多 ' + STK_LIMIT + ' 个，先删掉一些再加'); return; } $('stk-input').click(); return; }
+    const it = e.target.closest('[data-b]'); if (it) sendSticker(it.dataset.b);
+  });
+  const stkLp = it => { stkLpAt = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} stkActs(it.dataset.sid); };
+  ep.addEventListener('contextmenu', e => { const it = e.target.closest('.stk-m'); if (!it) return; e.preventDefault(); stkLp(it); });
+  ep.addEventListener('touchstart', e => { const it = e.target.closest('.stk-m'); if (!it) return; clearTimeout(stkLpT); stkLpT = setTimeout(() => stkLp(it), 550); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => ep.addEventListener(ev, () => clearTimeout(stkLpT), { passive: true }));
+  let epT = 0; const es = $('ep-search');
+  es.addEventListener('input', () => { clearTimeout(epT); epT = setTimeout(renderEp, 150); });
+  es.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); clearTimeout(epT); renderEp(); es.blur(); } });
+  $('stk-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; addStickerFiles(fs).catch(x => { logErr('stk-add', x); toast('添加失败'); }); };
+  /* 联想表情：点一下发送；按下时不让输入框失去焦点（键盘不收起） */
+  const sg = $('stk-suggest'); let sgEl = null;
+  sg.addEventListener('touchstart', e => { sgEl = e.target.closest('[data-b]'); e.preventDefault(); }, { passive: false });
+  sg.addEventListener('touchend', e => { e.preventDefault(); const t = e.changedTouches[0], el = t && document.elementFromPoint(t.clientX, t.clientY); const it = el && el.closest && el.closest('#stk-suggest [data-b]'); if (it && it === sgEl) sendSuggest(it.dataset.b); sgEl = null; }, { passive: false });
+  sg.addEventListener('mousedown', e => e.preventDefault());
+  sg.addEventListener('click', e => { const it = e.target.closest('[data-b]'); if (it) sendSuggest(it.dataset.b); });
   $('btn-img').onclick = () => $('file-input').click();
-  $('file-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendImages(fs).catch(x => { logErr('img', x); toast('图片发送失败'); }); };
+  $('file-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('img', x); toast('发送失败'); }); };
+  $('doc-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('doc', x); toast('发送失败'); }); };
 
   /* 按住说话 */
   const ab = $('btn-audio'); let down = false;

@@ -22,7 +22,8 @@
     const mk = (owner, peer, unread, read) => {
       let c = d.conversations.find(x => x.owner_acc === owner && x.conv_key === m.conv_key);
       if (!c) { c = { owner_acc: owner, conv_key: m.conv_key, peer_acc: peer, unread: 0 }; d.conversations.push(c); }
-      c.last_body = m.type === 'text' ? m.body : '[' + m.type + ']'; c.last_ts = m.created_at; c.peer_acc = peer;
+      const P = { image: '[图片]', voice: '[语音]', call: '[通话]', sticker: '[表情]', video: '[视频]' };
+      c.last_body = m.type === 'text' ? m.body : m.type === 'file' ? '[文件] ' + Array.from(JSON.parse(m.body).n || '').slice(0, 60).join('') : (P[m.type] || '[消息]'); c.last_ts = m.created_at; c.peer_acc = peer;
       if (read) { c.last_read_ts = m.created_at; c.unread = 0; } else c.unread = (c.unread || 0) + unread;
       emit('conversations', 'UPDATE', Object.assign({}, c));
     };
@@ -36,22 +37,37 @@
       or(s) { const parts = s.split(',').map(p => p.match(/^(\w+)\.ilike\.%(.*)%$/)); q.f.push(r => parts.some(m => m && String(r[m[1]] || '').toLowerCase().indexOf(m[2].toLowerCase()) > -1)); return api; },
       ilike(c, pat) { const lit = String(pat).replace(/^%|%$/g, '').replace(/\\([\\%_])/g, '$1').toLowerCase(); q.f.push(r => String(r[c] || '').toLowerCase().indexOf(lit) > -1); return api; },
       not() { return api; }, order(c, o) { q.ord = [c, o && o.ascending === false]; return api; }, limit(n) { q.lim = n; return api; },
-      insert(v) { q.op = 'insert'; q.vals = v; return api; }, update(v) { q.op = 'update'; q.vals = v; return api; }, upsert(v) { q.op = 'upsert'; q.vals = v; return api; },
+      insert(v) { q.op = 'insert'; q.vals = v; return api; }, update(v) { q.op = 'update'; q.vals = v; return api; }, upsert(v) { q.op = 'upsert'; q.vals = v; return api; }, delete() { q.op = 'delete'; return api; },
       single() { q.single = true; return api; }, maybeSingle() { q.maybe = true; return api; },
       then(res, rej) { return new Promise(r => setTimeout(r, 15)).then(() => run()).then(res, rej); }
     };
     function run() {
       const d = T(table); let rows = d[table];
+      if (table === 'stickers') {   // 模拟 setup-v6.sql 的表和权限：只能看/改/删自己的；只能加自己文件夹里的；最多 500 个
+        if (window.__noV6) return { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public.stickers' in the schema cache" } };
+        q.f.push(r => r.owner_acc === me);
+        if (q.op === 'insert') {
+          const v = q.vals;
+          if (v.owner_acc !== me || String(v.url).indexOf('/storage/v1/object/public/chat-media/' + me + '/') < 0 || rows.filter(r => r.owner_acc === me).length >= 500) return { data: null, error: { code: '42501', message: 'new row violates row-level security policy for table "stickers"' } };
+          q.vals = Object.assign({ id: uuid(), created_at: new Date().toISOString(), kw: '' }, v);
+        }
+      }
       if (q.op === 'insert' || q.op === 'upsert') {
         let v = Object.assign({}, q.vals);
         if (table === 'messages') {
           if (window.__failInsert) return { data: null, error: { code: '08006', message: 'network down' } };
           if (rows.some(r => r.id === v.id)) return { data: null, error: { code: '23505', message: 'dup' } };
           if (v.from_acc !== me) return { data: null, error: { code: '42501', message: 'rls' } };
+          if (['text', 'image', 'voice', 'call'].concat(window.__noV6 ? [] : ['sticker', 'video', 'file']).indexOf(v.type) < 0) return { data: null, error: { code: 'P0001', message: 'invalid message type' } };
+          if (v.type === 'file') { let j = null; try { j = JSON.parse(v.body); } catch (e) {} if (!j || typeof j !== 'object' || Array.isArray(j) || !j.u) return { data: null, error: { code: 'P0001', message: 'invalid file body' } }; }
           v.created_at = new Date().toISOString(); v.conv_key = [v.from_acc, v.to_acc].sort().join('::');
           rows.push(v); afterInsertMsg(d, v); save(d); emit('messages', 'INSERT', v); return out([v]);
         }
         rows.push(v); save(d); return out([v]);
+      }
+      if (q.op === 'delete') {
+        const hit = rows.filter(r => q.f.every(f => f(r)));
+        d[table] = rows.filter(r => hit.indexOf(r) < 0); save(d); return out(hit);
       }
       if (q.op === 'update') {
         const hit = rows.filter(r => q.f.every(f => f(r)));
@@ -98,6 +114,7 @@
       async _rpc(name, args) {
         await new Promise(r => setTimeout(r, 20));
         const d = load();
+        if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: 6, error: null }; }
         if (name === 'bootstrap') {
           const prof = a => { const p = d.profiles.find(x => x.account_id === a); return p && { account_id: p.account_id, nickname: p.nickname, avatar_url: null }; };
           const friends = d.friendships.filter(f => f.owner_acc === me).map(f => prof(f.friend_acc));
@@ -145,7 +162,11 @@
       },
       removeChannel(ch) { const i = chans.indexOf(ch); if (i > -1) chans.splice(i, 1); return Promise.resolve(); },
       storage: { from() { const folder0 = window.__me || ''; return {
-        async upload(path, blob) { (window.__uploads = window.__uploads || []).push(blob && blob.size); return { error: null }; },
+        async upload(path, blob, opt) {
+          const lim = window.__noV6 ? 20971520 : 52428800;
+          if (blob && blob.size > lim) return { error: { statusCode: '413', message: 'The object exceeded the maximum allowed size' } };
+          (window.__uploads = window.__uploads || []).push(blob && blob.size); (window.__upl = window.__upl || []).push({ path, size: blob && blob.size, ct: opt && opt.contentType }); return { error: null };
+        },
         async list(folder, opt) { const all = window.__files || []; const off = (opt && opt.offset) || 0, lim = (opt && opt.limit) || 100; return { data: all.slice(off, off + lim), error: window.__listErr ? { message: 'permission denied' } : null }; },
         async remove(paths) { window.__removed = (window.__removed || []).concat(paths); window.__files = (window.__files || []).filter(f => paths.indexOf(window.__acc + '/' + f.name) < 0); return { data: paths.map(p => ({ name: p })), error: null }; },
         getPublicUrl(path) { return { data: { publicUrl: SUPA + '/storage/v1/object/public/chat-media/' + path } }; } }; } }

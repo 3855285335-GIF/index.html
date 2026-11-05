@@ -133,7 +133,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // ---------- 删除会话（列表长按）----------
   await A.click('#chat-back'); await sleep(300);
   await A.locator('.conv-item').first().click({ button: 'right' }); await A.waitForSelector('#act-sheet.active'); await sleep(450);
-  ok(/删除这个会话/.test(await A.textContent('#as-title')), '会话列表长按/右键：删除会话确认框');
+  ok(await A.locator('#as-items button', { hasText: '置顶聊天' }).count() === 1 && await A.locator('#as-items button', { hasText: '消息免打扰' }).count() === 1, '会话列表长按/右键：菜单有 置顶 / 免打扰 / 删除会话');
+  await A.click('#as-items button:has-text("删除会话")'); await sleep(450);
+  ok(/删除这个会话/.test(await A.textContent('#as-title')), '点“删除会话”：弹出确认框');
   await A.click('#as-items button:has-text("删除会话")'); await sleep(400);
   ok(await A.locator('.conv-item').count() === 0, '删除会话后从列表消失');
   await B.fill('#chat-input', '你还在吗'); await B.click('#btn-send'); await sleep(900);

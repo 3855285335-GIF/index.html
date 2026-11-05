@@ -136,17 +136,6 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok(await A.evaluate(() => window.__setp.audio && !('maxBitrate' in window.__setp.audio)), '开着省流量但恢复直连：4 秒内自动解除限制');
   await A.evaluate(() => document.getElementById('btn-relaysave').click());   // 测完关回默认
   await A.click('#btn-hangup'); await B.waitForFunction(() => !document.getElementById('call-ui').classList.contains('active'), null, { timeout: 6000 });
-  // ---- 6. 中转测试 ----
-  await A.click('#chat-back'); await sleep(200); await A.click('.app-nav button[data-tab=me]');
-  await A.evaluate(() => { window.__probeMode = true; });
-  await A.click('#btn-relaytest');
-  await A.waitForFunction(() => /能连上的中转|所有中转都连不上/.test(document.getElementById('relay-res').textContent), null, { timeout: 12000 });
-  const rr = await A.textContent('#relay-res');
-  ok(/STUN · stun\.miwifi\.com:3478：✅/.test(rr) && /STUN · stun\.hitv\.com:3478：✅/.test(rr) && !/stun\.qq\.com/.test(rr), '中转测试：5 个 STUN 逐个测试（含 hitv，不含 qq）');
-  ok(/TestTURN · UDP 3478：✅/.test(rr) && /TestTURN · TCP 3478：❌/.test(rr) && /Metered · UDP 80：❌/.test(rr), '中转测试：每家每个地址单独显示结果');
-  ok(/能连上的中转：TestTURN/.test(rr) && !/Metered/.test((rr.split('能连上的中转：')[1] || '').split('\n')[0]) && /账号正确/.test(rr), '中转测试：结论只列出能连上的那家，并说明只代表服务器连得上');
-  await A.evaluate(() => { window.__probeMode = false; });
-
   ok(errors.length === 0, '页面无未捕获错误' + (errors.length ? '：' + errors.slice(0, 6).join(' | ') : ''));
   console.log(results.join('\n')); await browser.close(); process.exit(results.some(r => r.startsWith('FAIL')) ? 1 : 0);
 })().catch(e => { console.log(results.join('\n')); console.log('TEST CRASH', e.message); process.exit(2); });

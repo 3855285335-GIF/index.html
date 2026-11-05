@@ -4,7 +4,7 @@
 cd "$(dirname "$0")"
 python3 ../src/build.py || exit 1
 N=${1:-1}; FAILS=0; ITEMS=0
-SUITES="smoke vtest chattest chattest2 storetest acctest skew stress difftest cntest mix1 mix2 mix3 hangtest relaytest prtest defaulttest metab"
+SUITES="smoke vtest chattest chattest2 storetest acctest skew stress difftest cntest mix1 mix2 mix3 hangtest relaytest prtest defaulttest metab stktest nov6test"
 run() { # 名称 命令...
   local name=$1; shift; local r; r=$("$@" 2>&1); local bad; bad=$(echo "$r" | grep -E 'FAIL|CRASH' | head -2)
   ITEMS=$((ITEMS+1)); echo "$name 通过=$(echo "$r" | grep -c '^PASS') $bad"; [ -n "$bad" ] && FAILS=$((FAILS+1))

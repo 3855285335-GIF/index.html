@@ -205,9 +205,52 @@
   @keyframes recw { 0%, 100% { height: 20%; } 50% { height: 100%; } }
   #record-overlay.cancel .rec-bars i { background: #fff; animation-play-state: paused; }
 
-  #emoji-panel { position: absolute; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); background: var(--surface); border-radius: 20px; padding: 10px; display: none; flex-wrap: wrap; gap: 4px; max-height: 190px; overflow-y: auto; box-shadow: 0 10px 40px rgba(20,10,60,.22); z-index: 5; }
+  #emoji-panel { position: absolute; left: 8px; right: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); background: var(--surface); border-radius: 20px; padding: 10px; display: none; flex-direction: column; gap: 8px; box-shadow: 0 10px 40px rgba(20,10,60,.22); z-index: 5; }
   body.kb #emoji-panel { bottom: 66px; }
   #emoji-panel.active { display: flex; animation: pop .18s ease; }
+  .ep-top input { width: 100%; padding: 8px 14px; border-radius: 16px; background: var(--surface2); border: 1.5px solid var(--line); font-size: 16px; }   /* 小于 16px 时 iPhone 一点输入框就会自动放大页面 */
+  .ep-tabs { display: flex; gap: 6px; }
+  .ep-tabs button { flex: 1; padding: 7px 4px; border-radius: 12px; background: none; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+  .ep-tabs button.on { background: var(--surface2); color: var(--ink); }
+  #emoji-panel.finding .ep-tabs { display: none; }
+  .ep-pane { display: none; flex-wrap: wrap; gap: 4px; max-height: 230px; overflow-y: auto; -webkit-overflow-scrolling: touch; align-content: flex-start; }
+  .ep-pane.on { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); justify-items: center; align-content: start; }
+  #ep-emoji.on { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); }
+  .ep-pane .ep-cat, .ep-pane .ep-empty { grid-column: 1 / -1; justify-self: stretch; }
+  .ep-cat { width: 100%; font-size: 12px; color: var(--muted); padding: 6px 4px 2px; }
+  .stk-e { font-size: 38px; width: 58px; height: 58px; display: flex; align-items: center; justify-content: center; border-radius: 12px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .stk-m, .stk-add { width: 70px; height: 70px; border-radius: 12px; background: var(--surface2); display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .stk-m img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .stk-add { font-size: 30px; color: var(--muted); border: 2px dashed var(--line); background: none; }
+  .stk-e:active, .stk-m:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .ep-empty { width: 100%; padding: 22px 8px; text-align: center; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+  .ep-empty small { font-size: 12px; opacity: .8; }
+  body.kb #emoji-panel { bottom: 66px; }
+  .ep-pane { max-height: min(230px, calc(var(--vvh, 800px) * .4)); }
+  #ep-emoji span { font-size: 28px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 12px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  #ep-emoji span:active { background: var(--surface2); }
+  .stk-it { width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; border-radius: 14px; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overflow: hidden; }
+  .stk-it:active, .stk-m:active { background: var(--surface2); }
+  .stk-it .emo { font-size: 42px; line-height: 1; }
+  .stk-it img { max-width: 64px; max-height: 64px; object-fit: contain; pointer-events: none; }
+  .stk-bad { font-size: 12px; color: var(--muted); padding: 6px 10px; display: inline-block; }
+  /* 文字贴纸（自己画的） */
+  .tstk { --c1: #a594ff; --c2: #6c5ce7; width: 112px; height: 112px; border-radius: 30px; background: linear-gradient(150deg, var(--c1), var(--c2)); color: #fff; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transform: rotate(var(--r, -4deg)); box-shadow: inset 0 -6px 0 rgba(0,0,0,.12), 0 0 0 3px #fff, 0 8px 18px rgba(30,20,70,.22); user-select: none; -webkit-user-select: none; }
+  .tstk i { font-style: normal; font-size: 42px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
+  .tstk b { font-size: 21px; font-weight: 900; line-height: 1.1; letter-spacing: .5px; padding: 0 6px; text-align: center; text-shadow: 0 2px 0 rgba(0,0,0,.2); }
+  .tstk.l4 b { font-size: 17px; }
+  .tstk.dk { color: #5b3800; } .tstk.dk b { text-shadow: 0 1px 0 rgba(255,255,255,.45); }
+  .tstk.sm { width: 60px; height: 60px; border-radius: 17px; gap: 1px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12), 0 0 0 2px #fff, 0 3px 8px rgba(30,20,70,.18); }
+  .tstk.sm i { font-size: 22px; } .tstk.sm b { font-size: 12.5px; padding: 0 3px; } .tstk.sm.l4 b { font-size: 10.5px; }
+  .bubble.sticker .tstk { margin: 6px; }
+  /* 联想表情：输入框上方的一排 */
+  #stk-suggest { position: absolute; right: 10px; bottom: calc(64px + env(safe-area-inset-bottom)); display: none; gap: 4px; padding: 6px; background: var(--surface); border-radius: 18px; box-shadow: 0 10px 30px rgba(20,10,60,.22); z-index: 6; max-width: calc(100% - 20px); }
+  #stk-suggest.active { display: flex; animation: pop .16s ease; }
+  #stk-suggest .stk-it { width: 54px; height: 54px; }
+  #stk-suggest .stk-it .emo { font-size: 34px; }
+  #stk-suggest .tstk.sm { width: 46px; height: 46px; border-radius: 14px; } #stk-suggest .tstk.sm i { font-size: 17px; } #stk-suggest .tstk.sm b { font-size: 10px; } #stk-suggest .tstk.sm.l4 b { font-size: 8.5px; }
+  #stk-suggest .stk-it img { max-width: 50px; max-height: 50px; }
+  body.kb #stk-suggest { bottom: 64px; }
   #emoji-panel span { font-size: 25px; cursor: pointer; padding: 5px; border-radius: 10px; }
   #emoji-panel span:active { background: var(--surface2); }
 
@@ -221,8 +264,6 @@
 
   .store-info { font-size: 13.5px; line-height: 1.55; color: var(--muted); margin: 0 2px 10px; }
   #store-box .btns button:disabled { opacity: .45; }
-  #btn-relaytest:disabled { opacity: .45; }
-  .relay-res { white-space: pre-wrap; font-size: 13px; line-height: 1.6; background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 0; }
   .imgfail { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; width: 160px; height: 110px; border-radius: 18px; background: var(--surface2); color: var(--muted); font-size: 14px; text-align: center; cursor: pointer; }
   .imgfail small { font-size: 11.5px; opacity: .8; padding: 0 10px; }
   .sheet-bd { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2700; display: none; }
@@ -269,6 +310,29 @@
   #lightbox button { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 64px; background: rgba(255,255,255,.14); color: #fff; font-size: 34px; padding: 0; border-radius: 14px; }
   #lb-prev { left: 8px; } #lb-next { right: 8px; }
   #lb-count { position: absolute; top: calc(16px + env(safe-area-inset-top)); left: 0; right: 0; text-align: center; color: #fff; font-size: 14px; opacity: .85; pointer-events: none; }
+  .bubble.sticker, .msg.mine .bubble.sticker { background: none !important; box-shadow: none !important; padding: 0; }
+  .bubble.sticker img { max-width: 140px; max-height: 140px; min-width: 40px; min-height: 40px; display: block; border-radius: 10px; }
+  .bubble.sticker .emo { font-size: 64px; line-height: 1.1; display: block; }
+  .bubble.video { padding: 0; overflow: hidden; background: #000 !important; position: relative; border-radius: 18px; }
+  .bubble.video video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
+  .bubble.video .vlen { position: absolute; right: 8px; top: 8px; font-size: 11px; color: #fff; background: rgba(0,0,0,.5); padding: 1px 6px; border-radius: 8px; pointer-events: none; }
+  .bubble a { color: inherit; text-decoration: underline; word-break: break-all; }
+  .bubble.video .vup { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; background: rgba(0,0,0,.55); padding: 5px 12px; border-radius: 12px; pointer-events: none; }
+  .vfail { color: #fff; padding: 22px 16px; font-size: 14px; line-height: 1.5; text-align: center; max-width: 230px; }
+  .vfail small { display: block; font-size: 11.5px; opacity: .75; margin-top: 4px; }
+  .bubble.file { display: flex; align-items: center; gap: 11px; min-width: 200px; max-width: 250px; padding: 11px 13px; cursor: pointer; white-space: normal; }
+  .bubble.file .fic { flex-shrink: 0; width: 42px; height: 50px; border-radius: 9px; background: rgba(255,255,255,.9); color: #6c5ce7; font-size: 11px; font-weight: 800; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; box-shadow: inset 0 0 0 1.5px rgba(108,92,231,.25); letter-spacing: .3px; }
+  .msg.theirs .bubble.file .fic { background: var(--surface2); }
+  .bubble.file .fm { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .bubble.file .fm b { font-size: 14.5px; font-weight: 600; line-height: 1.35; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bubble.file .fm small { font-size: 12px; opacity: .72; }
+  .conv-item.pinned { background: var(--surface2); }
+  .mute-ic { width: 14px; height: 14px; margin-left: 5px; vertical-align: -2px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .badge.mute { background: #b9b4cc; box-shadow: none; }
+  #as-title { white-space: pre-line; }
+  #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #msg-menu { max-height: 86vh; overflow-y: auto; }
+  #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
   #lightbox { position: fixed; inset: 0; background: rgba(8,5,20,.94); z-index: 2600; display: none; align-items: center; justify-content: center; }
   #lightbox.active { display: flex; }
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -367,7 +431,7 @@ __LOGO_SYMBOL__
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.7</div>
+      <div class="build">build 3.8</div>
     </div>
   </div>
 
@@ -400,8 +464,6 @@ __LOGO_SYMBOL__
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
-          <div class="btns" style="margin:10px 0 12px"><button id="btn-relaytest" type="button">🛰 中转测试</button></div>
-          <div id="relay-box" style="display:none;margin-bottom:12px"><div class="store-info">分别测试每个 STUN 和每家中转服务器能不能连上（大约 8 秒）。请先关掉 VPN 再测，结果才代表国内网络。</div><pre id="relay-res" class="relay-res"></pre></div>
           <div class="section-title">最近错误</div>
           <pre id="errlog"></pre>
           <div class="btns"><button id="btn-copylog" type="button">复制诊断信息</button><button id="btn-logout" class="btn-danger" type="button">退出登录</button></div>
@@ -429,8 +491,16 @@ __LOGO_SYMBOL__
     <div id="chat-search"><div class="cs-bar"><input id="cs-input" type="text" placeholder="搜索聊天记录" autocomplete="off" enterkeyhint="search"><button id="cs-close" type="button">取消</button></div><div id="cs-list"></div></div>
     <div id="chat-messages"></div>
     <div id="emoji-panel">
-      <span>😀</span><span>😂</span><span>🥹</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span>
+      <div class="ep-top"><input id="ep-search" type="search" placeholder="搜索表情（比如：笑、猫、加油）" autocomplete="off" enterkeyhint="search"></div>
+      <div class="ep-tabs"><button type="button" data-ep="emoji" class="on">😀 表情</button><button type="button" data-ep="lib">🎭 表情库</button><button type="button" data-ep="mine">⭐ 我的</button></div>
+      <div id="ep-emoji" class="ep-pane on"><span>😀</span><span>😂</span><span>🥹</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span></div>
+      <div id="ep-lib" class="ep-pane"></div>
+      <div id="ep-mine" class="ep-pane"></div>
+      <div id="ep-find" class="ep-pane"></div>
     </div>
+    <div id="stk-suggest"></div>
+    <input id="stk-input" type="file" accept="image/*" multiple hidden>
+    <input id="doc-input" type="file" multiple hidden>
     <div id="reply-bar"><div id="reply-text"></div><button id="reply-x" type="button" aria-label="取消回复">×</button></div>
     <div id="chat-input-bar">
       <button id="btn-emoji" type="button" class="icon-btn" title="表情"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2c.9 1.3 2.1 2 3.5 2s2.6-.7 3.5-2"/><path d="M9 9.8h.01M15 9.8h.01" stroke-width="2.6"/></svg></button>
@@ -442,7 +512,7 @@ __LOGO_SYMBOL__
       </div>
       <button id="btn-send" type="button" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5.5M6 11.5l6-6 6 6"/></svg></button>
     </div>
-    <input id="file-input" type="file" accept="image/*" multiple hidden>
+    <input id="file-input" type="file" accept="image/*,video/*" multiple hidden>
   </div>
 </div>
 
@@ -455,11 +525,14 @@ __LOGO_SYMBOL__
   <div class="menu-title" id="msg-menu-title">消息</div>
   <button id="msg-menu-reply" type="button" class="menu-item plain">回复</button>
   <button id="msg-menu-copy" type="button" class="menu-item plain">复制</button>
+  <button id="msg-menu-fwd" type="button" class="menu-item plain">转发</button>
+  <button id="msg-menu-stk" type="button" class="menu-item plain">添加到表情</button>
+  <button id="msg-menu-save" type="button" class="menu-item plain">保存到手机</button>
   <button id="msg-menu-recall" type="button" class="menu-item">撤回</button>
   <button id="msg-menu-del" type="button" class="menu-item">删除（仅自己）</button>
 </div>
 <div id="record-overlay"><div class="rec-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div id="record-text">手指上滑，取消发送</div></div>
-<div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><div id="lb-count"></div></div>
+<div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><button id="lb-save" type="button">保存</button><div id="lb-count"></div></div>
 
 <div id="call-ui">
   <video id="remote-video" autoplay playsinline></video>

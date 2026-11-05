@@ -81,10 +81,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // ---- 在已读状态下撤回：不应再显示已读 ----
   ok((await A.locator('.msg.mine .bubble.recalled').first().evaluate(e => e.closest('.msg').querySelector('.msg-time').textContent)).indexOf('已读') < 0, '已撤回的消息不显示已读');
   // ---- 图片发送失败后重发 + 不同大小限制 ----
-  await A.setInputFiles('#file-input', [{ name: 'big.png', mimeType: 'image/png', buffer: Buffer.alloc(21 * 1024 * 1024) }]); await sleep(400);
-  ok(await A.locator('.bubble.img').count() === 0, '超过 20MB 的图片被拒绝且有提示');
-  await A.setInputFiles('#file-input', [{ name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('x') }]); await sleep(300);
-  ok(await A.locator('.bubble.img').count() === 0, '非图片文件不会被发送');
+  const tmpD = fs.mkdtempSync(require('os').tmpdir() + '/c2-'), bigP = tmpD + '/big.png'; fs.writeFileSync(bigP, Buffer.alloc(51 * 1024 * 1024));
+  await A.setInputFiles('#file-input', bigP); await sleep(800); fs.rmSync(tmpD, { recursive: true, force: true });
+  ok(await A.locator('.bubble.img').count() === 0, '超过 50MB 的图片被拒绝且有提示（Supabase 免费版单个文件上限）');
+  await A.setInputFiles('#file-input', [{ name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('x') }]); await sleep(900);
+  ok(await A.locator('.bubble.img').count() === 0 && await A.locator('.msg.mine .bubble.file').count() === 1, '不是图片/视频的文件按“文件”发送，不会当成图片');
   // ---- 10 张只发 9 张 ----
   const tiny = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await A.setInputFiles('#file-input', Array.from({ length: 10 }, (_, i) => ({ name: i + '.png', mimeType: 'image/png', buffer: tiny })));
