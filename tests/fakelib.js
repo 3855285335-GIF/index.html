@@ -93,12 +93,21 @@
       auth: {
         onAuthStateChange(cb) { subs.push(cb); setTimeout(() => cb('INITIAL_SESSION', null), 5); return { data: { subscription: {} } }; },
         async signInWithPassword({ email, password }) {
+          if (window.__netFail) return { data: { user: null, session: null }, error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch', status: 0 } };
           if (window.__realPw && password !== window.__realPw) return { data: null, error: { message: 'Invalid login credentials' } };
           const acc = email.split('@')[0], d = T('profiles');
           if (!d.profiles.some(p => p.account_id === acc)) return { error: { message: 'bad' } };
           me = acc; window.__acc = acc;
           setTimeout(() => subs.forEach(cb => cb('SIGNED_IN', { access_token: 'tok-' + acc, user: { id: 'uid-' + acc } })), 5);
           return { data: {}, error: null };
+        },
+        async signUp({ email, password, options }) {
+          if (window.__netFail) return { data: { user: null, session: null }, error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch', status: 0 } };
+          const acc = email.split('@')[0], d = T('profiles');
+          d.profiles.push({ id: 'uid-' + acc, account_id: acc, nickname: (options && options.data && options.data.nickname) || acc }); save(d);
+          me = acc; window.__acc = acc; window.__signedUp = acc;
+          setTimeout(() => subs.forEach(cb => cb('SIGNED_IN', { access_token: 'tok-' + acc, user: { id: 'uid-' + acc } })), 5);
+          return { data: { user: { id: 'uid-' + acc }, session: { access_token: 'tok-' + acc } }, error: null };
         },
         async getUser() { return { data: { user: { id: 'uid-' + me, email: me + '@chatter.local' } }, error: null }; },
         async updateUser({ password }) { if (window.__failUpdate) return { data: null, error: { message: 'weak' } }; (window.__pw = window.__pw || []).push(password); return { data: {}, error: null }; },
@@ -113,7 +122,9 @@
       },
       async _rpc(name, args) {
         await new Promise(r => setTimeout(r, 20));
+        if (window.__netFail) return { data: null, error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' } };
         const d = load();
+        if (name === 'account_exists') { if (window.__noAccFn) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.account_exists(p_acc) in the schema cache' } }; return { data: d.profiles.some(p => p.account_id === args.p_acc), error: null }; }
         if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: 6, error: null }; }
         if (name === 'bootstrap') {
           const prof = a => { const p = d.profiles.find(x => x.account_id === a); return p && { account_id: p.account_id, nickname: p.nickname, avatar_url: null }; };

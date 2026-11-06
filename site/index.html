@@ -532,7 +532,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.8.1</div>
+      <div class="build">build 3.8.2</div>
     </div>
   </div>
 
@@ -2784,6 +2784,9 @@ function bindViewport() {
   };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); apply();
 }
+/* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
+const isNetErr = e => { if (!e) return false; if (e.status === 0 || e.name === 'AuthRetryableFetchError') return true; return /Failed to fetch|Load failed|NetworkError|fetch failed|Network request failed/i.test(String(e.message || e)); };
+const NET_MSG = '❌ 连不上服务器：这台手机现在访问不到 Supabase（网络拦截或不稳定），不是账号密码的问题。请再试一次，或换个网络（Wi-Fi / 流量）、换个浏览器';
 function bindUI() {
   /* 登录 / 注册 */
   $('tab-login').onclick = () => { $('tab-login').classList.add('active'); $('tab-register').classList.remove('active'); $('login-form').style.display = ''; $('register-form').style.display = 'none'; msgAuth(''); };
@@ -2796,9 +2799,10 @@ function bindUI() {
     try {
       await ready;
       let { error } = await sb.auth.signInWithPassword({ email: acc + '@chatter.local', password: pass });
-      if (error) { const r2 = await sb.auth.signInWithPassword({ email: acc + '@gmail.com', password: pass }); error = r2.error; }
+      if (error && isNetErr(error)) { msgAuth(NET_MSG); return; }
+      if (error) { const r2 = await sb.auth.signInWithPassword({ email: acc + '@gmail.com', password: pass }); error = r2.error; if (error && isNetErr(error)) { msgAuth(NET_MSG); return; } }
       msgAuth(error ? '❌ 账号或密码错误' : '');
-    } catch (err) { msgAuth('❌ 登录失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
+    } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 登录失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
   });
   $('register-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -2810,13 +2814,13 @@ function bindUI() {
     try {
       await ready;
       const ex = await sb.rpc('account_exists', { p_acc: acc });
-      if (ex.error) { msgAuth('❌ 检查账号失败：' + ex.error.message + '（请先执行 setup.sql）'); return; }
+      if (ex.error) { msgAuth(isNetErr(ex.error) ? NET_MSG : '❌ 检查账号失败：' + ex.error.message + (isMissingFn(ex.error) ? '（后端还没建好：请在 Supabase 运行 1-setup.sql）' : '')); return; }
       if (ex.data) { msgAuth('❌ 账号已存在'); return; }
       const { data: up, error } = await sb.auth.signUp({ email: acc + '@chatter.local', password: pass, options: { data: { account_id: acc, nickname: name } } });
-      if (error) { msgAuth('❌ ' + error.message); return; }
+      if (error) { msgAuth(isNetErr(error) ? NET_MSG : '❌ ' + error.message); return; }
       if (!up || !up.user) { msgAuth('❌ 注册失败'); return; }
       msgAuth(up.session ? '' : '⚠️ 请到邮箱确认后再登录（或在 Supabase 关闭邮箱确认）');
-    } catch (err) { msgAuth('❌ 注册失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
+    } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 注册失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
   });
 
   /* 顶部导航 */
