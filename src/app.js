@@ -2334,6 +2334,7 @@ function bindUI() {
     if (!S.rt.db || !S.rt.user) startRealtime();
     if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
+    if (S.v6 !== true) checkSchema();   // 刚在 Supabase 运行完 setup-v6.sql 回来：直接查，不等同步（同步正忙时会跳过）
   };
   document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
   window.addEventListener('pagehide', () => { if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });

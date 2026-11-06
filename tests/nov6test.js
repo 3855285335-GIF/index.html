@@ -84,8 +84,10 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
   // 运行 SQL 之后：不用刷新
   await A.evaluate(() => { window.__noV6 = false; }); await sleep(5200);
-  await A.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(1200);
-  ok(/✅ 表情包 \/ 视频 \/ 文件/.test(await A.textContent('#diag')), '运行 setup-v6.sql 后回到页面：自动检测到，诊断变成 ✅（不用刷新）');
+  await A.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const t0 = Date.now(); await A.waitForFunction(() => /✅ 表情包 \/ 视频 \/ 文件/.test(document.getElementById('diag').textContent), null, { timeout: 8000 }).catch(() => {});
+  const waited = Date.now() - t0;
+  ok(/✅ 表情包 \/ 视频 \/ 文件/.test(await A.textContent('#diag')) && waited < 4000, '运行 setup-v6.sql 后回到页面：自动检测到，诊断变成 ✅（不用刷新，用了 ' + (waited / 1000).toFixed(1) + ' 秒）');
   await A.click('.app-nav button[data-tab=convs]'); await A.click('.conv-item'); await sleep(400);
   await A.setInputFiles('#file-input', [{ name: 'v.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(1000, 1) }]); await sleep(1200);
   ok(await B.locator('.msg.theirs .bubble.video').count() === 1, '然后就能发视频了');
