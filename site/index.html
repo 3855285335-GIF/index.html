@@ -318,6 +318,12 @@
   .bubble.video video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
   .bubble.video .vlen { position: absolute; right: 8px; top: 8px; font-size: 11px; color: #fff; background: rgba(0,0,0,.5); padding: 1px 6px; border-radius: 8px; pointer-events: none; }
   .bubble a { color: inherit; text-decoration: underline; word-break: break-all; }
+  .bubble.video { cursor: pointer; }
+  .bubble.video .vposter { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; object-fit: cover; }
+  .bubble.video > video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
+  .bubble.video .vplay { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.85); pointer-events: none; }
+  .bubble.video .vplay::after { content: ""; position: absolute; left: 19px; top: 14px; border-style: solid; border-width: 9px 0 9px 15px; border-color: transparent transparent transparent #fff; }
+  .bubble.video.playing .vlen { display: none; }
   .bubble.video .vup { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; background: rgba(0,0,0,.55); padding: 5px 12px; border-radius: 12px; pointer-events: none; }
   .vfail { color: #fff; padding: 22px 16px; font-size: 14px; line-height: 1.5; text-align: center; max-width: 230px; }
   .vfail small { display: block; font-size: 11.5px; opacity: .75; margin-top: 4px; }
@@ -532,7 +538,7 @@
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.8.2</div>
+      <div class="build">build 3.8.3</div>
     </div>
   </div>
 
@@ -636,7 +642,7 @@
 <div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><button id="lb-save" type="button">保存</button><div id="lb-count"></div></div>
 
 <div id="call-ui">
-  <video id="remote-video" autoplay playsinline></video>
+  <video id="remote-video" autoplay playsinline muted></video>
   <video id="local-video" autoplay playsinline muted></video>
   <audio id="remote-audio" autoplay playsinline></audio>
   <div class="call-info"><div id="call-avatar" class="call-avatar"></div><div id="call-name"></div><div id="call-status"></div></div>
@@ -751,7 +757,14 @@ function clrOf(conv) { if (clrUid !== S.uid) { clr = LS.get('ch2clr:' + (S.uid |
 function setClr(conv, t) { clrOf(conv); clr[conv] = t; LS.set('ch2clr:' + (S.uid || ''), clr); }
 const isHidden = m => hidden.has(m.id) || (clrOf(m.conv) > 0 && Date.parse(m.created_at) <= clrOf(m.conv));
 const convGone = c => { const t = clrOf(c.convKey); return t > 0 && (Date.parse(c.last_ts || 0) || 0) <= t; };
-const stampAfterClr = conv => new Date(Math.max(now(), clrOf(conv) + 1)).toISOString();
+/* 服务器时间 − 本机时间（手机时间不准时用它校正）：本机临时给消息打的时间和服务器时间才能直接比较，消息顺序才对 */
+let skewS = [], skewMs = LS.get('ch2skew', 0) || 0;
+function addSkew(ms) {
+  if (!isFinite(ms) || Math.abs(ms) > 7 * 86400e3) return;
+  skewS.push(ms); if (skewS.length > 7) skewS.shift();
+  const a = skewS.slice().sort((x, y) => x - y); skewMs = a[a.length >> 1]; LS.set('ch2skew', Math.round(skewMs));
+}
+const stampAfterClr = conv => new Date(Math.max(now() + skewMs, clrOf(conv) + 1)).toISOString();
 function loadHidden() { hidden = new Set(LS.get('ch2del:' + (S.uid || ''), []) || []); }
 function saveHidden() { const a = Array.from(hidden).slice(-3000); LS.set('ch2del:' + (S.uid || ''), a); }
 const peerReadOf = conv => (S.peerRead && S.peerRead[conv]) || 0;
@@ -808,7 +821,7 @@ function micError(e) {
    发送：轻快上扬一声；收到：两音叮咚（正在看的会话更轻）；好友请求：三音琶音；
    来电：循环铃声；呼叫中：等待音；接通/挂断/取消各有一声。iPhone 静音拨片打开时没有声音。 */
 const SFX = (function () {
-  let ctx = null, master = null, on = LS.get('ch2sfx', true) !== false, ringT = 0, backT = 0;
+  let ctx = null, master = null, on = LS.get('ch2sfx', true) !== false, ringT = 0, backT = 0, held = false, holdT = 0;
   function ensure() {
     try {
       if (!ctx) {
@@ -816,7 +829,7 @@ const SFX = (function () {
         ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.6; master.connect(ctx.destination);
         const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0);  // iOS：用一个静音片段解锁
       }
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if (ctx.state === 'suspended' && !held) ctx.resume().catch(() => {});
       return ctx;
     } catch (e) { return null; }
   }
@@ -829,12 +842,12 @@ const SFX = (function () {
     osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + d + 0.04);
   }
   function play(fn) {
-    if (!on) return;
+    if (!on || held) return;
     const c = ensure(); if (!c) return;
     if (c.state === 'running') { try { fn(c.currentTime + 0.01); } catch (e) {} }
     else if (c.resume) c.resume().then(() => { if (c.state === 'running') { try { fn(c.currentTime + 0.01); } catch (e) {} } }).catch(() => {});
   }
-  const unlock = () => { if (!ctx || ctx.state !== 'running') ensure(); };
+  const unlock = () => { if (!held && (!ctx || ctx.state !== 'running')) ensure(); };
   ['touchstart', 'touchend', 'mousedown', 'keydown', 'click'].forEach(ev => window.addEventListener(ev, unlock, { passive: true }));
   const ringOnce = () => play(t => { [659, 784, 988, 784].forEach((f, i) => note(f, t + i * 0.17, 0.2, { type: 'triangle', vol: 0.2 })); [659, 784, 988, 1319].forEach((f, i) => note(f, t + 0.9 + i * 0.17, 0.22, { type: 'triangle', vol: 0.2 })); });
   const backOnce = () => play(t => note(450, t, 1.0, { vol: 0.1, att: 0.06 }));
@@ -851,7 +864,14 @@ const SFX = (function () {
     ringStop() { clearInterval(ringT); ringT = 0; },
     backStart() { this.backStop(); if (!on) return; backOnce(); backT = setInterval(backOnce, 4000); },
     backStop() { clearInterval(backT); backT = 0; },
-    stopAll() { this.ringStop(); this.backStop(); }
+    stopAll() { this.ringStop(); this.backStop(); },
+    /* 通话接通后把提示音的音频引擎暂停，整个声音通道只留给通话（iPhone 上两者同时开着可能让通话没声音）；挂断时恢复 */
+    hold(v) {
+      clearTimeout(holdT); held = !!v;
+      if (held) holdT = setTimeout(() => { if (held && ctx && ctx.state === 'running') ctx.suspend().catch(() => {}); }, 900);
+      else if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    },
+    isHeld: () => held
   };
 })();
 
@@ -960,6 +980,23 @@ function renderMe() {
   if ($('me-avatar')) $('me-avatar').innerHTML = S.me ? avatarHTML(S.me.nickname, S.me.avatar_url, false, S.me.account_id) : '';
 }
 function renderAll() { renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
+/* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
+function convPreview(c) {
+  const t = parseQ(c.last_body).text; if (t) return t;
+  if (!c.last_ts) return '开始聊天吧';
+  let list = c.convKey === S.conv ? S.msgs : (LS.get(mk(S.uid, c.convKey), []) || []);
+  for (let i = list.length - 1; i >= 0; i--) { const m = list[i]; if (m && !isHidden(m)) { const p = previewOf(m); if (p) return p; } }
+  fixPreview(c.convKey);
+  return '[消息]';
+}
+const pvAsked = new Set();
+function fixPreview(key) {   // 本机也没有记录：去取这个会话最后一条消息（每个会话每次打开 App 最多取一次）
+  if (!sb || !S.me || pvAsked.has(key)) return; pvAsked.add(key);
+  sb.from('messages').select('type,body,created_at').eq('conv_key', key).order('created_at', { ascending: false }).limit(1).then(r => {
+    const m = r && !r.error && r.data && r.data[0], c = convOf(key);
+    if (m && c && !parseQ(c.last_body).text) { c.last_body = previewOf(m); sched('list'); }
+  }, () => {});
+}
 function renderList() {
   const el = $('conv-list');
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
@@ -968,7 +1005,7 @@ function renderList() {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, avatarOf(c.peer_acc), isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(parseQ(c.last_body).text || '开始聊天吧')) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(convPreview(c))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
 function renderContacts() {
@@ -1059,9 +1096,9 @@ function markReadSoon(key) {
 }
 function upsertConvRow(r) {
   const key = r.conv_key; if (!key) return;
-  const n = { convKey: key, peer_acc: r.peer_acc || peerOf(key, ME()), last_body: r.last_body, last_ts: r.last_ts, last_read_ts: r.last_read_ts, unread: r.unread || 0 };
-  if (key === S.conv) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
   const c = convOf(key);
+  const n = { convKey: key, peer_acc: r.peer_acc || peerOf(key, ME()), last_body: r.last_body || (c && c.last_body) || r.last_body, last_ts: r.last_ts, last_read_ts: r.last_read_ts, unread: r.unread || 0 };
+  if (key === S.conv) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
   if (c) Object.assign(c, n); else S.convs.push(n);
   S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
   if (!S.profiles[n.peer_acc]) fetchProfile(n.peer_acc);
@@ -1071,7 +1108,8 @@ function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
   (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
-  S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
+  const oldConvs = S.convs || [];
+  S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
   S.requests = b.requests || [];
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
 }
@@ -1104,7 +1142,11 @@ function msgHTML(m) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
     case 'image': body = '<div class="bubble img"><img src="' + esc(disp(m.body)) + '" alt="" decoding="async"></div>'; break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
-    case 'video': body = '<div class="bubble video"><video src="' + esc(disp(m.body)) + '#t=0.1" preload="metadata" playsinline webkit-playsinline controls></video>' + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + (m._st === 'sending' ? '<span class="vup">上传中…</span>' : '') + '</div>'; break;
+    case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
+      const u = disp(m.body), local = /^blob:/.test(m.body);
+      const cover = m._pu ? '<img class="vposter" src="' + esc(m._pu) + '" alt="">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
+      body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">上传中…</span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
+    }
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　上传中…' : m._st ? '' : '　点开查看') + '</small></span></div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
@@ -1137,16 +1179,26 @@ function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
   Object.assign(S.msgs[i], p); chatReplace(S.msgs[i]); return S.msgs[i];
 }
+/* S.msgs[i] 的时间变了或是新来的：如果位置不对，只把这一条挪到正确位置（以前会整页重画，聊天里图片视频多时很卡） */
+function placeMsg(i) {
+  const m = S.msgs[i]; if (!m) return; const t = ts(m); let j = i;
+  while (j > 0 && ts(S.msgs[j - 1]) > t) j--;
+  if (j === i) while (j < S.msgs.length - 1 && ts(S.msgs[j + 1]) < t) j++;
+  if (j === i) return;
+  S.msgs.splice(i, 1); S.msgs.splice(j, 0, m);
+  const el = msgElOf(m.id); if (!el) return;
+  let next = null; for (let k = j + 1; k < S.msgs.length && !next; k++) next = msgElOf(S.msgs[k].id);
+  const box = $('chat-messages'); if (next) box.insertBefore(el, next); else box.appendChild(el);
+}
 function upsertMsg(m) {
   const i = S.msgs.findIndex(x => x.id === m.id);
   if (i > -1) {
     const o = S.msgs[i];
-    if (o.type === m.type && o.body === m.body && o.dur === m.dur && !o._st) { o.created_at = m.created_at; return; }
-    S.msgs[i] = Object.assign({}, m); S.out.delete(m.id); chatReplace(S.msgs[i]); saveMsgsSoon(); return;
+    if (o._rx && m.created_at && !m._rx) { addSkew(Date.parse(m.created_at) - o._rx); delete o._rx; }
+    if (o.type === m.type && o.body === m.body && o.dur === m.dur && !o._st) { if (o.created_at !== m.created_at) { o.created_at = m.created_at; placeMsg(i); } return; }
+    S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; S.out.delete(m.id); chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
   }
-  const last = S.msgs[S.msgs.length - 1];
-  S.msgs.push(m);
-  if (last && ts(m) < ts(last)) { S.msgs.sort((a, b) => ts(a) - ts(b)); chatRender(S.stick); } else chatAppend(m);
+  S.msgs.push(m); chatAppend(m); placeMsg(S.msgs.length - 1);
   saveMsgsSoon();
 }
 
@@ -1179,7 +1231,7 @@ function onFastMsg(p) {
     else if (p.type === 'sticker') { if (!validStk(body)) return; }
     else if (p.type === 'file') { const f = parseFile(body); if (!f || !isStoreUrl(f.u) || body.length > 1000) return; }
     else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音/视频只接受本项目存储的地址
-    onIncoming({ id: p.id, conv: p.conv, from_acc: p.from, to_acc: me, type: p.type, body, dur: p.dur | 0 || null, created_at: stampAfterClr(p.conv) });
+    onIncoming({ id: p.id, conv: p.conv, from_acc: p.from, to_acc: me, type: p.type, body, dur: p.dur | 0 || null, created_at: stampAfterClr(p.conv), _rx: now() });
   } catch (e) { logErr('fast', e); }
 }
 function onFastRecall(p) {
@@ -1210,8 +1262,8 @@ function addLocal(m) {
   touchConv(m.conv, previewOf(m), m.created_at, false);
   deliver(m); SFX.send();
 }
-async function upload(blob, ext, ct, pre) {
-  const path = ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+async function upload(blob, ext, ct, pre, fixed) {
+  const path = fixed || ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
   const { error } = await sb.storage.from('chat-media').upload(path, blob, { contentType: ct, cacheControl: '31536000' });
   if (error) throw error;
   return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
@@ -1222,13 +1274,23 @@ async function deliver(m, silent) {
     if (m._blob) {
       const old = m.body, url = await upload(m._blob, m._ext, m._ct);
       const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : url;
+      if (m._poster) {   // 视频封面：和视频同名加 .jpg，传不上也不影响视频本身
+        const vp = /\/chat-media\/([^?#]+)/.exec(url);
+        if (vp) { try { await upload(m._poster, 'jpg', 'image/jpeg', '', decodeURIComponent(vp[1]) + '.jpg'); } catch (x) { logErr('poster', x); } }
+        m._poster = null;
+      }
       m.body = nb; m._blob = null; patchMsg(id, { body: nb });
       try { URL.revokeObjectURL(m._fm ? (parseFile(old) || {}).u : old); } catch (e) {}
     }
-    if (S.token && m.type !== 'call') bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
+    // 新类型（表情/视频/文件）在确认后端支持之前，先写数据库再通知对方，免得对方看到一条其实没发成的消息
+    const fastFirst = S.token && m.type !== 'call' && (S.v6 === true || !/^(sticker|video|file)$/.test(m.type));
+    const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
+    if (fastFirst) fast();
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur };
-    const { data, error } = await sb.from('messages').insert(row).select('created_at').single();
+    const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
+    if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
+    if (!fastFirst && S.token && m.type !== 'call') fast();
     S.out.delete(id); delete m._blob;
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
@@ -1673,12 +1735,17 @@ function showCallUI(call, status) {
 }
 function hideCallUI() {
   $('call-ui').classList.remove('active', 'connected', 'video', 'swap'); $('call-stats').classList.remove('show');
-  $('remote-video').srcObject = null; $('local-video').srcObject = null; $('remote-audio').srcObject = null;
+  $('remote-video').srcObject = null; $('local-video').srcObject = null; $('remote-audio').srcObject = null; $('remote-audio')._key = '';
 }
 function playEl(el) { try { const p = el.play(); if (p && p.catch) p.catch(() => { $('call-tip').style.display = 'block'; }); } catch (e) {} }
+/* 声音只由 remote-audio 播放（它只装对方的声音轨道，轨道一变就换一个新的流，iPhone 才会跟着更新）；
+   画面元素 remote-video 一直静音，避免两个元素同时放同一路声音（iPhone 上会出问题） */
 function attachRemote(call) {
-  const a = $('remote-audio'); if (a.srcObject !== call.remote) a.srcObject = call.remote; playEl(a);
-  if (call.video) { const v = $('remote-video'); if (v.srcObject !== call.remote) v.srcObject = call.remote; playEl(v); }
+  if (!call.remote) return;
+  const a = $('remote-audio'), at = call.remote.getAudioTracks(), key = at.map(t => t.id).join(',');
+  if (at.length && a._key !== key) { a.srcObject = new MediaStream(at); a._key = key; }
+  a.muted = false; a.volume = 1; if (at.length) playEl(a);
+  if (call.video) { const v = $('remote-video'); v.muted = true; if (v.srcObject !== call.remote) v.srcObject = call.remote; playEl(v); }
 }
 async function getMedia(call) {
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -1702,12 +1769,14 @@ const relaySave = () => LS.get('ch2relaysave2', false) === true;   // 默认关�
 const saving = call => !!(call && call.relay && relaySave());
 function aSender(call) { return call.pc && call.pc.getSenders().find(x => x.track && x.track.kind === 'audio'); }
 async function applyAudioParams(call) {
+  const want = saving(call) ? 24000 : 0;
+  if ((call._aBr || 0) === want) return;            // 没有变化就不碰声音发送设置（默认一次都不会改）
   const sd = aSender(call); if (!sd || !sd.getParameters || !sd.setParameters) return;
   try {
     const pr = sd.getParameters();
-    if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
-    if (saving(call)) pr.encodings[0].maxBitrate = 24000; else delete pr.encodings[0].maxBitrate;
-    await sd.setParameters(pr);
+    if (!pr.encodings || !pr.encodings.length) return;
+    if (want) pr.encodings[0].maxBitrate = want; else delete pr.encodings[0].maxBitrate;
+    await sd.setParameters(pr); call._aBr = want;
   } catch (e) { logErr('setParameters-a', e); }
 }
 async function applyCallParams(call) { await applyAudioParams(call); await applyVideoParams(call); }
@@ -1828,8 +1897,10 @@ function makePC(call) {
   call.pc = pc;
   pc.onicecandidate = e => { if (e.candidate) queueCand(call, e.candidate.toJSON ? e.candidate.toJSON() : e.candidate); else flushCand(call); };
   pc.ontrack = e => {
-    if (!call.remote) call.remote = new MediaStream();
-    if (e.track && !call.remote.getTracks().some(t => t.id === e.track.id)) call.remote.addTrack(e.track);
+    const s = e.streams && e.streams[0];
+    if (s) call.remote = s;
+    else { if (!call.remote) call.remote = new MediaStream(); if (e.track && !call.remote.getTracks().some(t => t.id === e.track.id)) call.remote.addTrack(e.track); }
+    if (e.track) e.track.onunmute = () => { if (S.call === call && !call.ended) attachRemote(call); };   // 对方的声音真正开始到达时再播一次
     attachRemote(call);
   };
   pc.onconnectionstatechange = () => onPcState(call);
@@ -1856,7 +1927,7 @@ function onPcState(call) {
     clearTimeout(call.dcT);
     if (!call.connected) {
       call.connected = true; call.startedAt = now(); clearTimers(call);
-      SFX.backStop(); SFX.connect(); $('call-ui').classList.add('connected');
+      SFX.backStop(); SFX.connect(); SFX.hold(true); $('call-ui').classList.add('connected'); attachRemote(call);
       const tick = () => setCallStatus(fmtDur(Math.floor((now() - call.startedAt) / 1000)));
       tick(); call.clock = setInterval(tick, 500);
       applyCallParams(call); clearInterval(call.statsT); call.statsT = setInterval(() => pollStats(call), 2000); setTimeout(() => pollStats(call), 600);
@@ -1967,7 +2038,7 @@ function sendCallLog(call, dur) {
 function endCall(reason, notify) {
   const call = S.call;
   if (!call) { hideCallUI(); return; }
-  S.call = null; call.ended = true; wakeOff(); SFX.backStop(); SFX.ringStop(); SFX.hangup();
+  S.call = null; call.ended = true; wakeOff(); SFX.backStop(); SFX.ringStop(); SFX.hold(false); SFX.hangup();
   clearTimers(call); clearTimeout(call.dcT); clearTimeout(call.candT); clearInterval(call.clock); clearInterval(call.statsT);
   const dur = call.connected && call.startedAt ? Math.floor((now() - call.startedAt) / 1000) : 0;
   if (notify) sig(call.peer, 'end', { id: call.id });
@@ -2146,7 +2217,7 @@ function teardown() {
   S.rtGen++; S.presGen++;
   [S.chDb, S.chUser, S.presCh].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
   S.chDb = S.chUser = S.presCh = null; S.rt.db = S.rt.user = false;
-  wakeOff(); SFX.stopAll();
+  wakeOff(); SFX.stopAll(); SFX.hold(false);
   if (S.call) { const c = S.call; S.call = null; c.ended = true; clearTimers(c); clearInterval(c.clock); clearInterval(c.statsT); try { c.pc && c.pc.close(); } catch (e) {} stopStream(c.local); stopStream(c.remote); }
   S.incoming = null; hideCallUI(); $('incoming-ui').classList.remove('active');
   recAbort(); stopAudio();
@@ -2618,20 +2689,42 @@ function sendSuggest(b) {
 }
 
 /* ---- 发视频 / 发文件（原文件上传，不压缩） ---- */
-function videoDur(file) {
+/* 读视频时长，并截第 0.1 秒的画面做封面（最长边 720 像素的 JPEG）。只用手机里的文件，不联网；视频本身不动 */
+function videoProbe(file) {
   return new Promise(res => {
-    let done = false, u = '';
+    let done = false, u = '', dur = null;
     const v = document.createElement('video');
-    const fin = d => { if (done) return; done = true; clearTimeout(t); try { v.removeAttribute('src'); v.load(); } catch (e) {} try { URL.revokeObjectURL(u); } catch (e) {} res(d > 0 && isFinite(d) ? Math.min(86400, Math.round(d)) : null); };
-    const t = setTimeout(() => fin(0), 5000);
-    v.preload = 'metadata'; v.muted = true; v.onloadedmetadata = () => fin(v.duration); v.onerror = () => fin(0);
-    try { u = URL.createObjectURL(file); v.src = u; } catch (e) { fin(0); }
+    const fin = poster => {
+      if (done) return; done = true; clearTimeout(t);
+      try { v.removeAttribute('src'); v.load(); } catch (e) {} try { URL.revokeObjectURL(u); } catch (e) {}
+      res({ dur, poster: poster || null });
+    };
+    const t = setTimeout(() => fin(null), 6000);
+    const grab = () => {
+      try {
+        const w = v.videoWidth, h = v.videoHeight; if (!w || !h) { fin(null); return; }
+        const k = Math.min(1, 720 / Math.max(w, h)), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        const g = c.getContext('2d'); g.drawImage(v, 0, 0, c.width, c.height);
+        const px = g.getImageData(0, 0, c.width, c.height).data; let lit = 0;   // 截到的是全黑（有些手机没解出画面）就不用
+        for (let i = 0; i < px.length; i += 4 * 97) if (px[i] + px[i + 1] + px[i + 2] > 24) { lit = 1; break; }
+        if (!lit || !c.toBlob) { fin(null); return; }
+        c.toBlob(b => fin(b && b.size > 0 ? b : null), 'image/jpeg', 0.82);
+      } catch (e) { fin(null); }
+    };
+    v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.preload = 'auto';
+    v.onloadedmetadata = () => { const d = v.duration; dur = d > 0 && isFinite(d) ? Math.min(86400, Math.round(d)) : null; try { v.currentTime = Math.min(0.1, (d || 1) / 2); } catch (e) { fin(null); } };
+    v.onseeked = () => { v.onseeked = null; grab(); };
+    v.onerror = () => fin(null);
+    try { u = URL.createObjectURL(file); v.src = u; v.load(); } catch (e) { fin(null); }
   });
 }
 async function sendVideo(file) {
-  const dur = await videoDur(file);
+  const pr = await videoProbe(file);
   if (!S.conv) return;
-  addLocal(newMsg('video', URL.createObjectURL(file), dur, { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' }));
+  const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
+  if (pr.poster) { ex._poster = pr.poster; try { ex._pu = URL.createObjectURL(pr.poster); } catch (e) {} }
+  addLocal(newMsg('video', URL.createObjectURL(file), pr.dur, ex));
 }
 function sendDoc(file) {
   const n = cpSlice(file.name || '文件', 120), lu = URL.createObjectURL(file);
@@ -2866,6 +2959,7 @@ function bindUI() {
     const el = e.target; if (!el || !el.closest) return;
     if (el.tagName === 'VIDEO' && el.closest('.bubble.video')) { const u = el.getAttribute('src') || ''; if (/^blob:/.test(u)) return; el.closest('.bubble.video').innerHTML = '<div class="vfail">视频无法在这里播放<small>可能已被清理，或这个浏览器不支持这种格式；可以长按“保存到手机”再看</small></div>'; return; }
     if (el.tagName === 'IMG' && el.closest('.bubble.sticker')) { el.outerHTML = '<span class="stk-bad">表情已失效</span>'; return; }
+    if (el.tagName === 'IMG' && el.classList.contains('vposter')) { const vb = el.closest('.bubble.video'), u = vb && vb.dataset.v; if (u) el.outerHTML = '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>'; return; }
     const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
     const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
     const holder = im.parentNode; if (!holder) return;
@@ -2879,6 +2973,7 @@ function bindUI() {
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
     const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; const holder = bad.parentNode; holder.innerHTML = '<img src="' + esc(u + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now()) + '" alt="" decoding="async">'; return; }
     const im = e.target.closest('.bubble.img img'); if (im) { openLightbox(im.closest('.msg').dataset.id); return; }
+    const vb = e.target.closest('.bubble.video'); if (vb && !vb.classList.contains('playing')) { const u = vb.dataset.v || ''; if (!u || /^blob:/.test(u) || vb.querySelector('.vup') || vb.querySelector('.vfail')) return; vb.classList.add('playing'); vb.innerHTML = '<video src="' + esc(u) + '" controls autoplay playsinline webkit-playsinline></video>'; const pv = vb.querySelector('video'); try { const pp = pv.play(); if (pp && pp.catch) pp.catch(() => {}); } catch (x) {} return; }
     const fb = e.target.closest('.bubble.file'); if (fb) { const u = fb.dataset.u || ''; if (u && !/^blob:/.test(u)) { try { window.open(disp(u), '_blank', 'noopener'); } catch (x) {} } return; }
     const sk = e.target.closest('.bubble.sticker img'); if (sk) {
       const m = S.msgs.find(x => x.id === sk.closest('.msg').dataset.id); if (!m || m._st || !isStoreUrl(m.body)) return;

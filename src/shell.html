@@ -319,6 +319,12 @@
   .bubble.video video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
   .bubble.video .vlen { position: absolute; right: 8px; top: 8px; font-size: 11px; color: #fff; background: rgba(0,0,0,.5); padding: 1px 6px; border-radius: 8px; pointer-events: none; }
   .bubble a { color: inherit; text-decoration: underline; word-break: break-all; }
+  .bubble.video { cursor: pointer; }
+  .bubble.video .vposter { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; object-fit: cover; }
+  .bubble.video > video { display: block; max-width: 230px; max-height: 320px; min-width: 120px; min-height: 90px; background: #000; }
+  .bubble.video .vplay { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.85); pointer-events: none; }
+  .bubble.video .vplay::after { content: ""; position: absolute; left: 19px; top: 14px; border-style: solid; border-width: 9px 0 9px 15px; border-color: transparent transparent transparent #fff; }
+  .bubble.video.playing .vlen { display: none; }
   .bubble.video .vup { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; background: rgba(0,0,0,.55); padding: 5px 12px; border-radius: 12px; pointer-events: none; }
   .vfail { color: #fff; padding: 22px 16px; font-size: 14px; line-height: 1.5; text-align: center; max-width: 230px; }
   .vfail small { display: block; font-size: 11.5px; opacity: .75; margin-top: 4px; }
@@ -433,7 +439,7 @@ __LOGO_SYMBOL__
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.8.2</div>
+      <div class="build">build 3.8.3</div>
     </div>
   </div>
 
@@ -537,7 +543,7 @@ __LOGO_SYMBOL__
 <div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><button id="lb-save" type="button">保存</button><div id="lb-count"></div></div>
 
 <div id="call-ui">
-  <video id="remote-video" autoplay playsinline></video>
+  <video id="remote-video" autoplay playsinline muted></video>
   <video id="local-video" autoplay playsinline muted></video>
   <audio id="remote-audio" autoplay playsinline></audio>
   <div class="call-info"><div id="call-avatar" class="call-avatar"></div><div id="call-name"></div><div id="call-status"></div></div>

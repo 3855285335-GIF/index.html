@@ -97,9 +97,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   await sleep(4800);
   await A.evaluate(() => { const b = document.getElementById('btn-relaysave'); b.click(); b.click(); });   // 触发一次重新设置参数
-  await A.waitForFunction(() => window.__setp.video && window.__setp.audio, null, { timeout: 4000 });
+  await A.waitForFunction(() => window.__setp.video, null, { timeout: 4000 }); await sleep(300);
   const d0 = await A.evaluate(() => window.__setp);
-  ok(d0.video.maxBitrate === 2500000 && d0.video.scaleResolutionDownBy === 1 && !('maxBitrate' in d0.audio), '直连时：视频按“清晰”2.5Mbps、分辨率不减半，语音不限');
+  ok(d0.video.maxBitrate === 2500000 && d0.video.scaleResolutionDownBy === 1 && !(d0.audio && 'maxBitrate' in d0.audio), '直连时：视频按“清晰”2.5Mbps、分辨率不减半，语音不限');
+  ok(d0.audio === null, '没开省流量时，完全不去改声音的发送设置（3.8.3 起：少动声音通道，避免手机上没声音）');
   // ---- 3. 走中转、省流量默认关：画质不变 ----
   ok((await A.evaluate(() => document.getElementById('btn-relaysave').textContent)).includes('关'), '“中转省流量”默认是关的');
   await A.evaluate(() => { window.__fakeRelay = true; window.__setp = { audio: null, video: null }; });
