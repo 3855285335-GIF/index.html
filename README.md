@@ -3,9 +3,9 @@
 两个人（或一小群好友）用的聊天 App：文字、表情包、图片、视频、文件、语音、视频通话，做成**单个网页文件**，放在 GitHub Pages 上，iPhone 用 Safari“添加到主屏幕”后像 App 一样用。后端是 Supabase 免费版。
 
 - **线上地址**：<https://3855285335-gif.github.io/index.html/>
-- **当前版本**：build 3.8.1（2026-11-06 发布，需要先运行 `sql/5-setup-v6.sql`）。进 App 的“我”页面可以看到版本号。
+- **当前版本**：build 4.0（2026-11-07 发布）。需要的 SQL 一直到 `sql/7-setup-v8.sql`；“App 关掉也能收到通知”还需要在 Supabase 部署 `chatter-push` 函数（见第 5.5 节）。进 App 的“我”页面可以看到版本号。
 - **本仓库的两个分支**
-  - `main`：网站本身，只有根目录的 `index.html`（图标已经内嵌在页面里），GitHub Pages 从这里发布。**只放网页文件。** `sw.js` 和单独的图标文件从来没放到 `main` 上，所以网站实际没有启用离线缓存（Service Worker）。
+  - `main`：网站本身，GitHub Pages 从这里发布。**只放网页要用的文件**：`index.html`（图标已内嵌）、`sw.js`（后台小助手，只管通知，**不缓存页面**）、`manifest.webmanifest`（添加到主屏幕用）、`icon-192.png`、`icon-512.png`、`icon-maskable-512.png`、`badge-96.png`（安卓状态栏的小图标）。4.0 之前 `main` 上只有 `index.html`。
   - `source`：全部源码、SQL、测试和这份说明。不会触发网站重新部署，也不会出现在网站上。
 
 ---
@@ -19,15 +19,20 @@ src/                 源码
   loader.html        Supabase 依赖库加载器（多个 CDN 竞速、本地缓存）
   logo.py            图标（SVG）
   favicon.svg / icon-180.png
-  build.py           把上面几样合成一个网页 → site/index.html
-site/                要发布的文件（index.html 由 build.py 生成）
-  index.html  sw.js  icon-192.png  icon-512.png  icon-maskable-512.png
+  sw.js              后台小助手（service worker）：收到推送弹通知、点通知打开聊天；不缓存页面
+  build.py           把上面几样合成一个网页 → site/index.html；同时生成 site/sw.js、site/manifest.webmanifest
+site/                要发布的文件（index.html、sw.js、manifest.webmanifest 由 build.py 生成）
+  index.html  sw.js  manifest.webmanifest  icon-192.png  icon-512.png  icon-maskable-512.png  badge-96.png
+supabase/functions/chatter-push/index.ts   推送函数（整段粘贴到 Supabase 后台的函数编辑器里部署，不用任何密钥）
 sql/                 Supabase 后端脚本（按编号顺序运行，都可以重复运行）
   1-setup.sql        建表、权限（RLS）、触发器、RPC、实时通道策略、存储桶
   2-setup-v3.sql     已读回执（服务器时间）、存储空间清理权限
   3-setup-v5.sql     国内模式（信号信箱、长轮询、在线状态）+ 中转服务器配置表
   4-setup-keepalive.sql  保活签到函数（配合 GitHub 定时任务）
   5-setup-v6.sql     表情包（stickers 表）、视频 / 文件消息类型、单个文件上限 50MB、后端版本号 chatter_schema()
+  6-setup-v7.sql     好友备注（friendships.remark、set_remark()）、存储用量 storage_used()
+  7-setup-v8.sql     推送：push_subs（每台手机的推送地址）、push_keys（签名密钥）、push_log（防重复）、push_job() 等
+  （5～7 都会先检查“是不是 Chatter 的数据库”，整份放在一个事务里：选错项目时直接报错，什么都不改）
   update-turn.sql    以后换中转账号 / 服务商只改这一段再运行，网页不用重传
   history/           已被合并、不用再单独运行的旧脚本
 ops/
@@ -36,6 +41,7 @@ ops/
 tests/               网页端自动测试（Node + Playwright 的 Chromium）
   fakelib.js         假的 Supabase 客户端（可模拟“国内网络拦住实时通道”）
   runall.sh          一键跑全部测试
+  push/              推送函数的测试（Node 用 http_ece 交叉验证加密；Deno 原样运行函数文件）。依赖要先装：在 tests/push 里 npm install（这个环境要走代理）
   sql/               SQL 测试（本机 PostgreSQL 16 真实运行）
 docs/
   国内模式-交接说明.md  国内模式的设计细节（给游戏窗口用过）
@@ -47,13 +53,13 @@ docs/
 ## 2. 构建与发布
 
 ```bash
-python3 src/build.py          # 生成 site/index.html
+python3 src/build.py          # 生成 site/index.html、site/sw.js、site/manifest.webmanifest
 bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 ```
 
 发布（用户在 iPhone 上操作）：
 1. 如果有新的 SQL，先在 Supabase 运行：<https://supabase.com/dashboard/project/uaoiqbxptnbrvkzjwguc/sql/new>
-2. 把 `site/index.html` 放到 `main` 分支根目录的 `index.html`。用户已决定由 Claude 直接推送，不再手动上传。如果要手动上传，就用 <https://github.com/3855285335-gif/index.html/upload/main>，**只提交一次**。然后等“操作”（Actions）页面变绿。
+2. 把 `site/` 里的网页文件（`index.html`、`sw.js`、`manifest.webmanifest`、几个图标）放到 `main` 分支根目录。用户已决定由 Claude 直接推送，不再手动上传。如果要手动上传，就用 <https://github.com/3855285335-gif/index.html/upload/main>，**只提交一次**。然后等“操作”（Actions）页面变绿。
 3. 手机上把 App 彻底关掉、再打开，GitHub Pages 本身有几分钟的缓存，可能要多开一两次。进“我”看版本号确认。
 4. 两个人的手机都要换成新版，新旧版本混用可能互相收不到通话信号。
 
@@ -70,7 +76,7 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 - 存储：桶 `chat-media`，公开读，单个文件上限 50MB（Supabase 免费版允许的最大值；运行 `5-setup-v6.sql` 之前是 20MB）。每个人只能往自己的文件夹（`账号/`）上传，也只能列出、删除自己文件夹里的文件。文件名：普通消息 `时间戳_随机.扩展名`，头像 `avatar_…`，表情 `sticker_…`。
 - 消息类型：`text`、`image`、`voice`、`call`、`recalled`，3.8 起加了 `sticker`（内容是 `e:emoji`、`t:文字贴纸编号` 或自己表情的地址）、`video`（地址，`dur` 是时长秒数）、`file`（`{"u":地址,"n":文件名,"s":字节数}`，数据库会检查格式）。
 - 实时：每个用户一个私有广播频道 `u:账号`，用于秒到消息、通话信号、正在输入、已读、在线推送；另外订阅数据库变更（postgres_changes）和 Presence。
-- **SQL 运行顺序**：`1-setup` → `2-setup-v3` → `3-setup-v5` → `4-setup-keepalive` → `5-setup-v6`。网页启动时调用 `chatter_schema()` 判断有没有运行过 `5-setup-v6.sql`：没运行时文字、图片、语音照常，表情包 / 视频 / 文件给出提示；运行之后回到页面就能用，不用刷新。线上项目实际运行过哪些，以用户确认为准：保活函数肯定运行过（定时任务成功过一次）；发布 build 3.6 时要运行最新的 `3-setup-v5.sql`（含 ExpressTURN）。所有脚本都可以重复运行，不确定时再跑一遍也没关系。
+- **SQL 运行顺序**：`1-setup` → `2-setup-v3` → `3-setup-v5` → `4-setup-keepalive` → `5-setup-v6` → `6-setup-v7` → `7-setup-v8`。网页启动时调用 `chatter_schema()`（6 / 7 / 8）判断后端到了哪一版：没运行时对应功能给出提示，其他照常；运行之后回到页面就能用，不用刷新。线上项目实际运行过哪些，以用户确认为准：保活函数肯定运行过（定时任务成功过一次）；发布 build 3.6 时要运行最新的 `3-setup-v5.sql`（含 ExpressTURN）。所有脚本都可以重复运行，不确定时再跑一遍也没关系。
 
 ### 保活（防止免费项目 7 天不活跃被暂停）
 - 私有仓库 `chatter-keepalive` 里的 GitHub 定时任务（`ops/keepalive.yml`），每天北京时间 9 点左右调用一次 `keepalive()`。
@@ -106,6 +112,20 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 - **“中转省流量”默认关**：走中转时不降画质，画质由用户自己选。用户在“我 → 📶 中转省流量”打开后，走中转时视频限制在约 300kbps、分辨率减半，语音约 24kbps；直连时不受影响。是否走中转每 4 秒复查一次。
 - 3.8 起删掉了“中转测试”按钮（用户要求）。“我 → 环境诊断”里仍然显示中转服务器列表和来源（数据库 / 内置）。
 
+### 5.5 来电 / 消息提醒（build 4.0）
+
+- **App 开着**：别的聊天来消息、有人加好友，屏幕顶部滑下横幅（点一下进聊天，往上划收起）；正开着的聊天、免打扰的聊天、正看着消息列表时不弹。
+- **App 在后台但还没被系统关掉**（主要是安卓、电脑）：页面自己弹系统通知。已经开了推送的手机不再自己弹，免得一条弹两次。
+- **App 完全关掉**：Web Push 推送。流程：
+  1. 用户在“我 → 📳 通知”点“开启通知”（必须是点击里直接请求权限，iPhone 的要求）→ 浏览器给出这台手机的推送地址 → `push_save()` 存进 `push_subs`。
+  2. 发消息成功、打电话、没接通就挂断、发好友请求时，**发送方**的网页请求 `chatter-push` 函数（带自己的登录凭证）。连发几条只请求最后一次（1.2 秒内合并，切到后台时立刻发出）；对方显示在线时不请求。
+  3. 函数用登录凭证查出发送方，调用数据库 `push_job()`：必须是好友、对方不在线（75 秒内没报到）、消息真的是这个人 3 分钟内发的、同一条只推一次；算出标题（有备注用备注）、内容（引用回复只留回复的话；可以设成不显示内容）、未读总数。
+  4. 函数用 WebCrypto 自己加密（RFC 8291）和签名（RFC 8292），只发给苹果 / 谷歌 / 火狐 / 微软的推送服务；推送服务说地址失效（404 / 410）就删掉。
+  5. 手机上的 `sw.js` 弹通知：同一个人的消息互相替换（显示“[3条] …”）；来电通知一直留着，没接通会被替换成“未接来电”；点通知打开对应聊天（`#c=账号`、`#call=账号` 会马上取一次来电信号、`#req`）。
+- 函数不需要任何手动设置的密钥：签名密钥第一次运行时自动生成，存在 `push_keys`（网页读不到）；访问数据库用 Supabase 自动提供给函数的 `SUPABASE_SECRET_KEYS`（旧项目回退到 `SUPABASE_SERVICE_ROLE_KEY`）。部署时保持默认的 JWT 校验（verify_jwt）打开。
+- **限制**：iPhone 要 iOS 16.4 以上，而且必须从主屏幕图标打开 Chatter 才能开启（[WebKit 官方博客](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)）；iOS 16.4–18 要靠 manifest 里的 `display: standalone` 才算“网页 App”，所以 4.0 起 `main` 上放了单独的 `manifest.webmanifest`。安卓 Chrome 的网页推送走谷歌 FCM，国内网络一般收不到（未真机验证）。
+- **额度**：Supabase 免费版每月 50 万次函数调用，浏览器的预检请求（OPTIONS）不算（[官方文档](https://supabase.com/docs/guides/platform/manage-your-usage/edge-function-invocations)）。只有对方不在线时才调用，两个人用远远用不完。
+
 ### 额度（2026-11-05 在官网重新核实过，完整清单见 `docs/限制清单.md`）
 | 服务 | 免费额度 | 来源 |
 |---|---|---|
@@ -115,7 +135,7 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 
 ---
 
-## 6. 功能清单（build 3.8）
+## 6. 功能清单（build 4.0）
 
 - **账号**：注册 / 登录，修改昵称、头像、密码。
 - **好友**：搜索、请求、通过、删除，在线状态。
@@ -124,8 +144,11 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
 - **消息操作**：长按菜单（回复引用、复制、转发、添加到表情、保存到手机、2 分钟内撤回、删除仅自己）、正在输入、已读回执、草稿、搜索聊天记录、清空聊天记录、删除会话、会话置顶、消息免打扰（后几项只在本机生效）。
 - **视频 / 语音通话**：见第 5 节。
 - **存储空间**：查看和清理自己发过的图片、语音、视频、文件（对方也会看不到；头像和“我的表情”里正在用的表情不会被清理）。
+- **好友备注 / 资料页**（3.9）：备注只有自己看得到，存在数据库里；资料页可以发消息、打电话、设备注、删好友（先确认）。
+- **上传进度、存储快满提醒、导出聊天记录**（3.9）。
+- **来电 / 消息提醒**（4.0）：见第 5.5 节。
 - **国内模式**：见第 4 节；后台时标题闪烁提醒；发送失败后自动重发；本地缓存实现秒开；诊断页自动刷新。
-- **没有做的**：群聊、App 关闭后的推送通知、忘记密码后自己找回、消息表情回应、编辑已发消息。
+- **没有做的**：群聊、忘记密码后自己找回、消息表情回应、编辑已发消息。
 
 ---
 
@@ -150,20 +173,25 @@ bash tests/runall.sh 2      # 需要 Node 和 Playwright（自带 Chromium）；
 | stktest | 表情面板、表情库、搜索、我的表情（上传原图、关键词、置顶、删除）、联想表情、添加到表情、发视频 / 文件、保存到手机（含 iPhone 分享面板）、转发、链接、置顶 / 免打扰、存储清理不删正在用的表情、快速通道丢弃格式不对的内容 |
 | animcheck | 屏幕正中的弹窗（长按菜单、“⋯”菜单等）逐帧检查：动画全程左右都在正中，不会先偏到右下再跳回来 |
 | nov6test | 还没运行 `5-setup-v6.sql` 时：文字图片照常、20MB 上限、表情 / 视频 / 文件给提示；运行后不用刷新就能用 |
+| authnet / audiotest / vposter / ordertest | 连不上服务器时提示说对原因；通话声音只走一个出口；视频封面；手机时间不准时的消息顺序 |
+| v39test | 好友备注（数据库 / 本机兜底 / 自动同步）、资料页、上传进度、存储快满提醒、导出聊天记录 |
+| notiftest | 顶部横幅（什么时候弹、什么时候不弹、点了去哪）、后台系统通知、开启 / 关闭 / 不显示内容、发消息 / 打电话 / 未接来电 / 加好友时请求推送、点通知打开聊天、后台小助手收到推送弹通知、各种开不了的情况（没运行 SQL、函数没部署、iPhone 没加主屏幕、拒绝过权限、连不上推送服务） |
+| push/fn-node.mjs / fn-deno.ts | 推送函数：加密用 web-push 官方的 http_ece 库解开、VAPID 签名验证、只发正规推送服务、失效地址清理、旧版密钥兼容；Deno 里原样运行函数文件 |
 | configcheck / icecheck / pptest | 网页内置的中转列表和两份 SQL 完全一致、除主力外没有 UDP、STUN 列表；浏览器接受全部服务器地址；依赖库加载 |
 
-目前每遍是 21 组网页测试，加 1 组国内网络下的在线状态测试，最后再跑 3 项检查。`runall.sh 2` 一共 2×22+3 = 47 项。
+目前每遍是 27 组网页测试，加 1 组国内网络下的在线状态测试，最后再跑 5 项检查。`runall.sh 2` 一共 2×28+5 = 61 项。
 
 ### SQL
 ```bash
 bash tests/sql/run-sql-tests.sh   # 需要本机 PostgreSQL 16（initdb / pg_ctl / psql）
 ```
-`stub.sql` 模拟 Supabase 的 auth、storage、realtime，`seed.sql` 建三个测试账号（alice、bob 互为好友，carol 是外人），然后真实运行全部 SQL 和权限测试。输出里的 `ERROR: permission denied`、`not friends` 都是预期被拒绝的情况。
+`stub.sql` 模拟 Supabase 的 auth、storage、realtime，`seed.sql` 建三个测试账号（alice、bob 互为好友，carol 是外人），然后真实运行全部 SQL 和权限测试（每份运行两次，确认可以重复运行）。输出里的 `ERROR: permission denied`、`not friends` 都是预期被拒绝的情况。`guard-tests.sh` 检查选错项目时 v6 / v7 / v8 什么都不改。
 
 ### 测试覆盖不到的（必须真机）
 模拟环境全部通过，**不代表在用户的手机和网络上一定没问题**。下面这些只能真机测：
 - iPhone Safari 和主屏幕 App 里的表现：摄像头、麦克风、长按、键盘、缓存更新。
 - 真实国内网络下的消息延迟、来电、在线状态。
+- 推送：真的弹出来（iPhone 锁屏 / 通知中心、角标）、点通知打开聊天、安卓在国内能不能收到。无头浏览器连不上谷歌的推送服务，测试里用的是假的推送登记；加密和签名用官方库交叉验证过，但没有真的发到苹果 / 谷歌。
 - 两台手机之间到底是直连还是走中转，以及中转服务器在国内能不能连上。用户实测过一次 ExpressTURN 和 Metered 都能拿到中转地址，但另有一次不开 VPN 时全部失败，原因还没查明。
 
 ---
@@ -196,4 +224,8 @@ bash tests/sql/run-sql-tests.sh   # 需要本机 PostgreSQL 16（initdb / pg_ctl
 - **3.7**：“中转测试”从“设置”挪到“环境诊断”里。
 - **3.8**：删掉“中转测试”；表情包（表情库、我的表情、搜索、联想）、发视频、发文件、保存到手机、转发、网址可点、会话置顶 / 免打扰、emoji 从 22 个扩到 316 个（需要 `5-setup-v6.sql`）。
 - **3.8.1**：修好长按菜单等屏幕正中的弹窗“先在右边闪一下再跑到中间”（弹出动画盖掉了居中位移；这个问题从有长按菜单起就存在）。
+- **3.8.2**：连不上服务器时提示说对原因（不再误报“密码错误”“请先执行 setup.sql”）。
+- **3.8.3**：通话声音加固、视频封面、手机时间不准时的消息顺序和卡顿、会话预览兜底。
+- **3.9**：好友备注、好友资料页、上传进度、存储快满提醒、导出聊天记录（需要 `6-setup-v7.sql`）。
+- **4.0**：来电 / 消息提醒——顶部横幅、后台系统通知、App 关掉后的推送（需要 `7-setup-v8.sql` 和 `chatter-push` 函数）；`main` 上加了 `sw.js`（只管通知）、`manifest.webmanifest` 和图标文件。
 - **3.6**：中转服务器配置放进数据库（ExpressTURN 主力、Metered 备用且只留 TLS 443）、中转测试、“中转省流量”开关（默认关）、在线状态变化即时推送、页面关闭时报离线、STUN 按真机实测核对。

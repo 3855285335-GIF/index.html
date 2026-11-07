@@ -1,0 +1,6 @@
+{
+  "name": "chatter-push-tests",
+  "private": true,
+  "description": "推送函数的测试依赖：http_ece / web-push 用来交叉验证加密和密钥格式，deno 用来在和 Supabase 同类的运行环境里跑函数",
+  "devDependencies": { "deno": "2.9.6", "http_ece": "1.2.0", "web-push": "3.6.7" }
+}

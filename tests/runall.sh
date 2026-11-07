@@ -4,7 +4,7 @@
 cd "$(dirname "$0")"
 python3 ../src/build.py || exit 1
 N=${1:-1}; FAILS=0; ITEMS=0
-SUITES="smoke vtest chattest chattest2 storetest acctest skew stress difftest cntest mix1 mix2 mix3 hangtest relaytest prtest defaulttest metab stktest nov6test animcheck authnet audiotest vposter ordertest v39test"
+SUITES="smoke vtest chattest chattest2 storetest acctest skew stress difftest cntest mix1 mix2 mix3 hangtest relaytest prtest defaulttest metab stktest nov6test animcheck authnet audiotest vposter ordertest v39test notiftest"
 run() { # 名称 命令...
   local name=$1; shift; local r; r=$("$@" 2>&1); local bad; bad=$(echo "$r" | grep -E 'FAIL|CRASH' | head -2)
   ITEMS=$((ITEMS+1)); echo "$name 通过=$(echo "$r" | grep -c '^PASS') $bad"; [ -n "$bad" ] && FAILS=$((FAILS+1))
@@ -16,4 +16,7 @@ done
 run "检查 configcheck（中转列表一致、Metered 无 UDP、STUN）" node configcheck.js
 run "检查 icecheck（服务器地址格式）" node icecheck.js
 run "检查 pptest（依赖库加载）" node pptest.js
-echo "全部结束：一共 $ITEMS 项（每遍 $(echo $SUITES | wc -w) 组网页测试 + 1 组国内网络在线状态，最后 3 项检查），失败 $FAILS 项"; exit $FAILS
+run "检查 推送函数（Node：加密用 http_ece 交叉验证、整个流程）" node push/fn-node.mjs
+if [ -x push/node_modules/.bin/deno ]; then run "检查 推送函数（Deno：原样运行函数文件）" push/node_modules/.bin/deno run --allow-net --allow-env --allow-run --allow-read push/fn-deno.ts
+else echo "（跳过 Deno 测试：先在 tests/push 里 npm install）"; fi
+echo "全部结束：一共 $ITEMS 项（每遍 $(echo $SUITES | wc -w) 组网页测试 + 1 组国内网络在线状态，最后 5 项检查），失败 $FAILS 项"; exit $FAILS

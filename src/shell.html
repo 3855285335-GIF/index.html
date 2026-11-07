@@ -374,6 +374,19 @@
   .toast { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); background: rgba(24,20,44,.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; padding: 10px 18px; border-radius: 22px; font-size: 13.5px; z-index: 9999; pointer-events: none; max-width: 88vw; text-align: center; line-height: 1.45; box-shadow: 0 10px 30px rgba(0,0,0,.3); animation: toastin .22s cubic-bezier(.3,1.4,.5,1); }
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, -12px); } }
 
+  /* ---------- 顶部横幅（App 开着时别的聊天来消息） ---------- */
+  #nbar { position: fixed; left: 10px; right: 10px; top: calc(8px + env(safe-area-inset-top)); max-width: 520px; margin: 0 auto; z-index: 2600; display: flex; align-items: center; gap: 11px; padding: 10px 14px 10px 10px; border-radius: 20px; background: var(--glass); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); color: var(--ink); box-shadow: 0 14px 36px rgba(18,14,40,.24), 0 0 0 1px var(--line); cursor: pointer; transform: translateY(calc(-100% - 30px)); visibility: hidden; transition: transform .34s cubic-bezier(.2,1.25,.4,1), visibility 0s linear .34s; }
+  #nbar.show { transform: none; visibility: visible; transition: transform .34s cubic-bezier(.2,1.25,.4,1), visibility 0s; }
+  #nbar .avatar { width: 42px; height: 42px; border-radius: 15px; font-size: 16px; }
+  .nb-tx { flex: 1; min-width: 0; }
+  .nb-top { display: flex; align-items: baseline; gap: 8px; }
+  .nb-name { font-weight: 650; font-size: 14.5px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nb-when { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
+  .nb-body { font-size: 13.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #nt-tip { font-size: 12.5px; line-height: 1.6; color: var(--muted); margin: 10px 2px 0; white-space: pre-line; }
+  #notify-box .btns button:disabled { opacity: .45; }
+  @media (prefers-reduced-motion: reduce) { #nbar, #nbar.show { transition: none; } }
+
   /* ---------- 通话 ---------- */
   #call-ui, #incoming-ui { position: fixed; inset: 0; z-index: 3000; color: #fff; display: none; }
   #call-ui { background: linear-gradient(170deg, #1b1650 0%, #43289f 50%, #b8447c 100%); flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
@@ -465,7 +478,7 @@ __LOGO_SYMBOL__
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.9</div>
+      <div class="build">build 4.0</div>
     </div>
   </div>
 
@@ -494,8 +507,9 @@ __LOGO_SYMBOL__
           <div class="btns" style="margin-bottom:16px"><button id="btn-avatar" type="button">🖼 修改头像</button><button id="btn-nick" type="button">✏️ 修改昵称</button><button id="btn-pass" type="button">🔑 修改密码</button></div>
           <input id="avatar-input" type="file" accept="image/*" hidden>
           <div class="section-title">设置</div>
-          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button></div>
+          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
+          <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
           <div class="section-title">最近错误</div>
@@ -551,6 +565,7 @@ __LOGO_SYMBOL__
 </div>
 
 <div id="act-backdrop" class="sheet-bd"></div>
+<div id="nbar" aria-hidden="true" role="button" tabindex="-1"><div class="nb-av"></div><div class="nb-tx"><div class="nb-top"><span class="nb-name"></span><span class="nb-when">现在</span></div><div class="nb-body"></div></div></div>
 <div id="act-sheet" class="sheet"><div class="menu-title" id="as-title"></div><div id="as-items"></div></div>
 <div id="pf-backdrop" class="sheet-bd"></div>
 <div id="profile-card" class="sheet">

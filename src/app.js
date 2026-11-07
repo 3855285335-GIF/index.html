@@ -204,10 +204,11 @@ const SFX = (function () {
   };
 })();
 
-/* 给“添加到主屏幕”用：在页面里直接生成 manifest（不需要单独的文件），图标内嵌 */
+/* 给“添加到主屏幕”用：正式网站上有单独的 manifest.webmanifest 文件（build.py 生成）；只有没有这个文件链接时，才在页面里临时生成一个 */
 const ICON_DATA = (document.querySelector('link[rel=apple-touch-icon]') || {}).href || '';
 function setupManifest() {
   try {
+    const cur = document.querySelector('link[rel=manifest]'); if (cur && /manifest\.webmanifest$/.test(cur.getAttribute('href') || '')) return;
     const base = location.href.split('#')[0].split('?')[0], dir = base.replace(/[^/]*$/, '');
     const abs = f => new URL(f, base).href;
     const icons = [{ src: ICON_DATA, sizes: '180x180', type: 'image/png', purpose: 'any' }, { src: abs('icon-192.png'), sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: abs('icon-512.png'), sizes: '512x512', type: 'image/png', purpose: 'any' }, { src: abs('icon-maskable-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' }];
@@ -309,6 +310,7 @@ function renderMe() {
   $('me-acc2').textContent = S.me ? S.me.account_id : '';
   if ($('me-name2')) $('me-name2').textContent = S.me ? S.me.nickname : '';
   if ($('me-avatar')) $('me-avatar').innerHTML = S.me ? avatarHTML(S.me.nickname, S.me.avatar_url, false, S.me.account_id) : '';
+  paintPush();
 }
 function renderAll() { renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 /* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
@@ -378,6 +380,7 @@ function renderEnv() {
   if (S.v6 === true) ok(true, '表情包 / 视频 / 文件');
   else if (S.v6 === false) L.push('🟡 表情包 / 视频 / 文件：要先在 Supabase 运行 setup-v6.sql');
   else L.push('⏳ 正在检查表情包 / 视频 / 文件功能…');
+  L.push(pushDiag());
   L.push('ℹ️ 中转服务器：' + turns().map(p => p.name).join('、') + '（来自' + turnFrom + '）');
   $('diag').textContent = L.join('\n');
   $('errlog').textContent = LOG.join('\n') || '（暂无错误）';
@@ -442,6 +445,8 @@ function applyBoot(b) {
   const oldConvs = S.convs || [];
   S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
   S.requests = b.requests || [];
+  const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
+  if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
 }
 async function bootstrap() {
@@ -460,7 +465,7 @@ async function ensureProfile(user) {
 async function resync() {
   if (S.syncing || !sb || !S.me) return;
   S.syncing = true;
-  try { const b = await bootstrap(); if (b) applyBoot(b); if (S.conv) await syncChat(); if (S.v7 !== true) checkSchema(); else loadRemarks(); }
+  try { const b = await bootstrap(); if (b) applyBoot(b); if (S.conv) await syncChat(); if (S.v8 !== true) checkSchema(); if (S.v7 === true) loadRemarks(); }
   catch (e) { logErr('resync', e); }
   finally { S.syncing = false; }
 }
@@ -540,7 +545,7 @@ function onIncoming(m) {
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
   const open = S.conv === m.conv;
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); }
+  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
@@ -637,6 +642,7 @@ async function deliver(m, silent) {
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
     touchConv(m.conv, previewOf(m), t, false);
     saveMsgsSoon();
+    pushAfterSend(m);
   } catch (e) {
     logErr('send', e);
     const em = String((e && (e.message || '')) || '') + ' ' + String((e && (e.statusCode || e.status)) || '');
@@ -795,6 +801,7 @@ async function openConv(key, peer) {
   renderChatTitle(); chatRender(true);          // 先用缓存秒开
   markReadSoon(key); sendReadAck(key, true);
   if (S.token) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
+  { const pa = S.peer; closeNotes(t => t === 'm:' + pa || t === 'c:' + pa); if (nbCur && nbCur.acc === pa) hideNBar(); }
   try {
     const rows = await fetchMsgs(key);
     if (S.conv !== key) return;
@@ -967,7 +974,7 @@ async function addFriend(btn) {
   btn.disabled = true;
   const { data, error } = await sb.rpc('send_friend_request', { p_to: btn.dataset.acc });
   if (error) { btn.disabled = false; toast('发送失败：' + error.message); return; }
-  if (data === 'ok' || data === 'exists') { btn.textContent = '已发送'; if (data === 'exists') toast('请求已发送过，等待对方处理'); }
+  if (data === 'ok' || data === 'exists') { btn.textContent = '已发送'; if (data === 'exists') toast('请求已发送过，等待对方处理'); else firePush('req', btn.dataset.acc); }
   else if (data === 'friends' || data === 'accepted') { btn.textContent = '已是好友'; resync(); }
   else { btn.disabled = false; toast('无法发送（' + data + '）'); }
 }
@@ -1299,6 +1306,7 @@ async function startCall(video) {
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
     const ok = await sig(call.peer, 'invite', { id: call.id, video: call.video, sdp: { type: offer.type, sdp: offer.sdp } });
     if (!ok) throw new Error('信令发送失败，请检查网络');
+    firePush('call', call.peer, call.id);   // 对方 App 关着：推送“xx 邀请你语音通话”
     ctimer(call, () => { if (S.call === call && !call.connected) endCall('对方未接听', true); }, 45000);
   } catch (e) { logErr('startCall', e); if (S.call === call) endCall('无法发起通话：' + micError(e), false); }
 }
@@ -1311,6 +1319,8 @@ function onInvite(p) {
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(peerName(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
+  closeNotes(t => t === 'c:' + p.from);
+  if (document.hidden) localNote(peerName(p.from), p.video ? '📹 邀请你视频通话' : '📞 邀请你语音通话', 'c:' + p.from, './#call=' + p.from, true);
   SFX.ringStart();
   clearTimeout(S.incTimer); S.incTimer = setTimeout(() => { if (S.incoming && S.incoming.id === p.id) declineCall(); }, 40000);
 }
@@ -1389,6 +1399,7 @@ function endCall(reason, notify) {
   stopStream(call.local); stopStream(call.remote);
   delete S.pendingIce[call.id];
   if (call.caller) sendCallLog(call, dur);
+  if (call.caller && !call.connected) firePush('miss', call.peer, call.id);   // 推送过来电的：把通知改成“未接来电”（没推送过的数据库会跳过）
   if (reason) { setCallStatus(reason); clearTimeout(S.callHideT); S.callHideT = setTimeout(() => { if (!S.call) hideCallUI(); }, 2200); }
   else hideCallUI();
 }
@@ -1408,8 +1419,9 @@ function startRealtime() {
     .on('postgres_changes', Object.assign({ event: '*' }, filt('friend_requests', 'to_acc')), p => {
       try {
         const r = p.new; if (!r || !r.id) return;
+        const known = S.reqKnown && S.reqKnown.has(String(r.id)) && S.requests.some(x => String(x.id) === String(r.id));
         S.requests = S.requests.filter(x => String(x.id) !== String(r.id));
-        if (r.status === 'pending') { S.requests.unshift(r); SFX.notify(); }
+        if (r.status === 'pending') { S.requests.unshift(r); SFX.notify(); if (!known) noteRequest(r); (S.reqKnown = S.reqKnown || new Set()).add(String(r.id)); }
         sched('reqs'); saveCache();
       } catch (e) { logErr('db-req', e); }
     })
@@ -1566,7 +1578,7 @@ function teardown() {
   recAbort(); stopAudio();
   document.body.classList.remove('chat-open');
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
-  S.v6 = undefined; S.v7 = undefined; S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
+  S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -1586,6 +1598,8 @@ async function start(user) {
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
   }
   S.started = true;
+  if (linkWait) setTimeout(() => goLink(linkWait), 0);   // 点通知打开的 App：直接进那个聊天
+  setTimeout(pushSync, 2500);
   startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
 }
@@ -1847,15 +1861,16 @@ function stkInner(body, small) {
 /* ---- 后端版本：setup-v6.sql 有没有运行过 ---- */
 let schemaAt = 0;
 async function checkSchema(force) {
-  if (!sb || !S.me || S.v7 === true || (!force && now() - schemaAt < (S.v6 === false || S.v7 === false ? 5000 : 30000))) return;   // 还没运行 SQL 时 5 秒内可以再查（运行完回来马上能用）
+  if (!sb || !S.me || S.v8 === true || (!force && now() - schemaAt < (S.v6 === false || S.v7 === false || S.v8 === false ? 5000 : 30000))) return;   // 还没运行 SQL 时 5 秒内可以再查（运行完回来马上能用）
   schemaAt = now();
-  const was7 = S.v7;
+  const was7 = S.v7, was8 = S.v8;
   try {
     const { data, error } = await sb.rpc('chatter_schema');
-    if (error) { if (isMissingFn(error)) { S.v6 = false; S.v7 = false; } else logErr('schema', error); }
-    else { S.v6 = (+data || 0) >= 6; S.v7 = (+data || 0) >= 7; }
+    if (error) { if (isMissingFn(error)) { S.v6 = false; S.v7 = false; S.v8 = false; } else logErr('schema', error); }
+    else { S.v6 = (+data || 0) >= 6; S.v7 = (+data || 0) >= 7; S.v8 = (+data || 0) >= 8; }
   } catch (e) { logErr('schema', e); }
   if (S.v7 && was7 !== true) { loadRemarks(); checkStorage(true); }
+  if (S.v8 && was8 !== true) { pushSync(); paintPush(); }
   if ($('emoji-panel').classList.contains('active')) { renderEp(); if (S.v6) loadStickers(true); }   // 表情列表等打开面板时再读，省流量
 }
 
@@ -2382,6 +2397,262 @@ function jumpTo(id) {
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600);
 }
 
+/* ================= 提醒：顶部横幅 / 后台系统通知 / 推送（App 关掉也能收到） ================= */
+// 推送的流程：这台手机开启通知 → 把手机的推送地址登记到数据库（push_save）；
+// 别人给你发消息、打电话时，对方的 App 请 Supabase 里的 chatter-push 函数推一下。
+// 推不推、推什么由数据库的 push_job() 决定（必须是好友、你不在线、消息真的刚发出），网页只能“请求”，冒充不了别人。
+const PUSH_FN = API_URL + '/functions/v1/chatter-push';
+const NEED_V8 = '后台还没开通推送：要先在 Supabase 运行 setup-v8.sql，并部署 chatter-push 函数';
+const NO_FN = '通知服务连不上：Supabase 里还没有部署 chatter-push 函数，或者网络拦住了';
+const IOS_NEED = 'iPhone 要先把 Chatter 添加到主屏幕（Safari 底部的分享按钮 → 添加到主屏幕），再从主屏幕的图标打开，才能开启通知；需要 iOS 16.4 以上';
+const PUSH = { srv: undefined, srvAt: 0, busy: false, last: '', q: {} };
+const pushKey = () => 'ch2push:' + (S.uid || '');
+const pushSt = () => LS.get(pushKey(), null) || {};
+const isIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/i.test(navigator.userAgent || '');
+const standalone = () => navigator.standalone === true || !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+const notePerm = () => (window.Notification && Notification.permission) || 'default';
+const pushOn = () => !!pushSt().on && notePerm() === 'granted' && S.v8 !== false;
+function pushWhy() {   // 这台手机 / 浏览器能不能开通知：能就返回空字符串
+  if (!window.isSecureContext) return '通知需要 https 地址';
+  if (isIOS() && !standalone()) return IOS_NEED;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.Notification) return isIOS() ? '这台 iPhone 的系统太旧：要 iOS 16.4 以上才能收通知' : '这个浏览器不支持通知（微信、QQ 里打开的不行，请用 Chrome、Edge 或手机自带的浏览器）';
+  return '';
+}
+function u8(b64) {
+  const s = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/'), pad = (4 - s.length % 4) % 4, bin = atob(s + '='.repeat(pad));
+  const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out;
+}
+function sameKey(sub, pub) {
+  try { const k = sub.options && sub.options.applicationServerKey; if (!k) return true; const a = new Uint8Array(k), b = u8(pub); return a.length === b.length && a.every((x, i) => x === b[i]); } catch (e) { return true; }
+}
+let swP = null;
+function swReg() {   // 后台小助手（service worker）：只管弹通知、点通知打开聊天，不缓存页面
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  if (!swP) swP = navigator.serviceWorker.getRegistration().then(r => r || navigator.serviceWorker.register('sw.js')).catch(e => { swP = null; logErr('sw', e); return null; });
+  return swP;
+}
+async function swActive(ms) {
+  const r = await swReg(); if (!r) throw new Error('后台小助手（service worker）装不上，请刷新页面再试');
+  if (r.active) return r;
+  return Promise.race([navigator.serviceWorker.ready, new Promise((_, rej) => setTimeout(() => rej(new Error('后台小助手（service worker）启动超时，请刷新页面再试')), ms || 10000))]);
+}
+async function fnCall(body) {
+  let tok = S.token;
+  try { const r = await sb.auth.getSession(); tok = (r && r.data && r.data.session && r.data.session.access_token) || tok; } catch (e) {}
+  if (!tok) throw new Error('还没有登录');
+  let r;
+  try { r = await fetch(PUSH_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }); }
+  catch (e) { const er = new Error(NO_FN); er.net = true; throw er; }
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) { const er = new Error(r.status === 404 ? NO_FN : '通知服务出错（' + r.status + '）' + ((j && (j.error || j.message || j.msg)) ? '：' + (j.error || j.message || j.msg) : '')); er.status = r.status; throw er; }
+  PUSH.srv = true; return j || {};
+}
+const pushBlocked = () => S.v8 === false || (PUSH.srv === false && now() - PUSH.srvAt < 10 * 60000);
+async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（对方在线、不是好友等情况由数据库判断后跳过）
+  if (!S.me || pushBlocked()) return null;
+  try {
+    const j = await fnCall({ op: 'push', kind, to: to || null, ref: ref || null });
+    PUSH.last = kind + (j.skip ? '：没推（' + ({ online: '对方在线', nosub: '对方没开通知', dup: '已经推过', ref: '找不到这条', friend: '不是好友' }[j.skip] || j.skip) + '）' : '：已推送到 ' + (j.sent || 0) + ' 台手机');
+    return j;
+  } catch (e) {
+    if (e.status === 404 || e.net) { PUSH.srv = false; PUSH.srvAt = now() - (e.net ? 9 * 60000 : 0); }   // 没部署：10 分钟内不再试；网络不通：1 分钟后再试
+    PUSH.last = kind + '：失败'; logErr('push', e.message || e); return null;
+  }
+}
+function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求推送；连着发好几条（比如一次 9 张图）只推最后一次，通知里显示“[9条]”
+  if (!m || m.type === 'call' || m.type === 'recalled' || pushBlocked() || isOnline(m.to_acc)) return;
+  const q = PUSH.q[m.to_acc] || (PUSH.q[m.to_acc] = {});
+  q.ref = m.id; clearTimeout(q.t);
+  q.t = setTimeout(() => { delete PUSH.q[m.to_acc]; firePush('msg', m.to_acc, q.ref); }, 1200);
+}
+function flushPush() {   // 发完消息马上切走 App：等不了 1.2 秒，立刻把还没发出的推送请求发掉（手机切到后台后几秒内还能发请求）
+  Object.keys(PUSH.q).forEach(to => { const q = PUSH.q[to]; clearTimeout(q.t); delete PUSH.q[to]; firePush('msg', to, q.ref); });
+}
+async function pushPub() {
+  const j = await fnCall({ op: 'key' });
+  if (!j.pub) throw new Error(NO_FN);
+  LS.set('ch2pushpub', j.pub); return j.pub;
+}
+async function pushSave(sub, pv) {
+  const j = sub.toJSON ? sub.toJSON() : sub, k = (j && j.keys) || {};
+  const { error } = await sb.rpc('push_save', { p_endpoint: j.endpoint, p_p256dh: k.p256dh, p_auth: k.auth, p_preview: pv !== false });
+  if (error) { if (isMissingFn(error)) { S.v8 = false; throw new Error(NEED_V8); } throw new Error('登记这台手机失败：' + (error.message || error.code)); }
+}
+function subErr(e) {
+  const s = String((e && (e.name + ' ' + e.message)) || e);
+  if (/AbortError|push service|Registration failed/i.test(s)) return '连不上手机的推送服务（' + (isAndroid() ? '安卓要经过谷歌的推送服务，国内网络一般连不上' : '请换个网络再试') + '）';
+  if (/NotAllowed|denied|permission/i.test(s)) return '没有通知权限：要在系统设置里允许 Chatter 发通知';
+  return (e && e.message) || '开启失败';
+}
+async function pushSubscribe() {
+  if (S.v8 !== true) { await checkSchema(true); if (S.v8 === false) throw new Error(NEED_V8); }
+  const pub = await pushPub();
+  const reg = await swActive();
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && !sameKey(sub, pub)) { try { await sub.unsubscribe(); } catch (e) {} sub = null; }
+  if (!sub) { try { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(pub) }); } catch (e) { logErr('subscribe', e); throw new Error(subErr(e)); } }
+  const pv = pushSt().pv !== false;
+  await pushSave(sub, pv);
+  LS.set(pushKey(), { on: 1, ep: sub.endpoint, pv, at: now() });
+  const j = await firePush('test');
+  toast(j && j.sent ? '通知已开启 ✅ 测试通知几秒内会弹出来' : j && j.skip === 'dup' ? '通知已开启 ✅' : '通知已开启，但测试通知没发出去' + (j && j.codes ? '（推送服务回应 ' + j.codes.join('、') + '）' : PUSH.srv === false ? '：' + NO_FN : ''));
+}
+function pushEnableClick() {   // 必须在点击里直接请求权限（iPhone 的要求），中间不能先等别的
+  const why = pushWhy(); if (why) { toast(why); paintPush(); return; }
+  const pp = notePerm() === 'granted' ? Promise.resolve('granted') : new Promise(res => { const r = Notification.requestPermission(res); if (r && r.then) r.then(res, () => res('default')); });
+  PUSH.busy = true; paintPush();
+  pp.then(perm => {
+    if (perm === 'granted') return pushSubscribe();
+    toast(perm === 'denied' ? '你没有允许通知。要开的话，到系统设置里允许 Chatter 发通知' : '没有允许通知');
+  }).catch(e => { logErr('push-enable', e); toast(e.message || '开启失败'); })
+    .then(() => { PUSH.busy = false; paintPush(); });
+}
+async function pushDisable(quiet) {
+  const st = pushSt(); LS.set(pushKey(), { on: 0, pv: st.pv });
+  try {
+    const reg = await swReg(), sub = reg && reg.pushManager ? await reg.pushManager.getSubscription() : null, ep = (sub && sub.endpoint) || st.ep;
+    if (ep && sb && S.v8 !== false) await sb.rpc('push_remove', { p_endpoint: ep });
+    if (sub) await sub.unsubscribe();
+  } catch (e) { logErr('push-off', e); }
+  paintPush(); if (!quiet) toast('通知已关闭（App 开着时顶部的横幅提醒还在）');
+}
+async function pushTogglePreview() {
+  const st = pushSt(), pv = st.pv === false;
+  try {
+    const reg = await swActive(), sub = await reg.pushManager.getSubscription();
+    if (!sub) throw new Error('这台手机的通知登记丢了，请先关闭再重新开启');
+    await pushSave(sub, pv); LS.set(pushKey(), Object.assign({}, st, { pv, ep: sub.endpoint, at: now() }));
+    toast(pv ? '通知里会显示消息内容' : '通知里只显示“发来一条新消息”，不显示内容');
+  } catch (e) { toast(e.message || '没改成功'); }
+  paintPush();
+}
+async function pushSync() {   // 每次打开 App：确认这台手机的登记还在（系统换了推送地址、隔几天刷新一次）
+  const st = pushSt(); if (!st.on || !sb || !S.me) return;
+  if (notePerm() !== 'granted') {   // 在系统设置里把通知关掉了
+    LS.set(pushKey(), { on: 0, pv: st.pv });
+    if (st.ep && S.v8 !== false) sb.rpc('push_remove', { p_endpoint: st.ep }).then(() => {}, () => {});
+    paintPush(); return;
+  }
+  if (S.v8 === false) return;
+  try {
+    const reg = await swActive(15000); let sub = await reg.pushManager.getSubscription();
+    if (!sub) { const pub = LS.get('ch2pushpub', null) || await pushPub(); sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(pub) }); }
+    if (sub.endpoint !== st.ep || now() - (st.at || 0) > 3 * 86400000) { await pushSave(sub, st.pv !== false); LS.set(pushKey(), Object.assign({}, st, { ep: sub.endpoint, at: now() })); }
+  } catch (e) { logErr('push-sync', e.message || e); }
+}
+async function pushLogout() {   // 退出登录：这台手机不再收这个账号的通知
+  const st = pushSt(); if (!st.on && !st.ep) return;
+  await Promise.race([pushDisable(true), new Promise(r => setTimeout(r, 2500))]);
+}
+function paintPush() {
+  const btn = $('btn-notify'); if (!btn) return;
+  const on = pushOn();
+  btn.textContent = on ? '📳 通知：开' : '📳 通知：关';
+  const box = $('notify-box'); if (!box || box.style.display !== 'block') return;
+  const why = pushWhy(), perm = notePerm(), st = pushSt();
+  let t;
+  if (PUSH.busy) t = '⏳ 正在开启…';
+  else if (why) t = '⚠️ ' + why;
+  else if (perm === 'denied') t = '⚠️ 之前点了“不允许”。' + (isIOS() ? '打开 iPhone 的“设置 → 通知 → Chatter”，打开“允许通知”' : '在浏览器的“网站设置 → 通知”里找到这个网址，改成“允许”') + '，再回来点“开启通知”';
+  else if (S.v8 === false) t = '⚠️ ' + NEED_V8;
+  else if (on && PUSH.srv === false) t = '⚠️ ' + NO_FN;
+  else if (on) t = '✅ 已开启：App 关掉以后，新消息、来电和好友请求也会弹通知' + (st.pv === false ? '（通知里不显示消息内容）' : '');
+  else t = '还没开启。开启后，App 关掉也能收到新消息、来电和好友请求的提醒';
+  $('nt-state').textContent = t;
+  const can = !why && perm !== 'denied';
+  $('nt-on').style.display = !on && can ? '' : 'none'; $('nt-on').disabled = PUSH.busy;
+  ['nt-test', 'nt-pv', 'nt-off'].forEach(id => { $(id).style.display = on ? '' : 'none'; });
+  $('nt-pv').textContent = '通知显示内容：' + (st.pv === false ? '关' : '开');
+  const tips = [];
+  if (isIOS()) tips.push('iPhone：需要 iOS 16.4 以上，并且要从主屏幕的图标打开 Chatter。');
+  else if (isAndroid()) tips.push('安卓：网页通知要经过谷歌的推送服务，国内网络一般收不到（手机没装谷歌服务的，开 VPN 也收不到）。');
+  tips.push('App 开着的时候，别的聊天来了消息会在屏幕顶部弹横幅，不开通知也有。');
+  $('nt-tip').textContent = tips.join('\n');
+}
+function pushDiag() {
+  const why = pushWhy();
+  if (S.v8 === false) return '🟡 App 关掉后的消息 / 来电通知：' + NEED_V8;
+  if (PUSH.srv === false) return '❌ ' + NO_FN;
+  if (pushOn()) return '✅ 通知已开启（这台手机）' + (PUSH.last ? '；最近一次请求推送：' + PUSH.last : '');
+  if (why) return '🟡 通知：' + why;
+  return 'ℹ️ 通知还没开启（我 → 📳 通知）' + (PUSH.last ? '；最近一次请求推送：' + PUSH.last : '');
+}
+
+/* ---- App 开着：顶部横幅；App 在后台但还没被系统关掉：系统通知（没开推送时才弹，免得一条弹两次） ---- */
+async function localNote(title, body, tag, url, call) {
+  if (notePerm() !== 'granted' || (pushOn() && PUSH.srv !== false)) return;
+  try {
+    const opt = { body, tag, renotify: true, icon: 'icon-192.png', badge: 'badge-96.png', data: { url }, requireInteraction: !!call };
+    const r = await swReg();
+    if (r && r.showNotification) await r.showNotification(title, opt); else new Notification(title, opt);
+  } catch (e) { logErr('note', e); }
+}
+async function closeNotes(pred) {
+  try { const r = await swReg(); if (!r || !r.getNotifications) return; (await r.getNotifications()).forEach(n => { if (pred(n.tag || '')) n.close(); }); } catch (e) {}
+}
+let nbT = 0, nbCur = null;
+function showNBar(o) {   // o: { key, acc, title, body, go }
+  const el = $('nbar'); if (!el) return;
+  if (nbCur && nbCur.key === o.key && el.classList.contains('show')) { o.n = (nbCur.n || 1) + 1; } else o.n = 1;
+  nbCur = o;
+  el.querySelector('.nb-av').innerHTML = avatarHTML(o.av || o.title, avatarOf(o.acc), false, o.acc);
+  el.querySelector('.nb-name').textContent = o.title;
+  el.querySelector('.nb-body').textContent = (o.n > 1 ? '[' + o.n + '条] ' : '') + o.body;
+  el.classList.add('show'); el.setAttribute('aria-hidden', 'false');
+  clearTimeout(nbT); nbT = setTimeout(hideNBar, 4500);
+}
+function hideNBar() { clearTimeout(nbT); const el = $('nbar'); if (el) { el.classList.remove('show'); el.setAttribute('aria-hidden', 'true'); } nbCur = null; }
+function openChatWith(acc) {
+  if (!S.me || !S.friends.includes(acc)) return;
+  const key = convKeyOf(ME(), acc);
+  if (S.conv === key) return;
+  if (S.conv) { recAbort(); stopAudio(); saveMsgsNow(); draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs(); closeMenu(); }   // 正在别的聊天里：直接切过去（不多留一层“返回”）
+  openConv(key, acc);
+}
+function goTab(name) {
+  if (S.conv) { if (S.hist) { try { history.back(); } catch (e) { closeChat(); } } else closeChat(); }
+  const b = document.querySelector('.app-nav button[data-tab="' + name + '"]'); if (b) b.click();
+}
+function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天、免打扰的不会走到这里）
+  const name = peerName(m.from_acc), body = previewOf(m);
+  if (document.hidden) { localNote(name, body, 'm:' + m.from_acc, './#c=' + m.from_acc); return; }
+  if (!S.conv && $('tab-convs').classList.contains('active')) return;   // 正看着消息列表：列表本身已经更新
+  showNBar({ key: 'm:' + m.from_acc, acc: m.from_acc, title: name, body, go: () => openChatWith(m.from_acc) });
+}
+function noteRequest(r) {
+  const name = r.from_name || r.from_acc, body = name + '（' + r.from_acc + '）请求加你为好友';
+  if (document.hidden) { localNote('新的好友请求', body, 'r:' + r.from_acc, './#req'); return; }
+  if (!S.conv && $('tab-requests').classList.contains('active')) return;
+  showNBar({ key: 'r:' + r.from_acc, acc: r.from_acc, av: name, title: '新的好友请求', body, go: () => goTab('requests') });
+}
+
+/* ---- 点通知打开 App：#c=账号 打开和他的聊天；#call=账号 打开聊天并马上取来电信号；#req 打开好友请求 ---- */
+let linkWait = '';
+function goLink(u) {
+  let h = ''; try { h = new URL(u, location.href).hash; } catch (e) { h = String(u || ''); }
+  const m = /^#(c|call)=([a-z0-9_-]{1,40})$/.exec(h) || /^#(req)$/.exec(h);
+  if (!m) return;
+  if (!S.started || !S.me) { linkWait = h; return; }
+  linkWait = '';
+  if (m[1] === 'req') { goTab('requests'); return; }
+  openChatWith(m[2]);
+  if (m[1] === 'call' && sb && !S.noSigDb) pollSignals().catch(() => {});
+}
+function bindSW() {
+  const h = location.hash;
+  if (/^#(c=|call=|req$)/.test(h)) { linkWait = h; try { history.replaceState(history.state, '', location.pathname + location.search); } catch (e) {} }
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    navigator.serviceWorker.addEventListener('message', e => {
+      const d = e.data || {};
+      if (d.t === 'open') goLink(d.url);
+      else if (d.t === 'resub') pushSync();
+      else if (d.t === 'pushed' && !document.hidden && d.from && S.me && S.conv === convKeyOf(ME(), d.from)) closeNotes(t => t === d.tag);   // 正看着这个聊天：推送来的通知直接收起
+    });
+  } catch (e) {}
+}
+
 /* ================= 事件绑定 ================= */
 function bindViewport() {
   const vv = window.visualViewport; if (!vv) return;
@@ -2609,7 +2880,20 @@ function bindUI() {
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
   $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
+  $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
+  $('nt-on').onclick = pushEnableClick;
+  $('nt-off').onclick = () => pushDisable();
+  $('nt-pv').onclick = pushTogglePreview;
+  $('nt-test').onclick = async () => { const j = await firePush('test'); toast(j && j.sent ? '测试通知已发出，几秒内会弹出来（先切到桌面看效果）' : j && j.skip === 'dup' ? '刚发过，10 秒后再试' : j && j.skip === 'nosub' ? '这台手机的登记丢了，请关闭通知再重新开启' : j && j.codes ? '推送服务没接受（回应 ' + j.codes.join('、') + '），请关闭通知再重新开启' : NO_FN); };
+  paintPush();
+  /* 顶部横幅：点一下打开，往上划收起 */
+  const nb = $('nbar'); let nbY = null;
+  nb.addEventListener('click', () => { const o = nbCur; hideNBar(); if (o && o.go) o.go(); });
+  nb.addEventListener('touchstart', e => { nbY = e.touches[0].clientY; clearTimeout(nbT); }, { passive: true });
+  nb.addEventListener('touchmove', e => { if (nbY != null && e.touches[0].clientY - nbY < -18) { nbY = null; hideNBar(); } }, { passive: true });
+  nb.addEventListener('touchend', () => { if (nbY != null && nbCur) nbT = setTimeout(hideNBar, 3000); nbY = null; }, { passive: true });
   $('btn-logout').onclick = async () => {
+    await pushLogout();
     teardown();
     try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
     try { if (sb) await sb.auth.signOut(); } catch (e) {}
@@ -2622,10 +2906,10 @@ function bindUI() {
     if (!S.rt.db || !S.rt.user) startRealtime();
     if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
-    if (S.v7 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
+    if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
-  window.addEventListener('pagehide', () => { if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  window.addEventListener('pagehide', () => { flushPush(); if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
 }
 
@@ -2637,7 +2921,7 @@ function boot() {
     logErr('lib', e);
     var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
   });
-  bindUI(); bindViewport(); setupManifest();
+  bindSW(); bindUI(); bindViewport(); setupManifest();
   try {
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'))
       window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
@@ -2649,6 +2933,6 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); }
 }
-if (window.__TEST__) window.__T = { togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG };
 boot();
 })();

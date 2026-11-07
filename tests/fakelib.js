@@ -127,7 +127,7 @@
         if (window.__netFail) return { data: null, error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' } };
         const d = load();
         if (name === 'account_exists') { if (window.__noAccFn) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.account_exists(p_acc) in the schema cache' } }; return { data: d.profiles.some(p => p.account_id === args.p_acc), error: null }; }
-        if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: window.__noV7 ? 6 : 7, error: null }; }
+        if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: window.__noV7 ? 6 : window.__noV8 ? 7 : 8, error: null }; }
         if (name === 'remove_friendship') { const d0 = load(); d0.friendships = (d0.friendships || []).filter(f => !((f.owner_acc === args.p_me && f.friend_acc === args.p_peer) || (f.owner_acc === args.p_peer && f.friend_acc === args.p_me))); save(d0); return { data: null, error: null }; }
         if (name === 'set_remark' || name === 'storage_used') {
           if (window.__noV7) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.' + name + ' in the schema cache' } };
@@ -137,6 +137,26 @@
           const row = (d0.friendships || []).find(f => f.owner_acc === me && f.friend_acc === args.p_friend);
           if (!row) return { data: null, error: { code: 'P0001', message: 'not friends' } };
           row.remark = r; save(d0); window.__remarkCalls = (window.__remarkCalls || 0) + 1; return { data: null, error: null };
+        }
+        if (name === 'send_friend_request' && window.__reqEmu) {   // 模拟加好友：写一条请求并推给对方的实时通道
+          const d0 = load(), tgt = String(args.p_to || '').trim().toLowerCase(); d0.friend_requests = d0.friend_requests || [];
+          if (!d0.profiles.some(p => p.account_id === tgt)) return { data: 'notfound', error: null };
+          if (d0.friend_requests.some(r => r.from_acc === me && r.to_acc === tgt && r.status === 'pending')) return { data: 'exists', error: null };
+          const r = { id: uuid(), from_acc: me, to_acc: tgt, from_name: (d0.profiles.find(p => p.account_id === me) || {}).nickname || me, status: 'pending', created_at: new Date().toISOString() };
+          d0.friend_requests.push(r); save(d0); emit('friend_requests', 'INSERT', r); return { data: 'ok', error: null };
+        }
+        if (/^push_(save|remove|status)$/.test(name)) {   // 模拟 setup-v8.sql：每台手机的推送登记
+          if (window.__noV8 || window.__noV7) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.' + name + ' in the schema cache' } };
+          const d0 = load(); d0.push_subs = d0.push_subs || [];
+          if (name === 'push_save') {
+            if (!/^https:\/\//.test(args.p_endpoint || '') || !/^[A-Za-z0-9_=+\/-]{80,100}$/.test(args.p_p256dh || '') || !/^[A-Za-z0-9_=+\/-]{16,32}$/.test(args.p_auth || '')) return { data: null, error: { code: '23514', message: 'new row for relation "push_subs" violates check constraint' } };
+            d0.push_subs = d0.push_subs.filter(x => x.endpoint !== args.p_endpoint);
+            d0.push_subs.push({ endpoint: args.p_endpoint, acc: me, p256dh: args.p_p256dh, auth: args.p_auth, preview: args.p_preview !== false, at: Date.now() });
+            save(d0); window.__pushSaves = (window.__pushSaves || 0) + 1; return { data: null, error: null };
+          }
+          if (name === 'push_remove') { d0.push_subs = d0.push_subs.filter(x => !(x.endpoint === args.p_endpoint && x.acc === me)); save(d0); window.__pushRemoves = (window.__pushRemoves || 0) + 1; return { data: null, error: null }; }
+          const mine = d0.push_subs.filter(x => x.acc === me), here = mine.find(x => x.endpoint === args.p_endpoint);
+          return { data: { n: mine.length, here: !!here, preview: here ? here.preview : null, keys: true }, error: null };
         }
         if (name === 'bootstrap') {
           const prof = a => { const p = d.profiles.find(x => x.account_id === a); return p && { account_id: p.account_id, nickname: p.nickname, avatar_url: null }; };
@@ -225,5 +245,25 @@
       done(200, { Key: 'chat-media/' + path });
     };
     setTimeout(tick, 10);
+  };
+})();
+
+/* 模拟推送函数 chatter-push（网页用 fetch 直接调用）：记录每次请求；__noFn = 没部署（404）；__fnNet = 网络不通 */
+(function () {
+  if (typeof window.fetch !== 'function') return;
+  const of = window.fetch;
+  window.fetch = function (u, init) {
+    const url = String((u && u.url) || u);
+    if (!/\/functions\/v1\/chatter-push$/.test(url)) return of.apply(this, arguments);
+    let body = {}; try { body = JSON.parse((init && init.body) || '{}'); } catch (e) {}
+    const h = (init && init.headers) || {};
+    (window.__fnCalls = window.__fnCalls || []).push(Object.assign({ auth: h.Authorization || '', apikey: h.apikey || '', keep: !!(init && init.keepalive), at: Date.now() }, body));
+    if (window.__fnNet) return Promise.reject(new TypeError('Failed to fetch'));
+    const R = (o, st) => new Promise(r => setTimeout(() => r(new Response(JSON.stringify(o), { status: st || 200, headers: { 'Content-Type': 'application/json' } })), 20));
+    if (window.__noFn) return R({ code: 'NOT_FOUND', message: 'Requested function was not found' }, 404);
+    if (!/^Bearer tok-/.test(h.Authorization || '') || !h.apikey) return R({ msg: 'Invalid JWT' }, 401);
+    if (body.op === 'key') return R({ pub: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', v: 1 });
+    if (body.op === 'push') return R(window.__fnSkip ? { ok: true, skip: window.__fnSkip } : { ok: true, sent: 1, codes: [201], gone: 0 });
+    return R({ error: 'op' }, 400);
   };
 })();
