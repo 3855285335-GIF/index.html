@@ -46,8 +46,13 @@
   .app-container { width: 100%; height: 100%; height: 100dvh; margin: 0 auto; background: var(--bg); position: relative; overflow: hidden; }
   @media (min-width: 768px) {
     body { display: flex; align-items: center; justify-content: center; background: radial-gradient(1200px 600px at 20% 0%, #e4dcff 0%, transparent 60%), radial-gradient(900px 500px at 90% 100%, #ffd9e6 0%, transparent 60%), #ece8f4; }
-    .app-container { max-width: 480px; height: 95vh; border-radius: 26px; box-shadow: 0 24px 70px rgba(60,40,120,.28); }
-    .chat-view { left: 50% !important; right: auto !important; top: 50% !important; width: 100%; max-width: 480px; height: 95vh !important; border-radius: 26px; transform: translate(-50%, -50%); box-shadow: 0 24px 70px rgba(60,40,120,.3); overflow: hidden; }
+    .app-container { max-width: 720px; height: 96vh; border-radius: 22px; box-shadow: 0 24px 70px rgba(60,40,120,.28); }
+    .chat-view { left: 50% !important; right: auto !important; top: 50% !important; width: 100%; max-width: 720px; height: 96vh !important; border-radius: 22px; transform: translate(-50%, -50%); box-shadow: 0 24px 70px rgba(60,40,120,.3); overflow: hidden; }
+  }
+  /* 大屏：铺满窗口，去掉手机壳的边框和圆角 */
+  @media (min-width: 1100px) {
+    .app-container { max-width: 920px; height: 100vh; border-radius: 0; box-shadow: none; }
+    .chat-view { max-width: 920px; height: 100vh !important; border-radius: 0; box-shadow: none; }
   }
   .view { display: none; position: absolute; inset: 0; flex-direction: column; }
   .view.active { display: flex; }
@@ -136,7 +141,7 @@
   .me-box .btns button { padding: 10px 16px; border-radius: 14px; font-weight: 600; }
 
   /* ---------- 聊天页 ---------- */
-  .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); background: var(--bg); display: none; flex-direction: column; z-index: 50; }
+  .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); background: var(--bg); background-image: var(--chat-bg, none); background-size: cover; background-position: center; background-repeat: no-repeat; display: none; flex-direction: column; z-index: 50; }
   body.chat-open .chat-view { display: flex; animation: fadein .18s ease; }
   .chat-view > header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; padding-top: calc(8px + env(safe-area-inset-top)); background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid var(--line); flex-shrink: 0; z-index: 2; }
   body.kb .chat-view > header { padding-top: 8px; }
@@ -608,6 +613,8 @@
           <input id="avatar-input" type="file" accept="image/*" hidden>
           <div class="section-title">设置</div>
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
+<div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
+<input id="bg-input" type="file" accept="image/*" hidden>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
@@ -1026,6 +1033,7 @@ function avatarHTML(name, url, online, key) {
 const EMPTY_SVG = '<svg viewBox="0 0 84 84" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="14" width="46" height="32" rx="14" fill="#6c5ce7" fill-opacity=".14" stroke="#6c5ce7" stroke-width="2.5"/><path d="M22 46l-3 12 14-12" fill="#6c5ce7" fill-opacity=".14" stroke="#6c5ce7" stroke-width="2.5"/><rect x="38" y="34" width="36" height="26" rx="12" fill="#e8508c" fill-opacity=".16" stroke="#e8508c" stroke-width="2.5"/><circle cx="48" cy="47" r="2" fill="#e8508c"/><circle cx="56" cy="47" r="2.6" fill="#e8508c"/><circle cx="65" cy="47" r="3.2" fill="#e8508c"/></svg>';
 const emptyHTML = t => '<div class="empty">' + EMPTY_SVG + t + '</div>';
 function renderMe() {
+  try { ensureChatBg(); } catch (e) {}
   $('me-name').textContent = S.me ? S.me.nickname : '加载中…';
   $('me-acc').textContent = S.me ? '@' + S.me.account_id : '';
   $('me-acc2').textContent = S.me ? S.me.account_id : '';
@@ -2423,6 +2431,64 @@ async function setAvatar(file) {
   S.me = Object.assign({}, S.me, { avatar_url: url }); S.profiles[ME()] = S.me; renderMe(); saveCache(); notifyFriends(); toast('头像已更新');
   try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const key = decodeURIComponent(m[1]); if (key.indexOf(ME() + '/avatar_') === 0) sb.storage.from('chat-media').remove([key]); } } catch (e) {}
 }
+
+/* ================= 聊天背景 ================= */
+async function fitJpeg(file, maxW, q) {
+  let bmp; try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { bmp = await createImageBitmap(file); }
+  const scale = Math.min(1, maxW / bmp.width);
+  const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(bmp, 0, 0, w, h); if (bmp.close) bmp.close();
+  return await new Promise(r => cv.toBlob(r, 'image/jpeg', q));
+}
+function applyChatBg(url) {
+  const v = url ? 'url("' + String(url).replace(/"/g, '%22') + '")' : 'none';
+  document.documentElement.style.setProperty('--chat-bg', v);
+  document.body.classList.toggle('has-chat-bg', !!url);
+}
+function hideBgUI() {
+  try { ['btn-bg', 'btn-bg-clear', 'bg-input'].forEach(function (id) { const el = $(id); if (el) el.style.display = 'none'; }); } catch (e) {}
+}
+let bgFetched = false;
+function ensureChatBg() {
+  if (!S.uid) { bgFetched = false; return; }
+  if (bgFetched) return; bgFetched = true;
+  if (S.me && typeof S.me.bg_url === 'string') { applyChatBg(S.me.bg_url); return; }
+  sb.from('profiles').select('bg_url').eq('id', S.uid).maybeSingle().then(function (r) {
+    if (r && r.error) { hideBgUI(); return; }
+    const v = (r && r.data && r.data.bg_url) || '';
+    if (S.me) S.me.bg_url = v;
+    applyChatBg(v);
+  }).catch(hideBgUI);
+}
+async function setChatBg(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('请选择图片'); return; }
+  toast('正在上传背景…');
+  let blob = null; try { blob = await fitJpeg(file, 1280, 0.82); } catch (e) { logErr('bg', e); }
+  if (!blob) { if (file.size > 8 * 1048576) { toast('图片太大，换一张'); return; } blob = file; }
+  const path = ME() + '/bg_' + now() + '.jpg';
+  const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  const { data, error } = await sb.from('profiles').update({ bg_url: url }).eq('id', S.uid).select('id');
+  if (error || !data || !data.length) throw error || new Error('保存失败');
+  const old = S.me.bg_url;
+  S.me = Object.assign({}, S.me, { bg_url: url }); S.profiles[ME()] = S.me;
+  applyChatBg(url); saveCache(); toast('聊天背景已更新');
+  try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/bg_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
+}
+async function clearChatBg() {
+  const { error } = await sb.from('profiles').update({ bg_url: null }).eq('id', S.uid);
+  if (error) throw error;
+  S.me = Object.assign({}, S.me, { bg_url: '' }); S.profiles[ME()] = S.me;
+  applyChatBg(''); saveCache(); toast('已恢复默认背景');
+}
+(function wireChatBg() {
+  const b = $('btn-bg'), cl = $('btn-bg-clear'), inp = $('bg-input');
+  if (b && inp) b.onclick = function () { inp.value = ''; inp.click(); };
+  if (inp) inp.onchange = function () { const f = inp.files && inp.files[0]; if (f) setChatBg(f).catch(function (e) { logErr('bg', e); toast('背景上传失败：' + (e && e.message ? e.message : e)); }); };
+  if (cl) cl.onclick = function () { clearChatBg().catch(function (e) { logErr('bg', e); toast('操作失败'); }); };
+})();
 
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
