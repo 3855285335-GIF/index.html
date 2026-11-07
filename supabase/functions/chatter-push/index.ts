@@ -1,6 +1,6 @@
 // @ts-nocheck -- 全部用纯 JavaScript 写法（不加类型标注），这样同一份代码也能在测试里直接运行
 // Chatter 推送函数（Supabase Edge Function，函数名：chatter-push）
-// 整段粘贴到 Supabase 后台的函数编辑器里，点 Deploy 就行；不需要设置任何密钥：
+// 整段粘贴到 Supabase 后台的函数编辑器里，点 Deploy；部署后在函数“设置”里关掉“Verify JWT with legacy secret”（函数自己核对登录凭证）。不需要设置任何密钥：
 //   - 推送签名密钥第一次运行时自动生成，存在数据库 push_keys 表里（网页和任何人都读不到）
 //   - 访问数据库用的是 Supabase 自动提供给函数的 SUPABASE_URL / SUPABASE_SECRET_KEYS
 // 网页只能让它做两件事：拿推送公钥（op: key）；请求给某个好友推一条通知（op: push）。

@@ -122,7 +122,7 @@ bash tests/runall.sh 2        # 网页测试跑两遍（见第 7 节）
   3. 函数用登录凭证查出发送方，调用数据库 `push_job()`：必须是好友、对方不在线（75 秒内没报到）、消息真的是这个人 3 分钟内发的、同一条只推一次；算出标题（有备注用备注）、内容（引用回复只留回复的话；可以设成不显示内容）、未读总数。
   4. 函数用 WebCrypto 自己加密（RFC 8291）和签名（RFC 8292），只发给苹果 / 谷歌 / 火狐 / 微软的推送服务；推送服务说地址失效（404 / 410）就删掉。
   5. 手机上的 `sw.js` 弹通知：同一个人的消息互相替换（显示“[3条] …”）；来电通知一直留着，没接通会被替换成“未接来电”；点通知打开对应聊天（`#c=账号`、`#call=账号` 会马上取一次来电信号、`#req`）。
-- 函数不需要任何手动设置的密钥：签名密钥第一次运行时自动生成，存在 `push_keys`（网页读不到）；访问数据库用 Supabase 自动提供给函数的 `SUPABASE_SECRET_KEYS`（旧项目回退到 `SUPABASE_SERVICE_ROLE_KEY`）。部署时保持默认的 JWT 校验（verify_jwt）打开。
+- 函数不需要任何手动设置的密钥：签名密钥第一次运行时自动生成，存在 `push_keys`（网页读不到）；访问数据库用 Supabase 自动提供给函数的 `SUPABASE_SECRET_KEYS`（旧项目回退到 `SUPABASE_SERVICE_ROLE_KEY`）。部署后在函数的“设置”（Settings）里把“使用遗留密钥验证 JWT”（Verify JWT with legacy secret）**关掉**并保存：这个开关只认旧版密钥签的登录凭证，项目换成新版签名密钥后会把正常用户也拒掉；函数自己会向 Supabase 核对登录凭证（`/auth/v1/user`），拿公钥（op: key）本来就不需要登录。Supabase 页面上也写着推荐关掉。
 - **限制**：iPhone 要 iOS 16.4 以上，而且必须从主屏幕图标打开 Chatter 才能开启（[WebKit 官方博客](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)）；iOS 16.4–18 要靠 manifest 里的 `display: standalone` 才算“网页 App”，所以 4.0 起 `main` 上放了单独的 `manifest.webmanifest`。安卓 Chrome 的网页推送走谷歌 FCM，国内网络一般收不到（未真机验证）。
 - **额度**：Supabase 免费版每月 50 万次函数调用，浏览器的预检请求（OPTIONS）不算（[官方文档](https://supabase.com/docs/guides/platform/manage-your-usage/edge-function-invocations)）。只有对方不在线时才调用，两个人用远远用不完。
 
