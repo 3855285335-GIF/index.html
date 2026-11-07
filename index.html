@@ -1813,6 +1813,7 @@ function showCallUI(call, status) {
   $('call-ui').classList.add('active');
 }
 function hideCallUI() {
+  SFX.ringStop();
   $('call-ui').classList.remove('active', 'connected', 'video', 'swap'); $('call-stats').classList.remove('show');
   $('remote-video').srcObject = null; $('local-video').srcObject = null; $('remote-audio').srcObject = null; $('remote-audio')._key = '';
 }
@@ -2026,6 +2027,7 @@ function onPcState(call) {
 async function startCall(video) {
   if (S.call || S.incoming || !S.peer) return;
   const pr = envProblem(); if (pr) { toast(pr); return; }
+  const ps = await mediaPerm(); if (ps.mic === 'denied' || (video && ps.cam === 'denied')) { callPermGuide(video); return; }
   if (!S.rt.user && S.noSigDb) { toast('实时通道连不上，且还没有运行 setup-v4.sql，暂时不能通话（我的 → 环境诊断）'); return; }
   const call = mkCall(S.peer, !!video, true); S.call = call;
   showCallUI(call, '正在呼叫…'); SFX.backStart();
@@ -2054,14 +2056,45 @@ function onInvite(p) {
   clearTimeout(S.incTimer); S.incTimer = setTimeout(() => { if (S.incoming && S.incoming.id === p.id) declineCall(); }, 40000);
 }
 function clearIncoming() { SFX.ringStop(); clearTimeout(S.incTimer); S.incoming = null; $('incoming-ui').classList.remove('active'); }
+/* 通话权限：先查状态，被拒绝时给可操作的指引，而不是一句“权限不足” */
+async function mediaPerm() {
+  const out = { mic: 'unknown', cam: 'unknown' };
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return out;
+    const m = await navigator.permissions.query({ name: 'microphone' });
+    out.mic = m.state;
+    const q = await navigator.permissions.query({ name: 'camera' });
+    out.cam = q.state;
+  } catch (e) {}
+  return out;
+}
+function callPermGuide(video) {
+  const need = video ? '麦克风和摄像头' : '麦克风';
+  openActs('浏览器禁止了' + need, [
+    { label: '① 点地址栏左边的锁或图标', fn: function () {} },
+    { label: '② 把' + need + '改成“允许”', fn: function () {} },
+    { label: '③ 回来让对方再打一次', fn: function () {} },
+    { label: '重新请求一次权限', fn: function () { requestCallPerm(video); } },
+    { label: '关闭', danger: true, fn: function () {} }
+  ]);
+}
+async function requestCallPerm(video) {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!video });
+    stopStream(s); toast('权限已获取，可以正常通话了');
+  } catch (e) { toast('还是不行：' + micError(e)); }
+}
 function declineCall() {
   const inc = S.incoming; if (!inc) return;
   clearIncoming(); delete S.pendingIce[inc.id]; sig(inc.from, 'reject', { id: inc.id });
 }
 async function acceptCall() {
   const inc = S.incoming; if (!inc) return;
+  SFX.ringStop();
   const pr = envProblem();
   if (pr) { toast(pr); declineCall(); return; }
+  const ps = await mediaPerm();
+  if (ps.mic === 'denied' || (inc.video && ps.cam === 'denied')) { callPermGuide(inc.video); return; }
   clearIncoming();
   const call = mkCall(inc.from, inc.video, false, inc.id); S.call = call;
   showCallUI(call, '连接中…');
@@ -2074,7 +2107,13 @@ async function acceptCall() {
     const ok = await sig(call.peer, 'accept', { id: call.id, sdp: { type: ans.type, sdp: ans.sdp } });
     if (!ok) throw new Error('信令发送失败，请检查网络');
     ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时：网络受限（可能需要配置 TURN 服务器）', true); }, 25000);
-  } catch (e) { logErr('acceptCall', e); if (S.call === call) endCall('接听失败：' + micError(e), true); }
+  } catch (e) {
+    logErr('acceptCall', e);
+    if (S.call === call) {
+      endCall('接听失败：' + micError(e), true);
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) setTimeout(function () { callPermGuide(call.video); }, 400);
+    }
+  }
 }
 async function onAccept(p) {
   const call = S.call;
