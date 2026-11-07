@@ -124,6 +124,7 @@
   .btn-primary { background: var(--brand); color: #fff; }
   .btn-danger { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
   .btn-ok { background: var(--ok); color: #fff; }
+  .btn-soft { background: var(--surface2); color: var(--ink); }
   .section-title { font-size: 12px; color: var(--muted); letter-spacing: 1px; padding: 6px 6px 8px; }
   .empty { padding: 46px 20px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.7; }
   .empty svg { width: 84px; height: 84px; margin: 0 auto 10px; display: block; opacity: .9; }
@@ -338,6 +339,31 @@
   .mute-ic { width: 14px; height: 14px; margin-left: 5px; vertical-align: -2px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .badge.mute { background: #b9b4cc; box-shadow: none; }
   #as-title { white-space: pre-line; }
+  /* 好友资料页 */
+  #profile-card { padding-top: 18px; }
+  .pf-top { display: flex; align-items: center; gap: 14px; padding: 4px 20px 14px; }
+  #pf-av .avatar { width: 64px; height: 64px; font-size: 26px; }
+  .pf-names { min-width: 0; }
+  #pf-name { font-size: 20px; font-weight: 700; word-break: break-all; }
+  #pf-sub { font-size: 13px; color: var(--muted); line-height: 1.55; margin-top: 2px; word-break: break-all; }
+  .pf-on::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #b9b4cc; margin-right: 5px; vertical-align: 1px; }
+  .pf-on.on::before { background: var(--ok); }
+  .pf-acts { display: flex; gap: 8px; padding: 0 16px 12px; }
+  .pf-acts button { flex: 1; padding: 11px 0; border-radius: 14px; background: var(--surface2); font-size: 14.5px; font-weight: 600; color: var(--ink); }
+  .pf-acts button:first-child { background: var(--brand); color: #fff; }
+  #pf-del { color: var(--danger); }
+  /* 上传进度 */
+  .bubble.img { position: relative; }
+  .uppct { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 13px; background: rgba(0,0,0,.55); padding: 4px 11px; border-radius: 12px; pointer-events: none; white-space: nowrap; }
+  .upbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.25); pointer-events: none; }
+  .upbar i { display: block; height: 100%; background: #fff; transition: width .2s linear; }
+  .bubble.file { position: relative; overflow: hidden; }
+  /* 存储用量 */
+  .st-tl { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .st-bar { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; margin-bottom: 10px; }
+  .st-bar i { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
+  .st-bar.warn i { background: var(--danger); }
+  #chat-title { cursor: pointer; }
   #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #msg-menu { max-height: 86vh; overflow-y: auto; }
   #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
@@ -439,7 +465,7 @@ __LOGO_SYMBOL__
         <button type="submit">注册</button>
       </form>
       <div id="auth-msg" class="auth-message"></div>
-      <div class="build">build 3.8.3</div>
+      <div class="build">build 3.9</div>
     </div>
   </div>
 
@@ -469,7 +495,7 @@ __LOGO_SYMBOL__
           <input id="avatar-input" type="file" accept="image/*" hidden>
           <div class="section-title">设置</div>
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button></div>
-          <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
+          <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
           <pre id="diag"></pre>
           <div class="section-title">最近错误</div>
@@ -526,6 +552,14 @@ __LOGO_SYMBOL__
 
 <div id="act-backdrop" class="sheet-bd"></div>
 <div id="act-sheet" class="sheet"><div class="menu-title" id="as-title"></div><div id="as-items"></div></div>
+<div id="pf-backdrop" class="sheet-bd"></div>
+<div id="profile-card" class="sheet">
+  <div class="pf-top"><div id="pf-av"></div><div class="pf-names"><div id="pf-name"></div><div id="pf-sub"></div></div></div>
+  <div class="pf-acts"><button id="pf-chat" type="button">发消息</button><button id="pf-voice" type="button">语音通话</button><button id="pf-video" type="button">视频通话</button></div>
+  <button id="pf-remark" type="button" class="menu-item plain">设置备注</button>
+  <button id="pf-del" type="button" class="menu-item">删除好友</button>
+  <button id="pf-close" type="button" class="menu-item plain">关闭</button>
+</div>
 <div id="form-backdrop" class="sheet-bd"></div>
 <div id="form-sheet" class="sheet"><div class="menu-title" id="fs-title"></div><div id="fs-fields"></div><div id="fs-msg"></div><div class="fs-btns"><button id="fs-cancel" type="button">取消</button><button id="fs-ok" type="button">确定</button></div></div>
 <div id="msg-menu-backdrop"></div>

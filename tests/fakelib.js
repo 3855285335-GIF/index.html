@@ -32,7 +32,7 @@
   function query(table) {
     const q = { table, op: 'select', f: [], ord: null, lim: null, vals: null, single: false, maybe: false };
     const api = {
-      select() { return api; }, eq(c, v) { q.f.push(r => String(r[c]) === String(v)); return api; }, neq(c, v) { q.f.push(r => String(r[c]) !== String(v)); return api; },
+      select(c) { q.sel = c || '*'; return api; }, eq(c, v) { q.f.push(r => String(r[c]) === String(v)); return api; }, neq(c, v) { q.f.push(r => String(r[c]) !== String(v)); return api; },
       lt(c, v) { q.f.push(r => r[c] < v); return api; }, gt(c, v) { q.f.push(r => r[c] > v); return api; }, in(c, a) { q.f.push(r => a.indexOf(r[c]) > -1); return api; },
       or(s) { const parts = s.split(',').map(p => p.match(/^(\w+)\.ilike\.%(.*)%$/)); q.f.push(r => parts.some(m => m && String(r[m[1]] || '').toLowerCase().indexOf(m[2].toLowerCase()) > -1)); return api; },
       ilike(c, pat) { const lit = String(pat).replace(/^%|%$/g, '').replace(/\\([\\%_])/g, '$1').toLowerCase(); q.f.push(r => String(r[c] || '').toLowerCase().indexOf(lit) > -1); return api; },
@@ -43,6 +43,7 @@
     };
     function run() {
       const d = T(table); let rows = d[table];
+      if (table === 'friendships' && window.__noV7 && /remark/.test(q.sel || '')) return { data: null, error: { code: '42703', message: 'column friendships.remark does not exist' } };
       if (table === 'stickers') {   // 模拟 setup-v6.sql 的表和权限：只能看/改/删自己的；只能加自己文件夹里的；最多 500 个
         if (window.__noV6) return { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public.stickers' in the schema cache" } };
         q.f.push(r => r.owner_acc === me);
@@ -109,6 +110,7 @@
           setTimeout(() => subs.forEach(cb => cb('SIGNED_IN', { access_token: 'tok-' + acc, user: { id: 'uid-' + acc } })), 5);
           return { data: { user: { id: 'uid-' + acc }, session: { access_token: 'tok-' + acc } }, error: null };
         },
+        async getSession() { return { data: { session: me ? { access_token: 'tok-' + me } : null }, error: null }; },
         async getUser() { return { data: { user: { id: 'uid-' + me, email: me + '@chatter.local' } }, error: null }; },
         async updateUser({ password }) { if (window.__failUpdate) return { data: null, error: { message: 'weak' } }; (window.__pw = window.__pw || []).push(password); return { data: {}, error: null }; },
         async signOut() { return {}; }
@@ -125,7 +127,17 @@
         if (window.__netFail) return { data: null, error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' } };
         const d = load();
         if (name === 'account_exists') { if (window.__noAccFn) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.account_exists(p_acc) in the schema cache' } }; return { data: d.profiles.some(p => p.account_id === args.p_acc), error: null }; }
-        if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: 6, error: null }; }
+        if (name === 'chatter_schema') { window.__schemaCalls = (window.__schemaCalls || 0) + 1; return window.__noV6 ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.chatter_schema without parameters in the schema cache' } } : { data: window.__noV7 ? 6 : 7, error: null }; }
+        if (name === 'remove_friendship') { const d0 = load(); d0.friendships = (d0.friendships || []).filter(f => !((f.owner_acc === args.p_me && f.friend_acc === args.p_peer) || (f.owner_acc === args.p_peer && f.friend_acc === args.p_me))); save(d0); return { data: null, error: null }; }
+        if (name === 'set_remark' || name === 'storage_used') {
+          if (window.__noV7) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.' + name + ' in the schema cache' } };
+          if (name === 'storage_used') return { data: window.__stUsed != null ? window.__stUsed : 0, error: null };
+          const d0 = load(), r = String(args.p_remark || '').trim();
+          if (Array.from(r).length > 20) return { data: null, error: { code: 'P0001', message: 'remark too long' } };
+          const row = (d0.friendships || []).find(f => f.owner_acc === me && f.friend_acc === args.p_friend);
+          if (!row) return { data: null, error: { code: 'P0001', message: 'not friends' } };
+          row.remark = r; save(d0); window.__remarkCalls = (window.__remarkCalls || 0) + 1; return { data: null, error: null };
+        }
         if (name === 'bootstrap') {
           const prof = a => { const p = d.profiles.find(x => x.account_id === a); return p && { account_id: p.account_id, nickname: p.nickname, avatar_url: null }; };
           const friends = d.friendships.filter(f => f.owner_acc === me).map(f => prof(f.friend_acc));
@@ -187,3 +199,31 @@
   } };
 })();
 /* createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding createClient padding */
+
+/* 模拟 Supabase Storage 的上传接口（网页用 XHR 直接上传，才能显示进度） */
+(function () {
+  if (typeof XMLHttpRequest === 'undefined') return;
+  const XP = XMLHttpRequest.prototype, o = XP.open, sd = XP.send, sh = XP.setRequestHeader;
+  XP.open = function (m, u) { this.__fk = /\/storage\/v1\/object\/chat-media\//.test(u) && !window.__realXhr ? { u, h: {} } : null; if (!this.__fk) return o.apply(this, arguments); };
+  XP.setRequestHeader = function (k, v) { if (this.__fk) { this.__fk.h[String(k).toLowerCase()] = v; return; } return sh.apply(this, arguments); };
+  XP.send = function (body) {
+    if (!this.__fk) return sd.apply(this, arguments);
+    const x = this, fk = this.__fk;
+    const path = decodeURIComponent(fk.u.split('/storage/v1/object/chat-media/')[1] || '');
+    const file = body && body.get ? body.get('') : body, size = file ? file.size : 0;
+    (window.__xhrReqs = window.__xhrReqs || []).push({ path, auth: fk.h.authorization || '', apikey: fk.h.apikey || '', upsert: fk.h['x-upsert'], cc: body && body.get ? body.get('cacheControl') : null });
+    const done = (st, obj) => { Object.defineProperty(x, 'status', { value: st, configurable: true }); Object.defineProperty(x, 'responseText', { value: JSON.stringify(obj), configurable: true }); if (x.onload) x.onload(); };
+    if (window.__xhrFail) { setTimeout(() => { if (x.onerror) x.onerror(); }, 20); return; }
+    if (!/^Bearer tok-/.test(fk.h.authorization || '') || !fk.h.apikey) { setTimeout(() => done(400, { statusCode: '400', error: 'Bad Request', message: 'Invalid headers' }), 20); return; }
+    const lim = window.__noV6 ? 20971520 : 52428800;
+    if (size > lim) { setTimeout(() => done(413, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' }), 20); return; }
+    const steps = window.__slowUp ? 10 : 3; let i = 0;
+    const tick = () => {
+      i++; if (x.upload && x.upload.onprogress) x.upload.onprogress({ lengthComputable: true, loaded: Math.round(size * i / steps), total: size });
+      if (i < steps) { setTimeout(tick, window.__slowUp || 15); return; }
+      (window.__uploads = window.__uploads || []).push(size); (window.__upl = window.__upl || []).push({ path, size, ct: file && file.type, via: 'xhr' });
+      done(200, { Key: 'chat-media/' + path });
+    };
+    setTimeout(tick, 10);
+  };
+})();
