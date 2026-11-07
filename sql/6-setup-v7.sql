@@ -9,6 +9,20 @@
 -- ============================================================
 
 
+-- 整份放在一个事务里：中间任何一句出错，前面做的也会全部撤销，不会只改一半
+begin;
+
+-- ========== 0. 先确认是 Chatter 的数据库（选错项目时直接报错，什么都不会改） ==========
+do $$ begin
+  if to_regclass('public.friendships') is null or to_regclass('public.messages') is null then
+    raise exception '这不是 Chatter 的数据库：找不到 friendships / messages 表。请确认页面左上角选的是 Chatter 的项目（地址里应有 uaoiqbxptnbrvkzjwguc），这次什么都没有改动';
+  end if;
+  if to_regclass('public.stickers') is null then
+    raise exception '请先运行 setup-v6.sql（表情包 / 视频 / 文件），再运行这一份。这次什么都没有改动';
+  end if;
+end $$;
+
+
 -- ========== 1. 好友备注 ==========
 alter table public.friendships add column if not exists remark text not null default '';
 
@@ -48,5 +62,7 @@ create or replace function public.chatter_schema()
 returns integer language sql immutable as $$ select 7 $$;
 revoke all on function public.chatter_schema() from public, anon;
 grant execute on function public.chatter_schema() to authenticated;
+
+commit;
 
 -- 完成 ✅
