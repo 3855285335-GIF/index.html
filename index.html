@@ -3392,8 +3392,9 @@ function pushDiag() {
 }
 
 /* ---- App 开着：顶部横幅；App 在后台但还没被系统关掉：系统通知（没开推送时才弹，免得一条弹两次） ---- */
-async function localNote(title, body, tag, url, call) {
-  if (notePerm() !== 'granted' || (pushOn() && PUSH.srv !== false)) return;
+async function localNote(title, body, tag, url, call, force) {
+  if (notePerm() !== 'granted') return;
+  if (!force && pushOn() && PUSH.srv !== false) return;
   try {
     const opt = { body, tag, renotify: true, icon: 'icon-192.png', badge: 'badge-96.png', data: { url }, requireInteraction: !!call };
     const r = await swReg();
@@ -3434,7 +3435,7 @@ function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天
 }
 function noteRequest(r) {
   const name = r.from_name || r.from_acc, body = name + '（' + r.from_acc + '）请求加你为好友';
-  if (document.hidden) { localNote('新的好友请求', body, 'r:' + r.from_acc, './#req'); return; }
+  if (document.hidden) { localNote('新的好友请求', body, 'r:' + r.from_acc, './#req', false, true); return; }
   if (!S.conv && $('tab-requests').classList.contains('active')) return;
   showNBar({ key: 'r:' + r.from_acc, acc: r.from_acc, av: name, title: '新的好友请求', body, go: () => goTab('requests') });
 }
