@@ -2490,6 +2490,31 @@ async function clearChatBg() {
   if (cl) cl.onclick = function () { clearChatBg().catch(function (e) { logErr('bg', e); toast('操作失败'); }); };
 })();
 
+/* ================= 全局健壮性：脚本错误上报 / 粘贴发图 / 离开提醒 ================= */
+window.onerror = function (msg, src, line, col, err) {
+  try { logErr('window', String(msg) + ' @' + (src || '') + ':' + line + ':' + col); } catch (e) {}
+  return false;
+};
+document.addEventListener('paste', function (e) {
+  try {
+    if (!S || !S.conv) return;
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && /^image\//.test(items[i].type)) {
+        const f = items[i].getAsFile();
+        if (f) { e.preventDefault(); sendImage(f); return; }
+      }
+    }
+  } catch (err) {}
+});
+window.addEventListener('beforeunload', function (e) {
+  try {
+    let pending = 0;
+    if (S && S.out && S.out.forEach) S.out.forEach(function (m) { if (m && (m._st === 'sending' || m._st === 'failed')) pending++; });
+    if (pending > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
+  } catch (err) {}
+});
+
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
