@@ -1013,7 +1013,14 @@ let sb = null;
 const ME = () => S.me && S.me.account_id;
 const nickOf = a => (S.profiles[a] && S.profiles[a].nickname) || a;
 const remarkOf = a => (S.remarks && S.remarks[a] && S.remarks[a].r) || '';
-const peerName = a => remarkOf(a) || nickOf(a);   // 有备注就显示备注
+const peerName = a => {
+  if (typeof a === 'string' && a.indexOf('g:') === 0) {
+    const gid = a.slice(2);
+    try { const g = (typeof GRP !== 'undefined' && GRP.list ? GRP.list : []).find(function (x) { return x.id === gid; }); if (g) return g.name; } catch (e) {}
+    return '群聊';
+  }
+  return remarkOf(a) || nickOf(a);   // 有备注就显示备注
+};
 const avatarOf = a => (S.profiles[a] && S.profiles[a].avatar_url) || '';
 const isOnline = a => S.online.has(a) || (S.fbOnline && S.fbOnline.has(a));
 const convOf = k => S.convs.find(c => c.convKey === k);
