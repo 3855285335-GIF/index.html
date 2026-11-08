@@ -66,7 +66,7 @@
     .chat-view { max-width: 920px; height: 100vh !important; border-radius: 0; box-shadow: none; }
   }
   /* 大屏 + 打开聊天：左侧会话列表固定 372px，右侧聊天铺满，像电脑版微信 */
-  @media (min-width: 1100px) {
+  @media (min-width: 980px) {
     body.chat-open { justify-content: flex-start; }
     body.chat-open .app-container { width: 372px; max-width: 372px; height: 100vh; border-radius: 0; box-shadow: none; }
     body.chat-open .chat-view { left: 372px !important; right: 0 !important; top: 0 !important; width: auto !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: -8px 0 24px rgba(0,0,0,.10); }
@@ -2635,7 +2635,7 @@ function searchMsgs() {
     toast('搜索中…');
     try {
       const { data, error } = await sb.from('messages')
-        .select('id,conv,from_acc,to_acc,body,type,created_at')
+        .select('id,conv_key,from_acc,to_acc,body,type,created_at')
         .ilike('body', '%' + q + '%')
         .order('created_at', { ascending: false })
         .limit(40);
