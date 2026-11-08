@@ -281,6 +281,27 @@
 
   #msg-menu-backdrop { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2400; display: none; }
   #msg-menu-backdrop.active { display: block; }
+  #grp-panel { position: fixed; inset: 0; z-index: 2700; background: var(--bg); display: none; flex-direction: column; }
+  #grp-panel.active { display: flex; }
+  .grp-bar { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .grp-bar b { flex: 1; font-size: 17px; }
+  .grp-bar button { width: 34px; height: 34px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 18px; }
+  #grp-list { flex: 1; overflow: auto; }
+  .grp-item { padding: 14px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .grp-item:active { background: var(--surface2); }
+  .grp-item small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .grp-actions { padding: 12px 16px; }
+  .grp-actions button { width: 100%; padding: 12px; border-radius: 14px; background: var(--brand); color: #fff; font-size: 15px; }
+  .grp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 14px; }
+  #grp-chat { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  #grp-chat.active { display: flex; }
+  #grp-msgs { flex: 1; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .grp-msg { max-width: 78%; padding: 9px 12px; border-radius: 14px; background: var(--surface); font-size: 14px; line-height: 1.45; word-break: break-word; }
+  .grp-msg.mine { align-self: flex-end; background: var(--accent); color: #fff; }
+  .grp-msg .who { display: block; font-size: 11px; opacity: .7; margin-bottom: 3px; }
+  .grp-input { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .grp-input input { flex: 1; }
+  .grp-input button { padding: 0 14px; border-radius: 12px; background: var(--accent); color: #fff; }
   #multi-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2600; display: none; align-items: center; gap: 10px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(0,0,0,.12); }
   #multi-bar.active { display: flex; }
   #multi-count { flex: 1; font-size: 14px; color: var(--muted); }
@@ -638,7 +659,7 @@
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
-<div class="btns" style="margin-bottom:10px"><button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-export" type="button">📄 导出聊天记录</button></div>
+<div class="btns" style="margin-bottom:10px"><button id="btn-groups" type="button">👥 群聊</button><button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-export" type="button">📄 导出聊天记录</button></div>
 <input id="bg-input" type="file" accept="image/*" hidden>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
@@ -710,6 +731,15 @@
 <div id="form-backdrop" class="sheet-bd"></div>
 <div id="form-sheet" class="sheet"><div class="menu-title" id="fs-title"></div><div id="fs-fields"></div><div id="fs-msg"></div><div class="fs-btns"><button id="fs-cancel" type="button">取消</button><button id="fs-ok" type="button">确定</button></div></div>
 <div id="msg-menu-backdrop"></div>
+<div id="grp-panel">
+  <div class="grp-bar"><button id="grp-back" type="button" style="display:none">‹</button><b id="grp-title">群聊</b><button id="grp-close" type="button">×</button></div>
+  <div id="grp-list"><div class="grp-empty">还没有群聊</div></div>
+  <div class="grp-actions"><button id="grp-new" type="button">＋ 新建群聊</button></div>
+  <div id="grp-chat">
+    <div id="grp-msgs"></div>
+    <div class="grp-input"><input id="grp-text" type="text" placeholder="说点什么…" autocomplete="off"><button id="grp-send" type="button">发送</button><button id="grp-invite" type="button">拉人</button></div>
+  </div>
+</div>
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
 <div id="msg-menu">
   <div class="menu-title" id="msg-menu-title">消息</div>
@@ -2622,6 +2652,108 @@ function searchMsgs() {
     } catch (e) { logErr('search', e); toast('搜索失败：' + (e && e.message ? e.message : e)); }
   });
 }
+/* ================= 群聊 ================= */
+const GRP = { list: [], cur: null, timer: 0, last: null };
+function grpClose() { clearInterval(GRP.timer); GRP.timer = 0; const el = $('grp-panel'); if (el) el.classList.remove('active'); }
+function grpShowChat(on) {
+  $('grp-chat').classList.toggle('active', !!on);
+  $('grp-list').style.display = on ? 'none' : '';
+  $('grp-new').style.display = on ? 'none' : '';
+  $('grp-back').style.display = on ? '' : 'none';
+  $('grp-title').textContent = on ? (GRP.cur ? GRP.cur.name : '群聊') : '群聊';
+}
+async function grpLoad() {
+  const el = $('grp-list'); if (!el) return;
+  try {
+    const me = await public_my_acc();
+    const { data, error } = await sb.from('chat_group_members').select('group_id').eq('account_id', me);
+    if (error) throw error;
+    const ids = (data || []).map(function (r) { return r.group_id; });
+    if (!ids.length) { GRP.list = []; el.innerHTML = '<div class="grp-empty">还没有群聊</div>'; return; }
+    const g = await sb.from('chat_groups').select('id,name,owner_acc').in('id', ids);
+    if (g.error) throw g.error;
+    GRP.list = g.data || [];
+    el.innerHTML = GRP.list.map(function (x) {
+      return '<div class="grp-item" data-id="' + x.id + '"><b>' + esc(x.name) + '</b><small>' + esc(x.owner_acc === ME() ? '我创建的' : '群成员') + '</small></div>';
+    }).join('') || '<div class="grp-empty">还没有群聊</div>';
+  } catch (e) { logErr('grp', e); el.innerHTML = '<div class="grp-empty">加载失败：' + esc(e.message || e) + '</div>'; }
+}
+async function public_my_acc() { return ME(); }
+function grpOpenPanel() { $('grp-panel').classList.add('active'); grpShowChat(false); grpLoad(); }
+async function grpNew() {
+  openForm('新建群聊', [{ ph: '群名称（1-20 字）', max: 20 }], async function (v) {
+    const name = String((v && v[0]) || '').trim();
+    if (!name) return;
+    try {
+      const me = ME();
+      const gid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2) + '-4000-8000-' + Date.now());
+      const ins = await sb.from('chat_groups').insert({ id: gid, name: name, owner_acc: me });
+      if (ins.error) throw ins.error;
+      const mem = await sb.from('chat_group_members').insert({ group_id: gid, account_id: me, role: 'owner' });
+      if (mem.error) throw mem.error;
+      toast('群已创建');
+      await grpLoad();
+    } catch (e) { logErr('grpNew', e); toast('建群失败：' + (e.message || e)); }
+  });
+}
+async function grpOpen(id) {
+  GRP.cur = GRP.list.find(function (x) { return x.id === id; }) || null;
+  if (!GRP.cur) return;
+  GRP.last = null; $('grp-msgs').innerHTML = '';
+  grpShowChat(true);
+  await grpFetch(true);
+  clearInterval(GRP.timer);
+  GRP.timer = setInterval(function () { grpFetch(false); }, 3000);
+}
+async function grpFetch(reset) {
+  if (!GRP.cur) return;
+  try {
+    let q = sb.from('messages').select('id,conv_key,from_acc,type,body,created_at')
+      .eq('conv_key', 'g:' + GRP.cur.id)
+      .order('created_at', { ascending: false })
+      .limit(60);
+    const r = await q;
+    if (r.error) throw r.error;
+    const rows = (r.data || []).slice().reverse();
+    const box = $('grp-msgs');
+    const html = rows.map(function (m) {
+      const mine = m.from_acc === ME();
+      const txt = m.type === 'text' ? parseQ(m.body).text : '[' + m.type + ']';
+      return '<div class="grp-msg' + (mine ? ' mine' : '') + '">' + (mine ? '' : '<span class="who">' + esc(m.from_acc) + '</span>') + esc(txt) + '</div>';
+    }).join('');
+    box.innerHTML = html || '<div class="grp-empty">还没有消息</div>';
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { logErr('grpFetch', e); }
+}
+async function grpSend() {
+  const inp = $('grp-text'); const t = (inp.value || '').trim();
+  if (!t || !GRP.cur) return;
+  inp.value = '';
+  try {
+    const row = { conv_key: 'g:' + GRP.cur.id, from_acc: ME(), to_acc: null, type: 'text', body: t, created_at: new Date().toISOString() };
+    const r = await sb.from('messages').insert(row);
+    if (r.error) throw r.error;
+    grpFetch(false);
+  } catch (e) { logErr('grpSend', e); toast('发送失败：' + (e.message || e)); }
+}
+async function grpInvite() {
+  if (!GRP.cur) return;
+  const items = S.friends.slice(0, 20).map(function (a) {
+    return { label: peerName(a), fn: async function () {
+      try {
+        const r = await sb.from('chat_group_members').insert({ group_id: GRP.cur.id, account_id: a, role: 'member' });
+        if (r.error) throw r.error;
+        toast('已拉入 ' + peerName(a));
+      } catch (e) { toast('拉人失败：' + (e.message || e)); }
+    } };
+  });
+  items.push({ label: '取消', danger: true, fn: function () {} });
+  openActs('拉谁进群', items);
+}
+document.addEventListener('click', function (e) {
+  const it = e.target && e.target.closest ? e.target.closest('.grp-item') : null;
+  if (it) { grpOpen(it.getAttribute('data-id')); }
+});
 /* ================= 多选 ================= */
 let selMode = false, selSet = new Set();
 function paintMulti() {
@@ -3899,6 +4031,13 @@ $('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
 $('multi-del').onclick = multiDel;
 $('multi-fwd').onclick = multiFwd;
 $('multi-cancel').onclick = exitMulti;
+$('btn-groups').onclick = grpOpenPanel;
+$('grp-close').onclick = grpClose;
+$('grp-back').onclick = function () { grpShowChat(false); clearInterval(GRP.timer); };
+$('grp-new').onclick = grpNew;
+$('grp-send').onclick = grpSend;
+$('grp-invite').onclick = grpInvite;
+$('grp-text').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); grpSend(); } });
 $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
   $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
   $('nt-on').onclick = pushEnableClick;
