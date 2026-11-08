@@ -2693,7 +2693,9 @@ async function grpNew() {
   });
 }
 async function grpOpen(id) {
-  GRP.cur = GRP.list.find(function (x) { return x.id === id; }) || null;`r`n  if (!GRP.cur) { try { const r = await sb.from('chat_groups').select('id,name,owner_acc').eq('id', id).maybeSingle(); if (r && r.data) GRP.cur = r.data; } catch (e) {} }`r`n  if (!GRP.cur) GRP.cur = { id: id, name: '群聊' };
+  GRP.cur = GRP.list.find(function (x) { return x.id === id; }) || null;
+  if (!GRP.cur) { try { const r = await sb.from('chat_groups').select('id,name,owner_acc').eq('id', id).maybeSingle(); if (r && r.data) GRP.cur = r.data; } catch (e) {} }
+  if (!GRP.cur) GRP.cur = { id: id, name: '群聊' };
   if (!GRP.cur) return;
   GRP.last = null; $('grp-msgs').innerHTML = '';
   grpShowChat(true);
