@@ -281,6 +281,12 @@
 
   #msg-menu-backdrop { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2400; display: none; }
   #msg-menu-backdrop.active { display: block; }
+  #multi-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2600; display: none; align-items: center; gap: 10px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(0,0,0,.12); }
+  #multi-bar.active { display: flex; }
+  #multi-count { flex: 1; font-size: 14px; color: var(--muted); }
+  #multi-bar button { padding: 8px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 14px; }
+  #multi-del { background: var(--danger) !important; color: #fff !important; }
+  .msg.sel .bubble { outline: 2px solid var(--accent); outline-offset: 2px; }
   #msg-menu { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--surface); border-radius: 22px; z-index: 2500; display: none; min-width: 250px; max-width: 80vw; box-shadow: 0 20px 60px rgba(0,0,0,.35); overflow: hidden; }
   #msg-menu.active { display: block; animation: popc .18s ease; }
   #msg-menu .menu-title { padding: 15px 16px; font-size: 13px; color: var(--muted); text-align: center; border-bottom: 1px solid var(--line); }
@@ -704,11 +710,13 @@
 <div id="form-backdrop" class="sheet-bd"></div>
 <div id="form-sheet" class="sheet"><div class="menu-title" id="fs-title"></div><div id="fs-fields"></div><div id="fs-msg"></div><div class="fs-btns"><button id="fs-cancel" type="button">取消</button><button id="fs-ok" type="button">确定</button></div></div>
 <div id="msg-menu-backdrop"></div>
+<div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
 <div id="msg-menu">
   <div class="menu-title" id="msg-menu-title">消息</div>
   <button id="msg-menu-reply" type="button" class="menu-item plain">回复</button>
   <button id="msg-menu-copy" type="button" class="menu-item plain">复制</button>
   <button id="msg-menu-fwd" type="button" class="menu-item plain">转发</button>
+<button id="msg-menu-multi" type="button" class="menu-item plain">多选</button>
   <button id="msg-menu-stk" type="button" class="menu-item plain">添加到表情</button>
   <button id="msg-menu-save" type="button" class="menu-item plain">保存到手机</button>
   <button id="msg-menu-recall" type="button" class="menu-item">撤回</button>
@@ -2614,6 +2622,60 @@ function searchMsgs() {
     } catch (e) { logErr('search', e); toast('搜索失败：' + (e && e.message ? e.message : e)); }
   });
 }
+/* ================= 多选 ================= */
+let selMode = false, selSet = new Set();
+function paintMulti() {
+  try {
+    const bar = $('multi-bar'); if (!bar) return;
+    $('multi-count').textContent = '已选 ' + selSet.size + ' 条';
+    bar.classList.toggle('active', selMode && selSet.size > 0);
+  } catch (e) {}
+}
+function startMulti(id) {
+  selMode = true; selSet = new Set(); document.body.classList.add('multi');
+  if (id) { selSet.add(id); const el = msgElOf(id); if (el) el.classList.add('sel'); }
+  paintMulti();
+}
+function toggleSel(id) {
+  if (!id) return;
+  const el = msgElOf(id);
+  if (selSet.has(id)) { selSet.delete(id); if (el) el.classList.remove('sel'); }
+  else { selSet.add(id); if (el) el.classList.add('sel'); }
+  paintMulti();
+}
+function exitMulti() {
+  selSet.forEach(function (id) { const el = msgElOf(id); if (el) el.classList.remove('sel'); });
+  selSet = new Set(); selMode = false; document.body.classList.remove('multi'); paintMulti();
+}
+function multiDel() {
+  const n = selSet.size; if (!n) return;
+  selSet.forEach(function (id) {
+    hidden.add(id); S.out.delete(id);
+    const el = msgElOf(id); if (el) el.remove();
+  });
+  saveHidden(); exitMulti();
+  if (!$('chat-messages').querySelector('.msg')) chatRender(true);
+  toast('已删除 ' + n + ' 条（仅在你这边）');
+}
+function multiFwd() {
+  if (!selSet.size) return;
+  const ids = Array.from(selSet);
+  const items = S.friends.slice(0, 12).map(function (a) {
+    return { label: peerName(a), fn: function () {
+      ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
+      toast('已转发 ' + ids.length + ' 条'); exitMulti();
+    } };
+  });
+  items.push({ label: '取消', danger: true, fn: function () {} });
+  openActs('转发给', items);
+}
+document.addEventListener('click', function (e) {
+  if (!selMode) return;
+  const el = e.target && e.target.closest ? e.target.closest('.msg') : null;
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  toggleSel(el.getAttribute('data-id'));
+}, true);
 /* ================= 主题切换 / 导出聊天记录 ================= */
 function applyTheme() {
   const t = LS.get('ch2theme', 'auto');
@@ -3833,6 +3895,10 @@ function bindUI() {
   $('btn-theme').onclick = cycleTheme;
 $('btn-export').onclick = exportChat;
 $('btn-msearch').onclick = searchMsgs;
+$('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
+$('multi-del').onclick = multiDel;
+$('multi-fwd').onclick = multiFwd;
+$('multi-cancel').onclick = exitMulti;
 $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
   $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
   $('nt-on').onclick = pushEnableClick;
