@@ -625,7 +625,7 @@
           <div class="section-title">设置</div>
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
-<div class="btns" style="margin-bottom:10px"><button id="btn-ui" type="button">🔎 界面大小：100%</button><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
+<div class="btns" style="margin-bottom:10px"><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-export" type="button">📄 导出聊天记录</button></div>
 <input id="bg-input" type="file" accept="image/*" hidden>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
@@ -2576,19 +2576,6 @@ window.addEventListener('beforeunload', function (e) {
 });
 
 /* ================= 界面缩放 / Esc 关闭 / 搜索聊天记录 ================= */
-let uiScale = Number(LS.get('ch2ui', 1)) || 1;
-function applyUi() {
-  try {
-    if (uiScale === 1) document.documentElement.style.removeProperty('zoom');
-    else document.documentElement.style.zoom = String(uiScale);
-    const b = $('btn-ui'); if (b) b.textContent = '🔎 界面大小：' + Math.round(uiScale * 100) + '%';
-  } catch (e) {}
-}
-function cycleUi() {
-  uiScale = uiScale >= 1.25 ? 1 : (uiScale >= 1.1 ? 1.25 : 1.1);
-  LS.set('ch2ui', uiScale); applyUi();
-}
-applyUi();
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
   try {
@@ -3837,8 +3824,7 @@ function bindUI() {
   /* 我 */
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
-  $('btn-ui').onclick = cycleUi;
-$('btn-theme').onclick = cycleTheme;
+  $('btn-theme').onclick = cycleTheme;
 $('btn-export').onclick = exportChat;
 $('btn-msearch').onclick = searchMsgs;
 $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
