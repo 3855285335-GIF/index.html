@@ -2732,7 +2732,15 @@ async function grpSend() {
     const r = await sb.rpc('send_group_msg', { gid: GRP.cur.id, msg: t });
     if (r.error) throw r.error;
     grpFetch(false);
-  } catch (e) { logErr('grpSend', e); toast('发送失败：' + (e.message || e)); }
+  } catch (e) {
+    logErr('grpSend', e);
+    const m = String((e && e.message) || e);
+    let hint = m;
+    if (/Could not find the function|does not exist|PGRST202/i.test(m)) hint = '数据库里还没有发送函数：请先运行 send_group_msg 那段 SQL';
+    else if (/not a member|不是这个群的成员/i.test(m)) hint = '你不在这个群的成员表里（建群时成员没写进去）';
+    else if (/row-level security/i.test(m)) hint = '数据库权限拦截：先跑 my_acc 那段 SQL';
+    toast('发送失败：' + hint);
+  }
 }
 async function grpInvite() {
   if (!GRP.cur) return;
