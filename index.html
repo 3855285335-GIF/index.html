@@ -3353,7 +3353,7 @@ function stRenderInfo() {
   const tot = $('store-total');
   if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">两个人一共用了 ' + fmtDec(S.stUsed) + ' / 1 GB（' + Math.round(r * 100) + '%）</div><div class="st-bar' + (r >= 0.8 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
   else tot.style.display = 'none';
-  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是整个项目共用的）。文字消息几乎不占空间；图片发送前会自动压缩；语音按约每分钟 1.4MB 算；通话不占这里（只走中转流量）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。文字消息几乎不占空间；图片发送前会自动压缩。';
+  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是整个项目共用的）。文字消息几乎不占空间；图片发送前会自动压缩；语音按 AAC 约每分钟 0.36MB（浏览器不支持时回退 WAV，约 1.4MB/分钟）；通话不占这里（只走中转流量）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。文字消息几乎不占空间；图片发送前会自动压缩。';
   [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
 }
 async function loadStore() {
