@@ -2725,8 +2725,7 @@ async function grpSend() {
   if (!t || !GRP.cur) return;
   inp.value = '';
   try {
-    const row = { conv_key: 'g:' + GRP.cur.id, from_acc: ME(), to_acc: null, type: 'text', body: t, created_at: new Date().toISOString() };
-    const r = await sb.from('messages').insert(row);
+    const r = await sb.rpc('send_group_msg', { gid: GRP.cur.id, msg: t });
     if (r.error) throw r.error;
     grpFetch(false);
   } catch (e) { logErr('grpSend', e); toast('发送失败：' + (e.message || e)); }
