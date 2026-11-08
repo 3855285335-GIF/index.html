@@ -614,6 +614,7 @@
           <div class="section-title">设置</div>
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
+<div class="btns" style="margin-bottom:10px"><button id="btn-ui" type="button">🔎 界面大小：100%</button><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
 <input id="bg-input" type="file" accept="image/*" hidden>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
@@ -2562,6 +2563,52 @@ window.addEventListener('beforeunload', function (e) {
   } catch (err) {}
 });
 
+/* ================= 界面缩放 / Esc 关闭 / 搜索聊天记录 ================= */
+let uiScale = Number(LS.get('ch2ui', 1)) || 1;
+function applyUi() {
+  try {
+    if (uiScale === 1) document.documentElement.style.removeProperty('zoom');
+    else document.documentElement.style.zoom = String(uiScale);
+    const b = $('btn-ui'); if (b) b.textContent = '🔎 界面大小：' + Math.round(uiScale * 100) + '%';
+  } catch (e) {}
+}
+function cycleUi() {
+  uiScale = uiScale >= 1.25 ? 1 : (uiScale >= 1.1 ? 1.25 : 1.1);
+  LS.set('ch2ui', uiScale); applyUi();
+}
+applyUi();
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  try {
+    if ($('act-sheet').classList.contains('active')) { closeActs(); return; }
+    if ($('form-sheet').classList.contains('active')) { closeForm(); return; }
+    if (document.body.classList.contains('chat-open')) { closeChat(); return; }
+  } catch (x) {}
+});
+function searchMsgs() {
+  openForm('搜索聊天记录', [{ ph: '输入关键词，比如“发票”', max: 40 }], async function (vals) {
+    const q = String((vals && vals[0]) || '').trim().replace(/[%_\\]/g, '');
+    if (!q) return;
+    toast('搜索中…');
+    try {
+      const { data, error } = await sb.from('messages')
+        .select('id,conv,from_acc,to_acc,body,type,created_at')
+        .ilike('body', '%' + q + '%')
+        .order('created_at', { ascending: false })
+        .limit(40);
+      if (error) throw error;
+      const rows = (data || []).filter(function (m) { return m && m.type !== 'call' && m.type !== 'recalled'; });
+      if (!rows.length) { toast('没有找到相关消息'); return; }
+      const items = rows.slice(0, 12).map(function (m) {
+        const other = m.from_acc === ME() ? m.to_acc : m.from_acc;
+        const txt = (parseQ(m.body).text || ('[' + m.type + ']')).replace(/\s+/g, ' ').slice(0, 26);
+        return { label: peerName(other) + '：' + txt, fn: function () { openConv(convKeyOf(ME(), other)); } };
+      });
+      items.push({ label: '关闭', danger: true, fn: function () {} });
+      openActs('找到 ' + rows.length + ' 条', items);
+    } catch (e) { logErr('search', e); toast('搜索失败：' + (e && e.message ? e.message : e)); }
+  });
+}
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
@@ -3741,7 +3788,9 @@ function bindUI() {
   /* 我 */
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
-  $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
+  $('btn-ui').onclick = cycleUi;
+$('btn-msearch').onclick = searchMsgs;
+$('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
   $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
   $('nt-on').onclick = pushEnableClick;
   $('nt-off').onclick = () => pushDisable();
