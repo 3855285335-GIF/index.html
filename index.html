@@ -1012,6 +1012,81 @@ const convOf = k => S.convs.find(c => c.convKey === k);
 
 /* ================= 本地缓存（秒开的关键）================= */
 const ck = u => 'ch2:' + u, mk = (u, c) => 'ch2m:' + u + ':' + c;
+/* ---- 消息缓存改存 IndexedDB：localStorage 只有 5MB，聊天记录多了会满 ---- */
+const IDB = { p: null, bad: false };
+function idbOpen() {
+  if (IDB.p) return IDB.p;
+  IDB.p = new Promise(function (res, rej) {
+    if (!window.indexedDB) { IDB.bad = true; rej(new Error('no indexeddb')); return; }
+    let r = null;
+    try { r = indexedDB.open('chatter', 1); } catch (e) { IDB.bad = true; rej(e); return; }
+    r.onupgradeneeded = function () { const db = r.result; if (!db.objectStoreNames.contains('msgs')) db.createObjectStore('msgs'); };
+    r.onsuccess = function () { res(r.result); };
+    r.onerror = function () { IDB.bad = true; rej(r.error || new Error('idb')); };
+  });
+  return IDB.p;
+}
+async function idbGet(k) {
+  try { const db = await idbOpen(); return await new Promise(function (res, rej) { const q = db.transaction('msgs', 'readonly').objectStore('msgs').get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); }; }); }
+  catch (e) { IDB.bad = true; return null; }
+}
+async function idbSet(k, v) {
+  try {
+    const db = await idbOpen();
+    await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').put(v, k); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
+  } catch (e) { IDB.bad = true; throw e; }
+}
+async function idbDel(k) {
+  try {
+    const db = await idbOpen();
+    await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').delete(k); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
+  } catch (e) { IDB.bad = true; }
+}
+const MSG = { mem: new Map(), uid: null };
+const msgKey = c => (S.uid || '') + ':' + c;
+function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; }
+async function msgCacheGet(conv) {
+  if (!S.uid || !conv) return [];
+  if (MSG.uid !== S.uid) { MSG.mem.clear(); MSG.uid = S.uid; }
+  const k = msgKey(conv);
+  if (MSG.mem.has(k)) return MSG.mem.get(k);
+  let list = IDB.bad ? null : await idbGet(k);
+  if (!Array.isArray(list)) {
+    list = LS.get(mk(S.uid, conv), []) || [];          // 旧版 localStorage 缓存：读一次就搬过去
+    if (list.length && !IDB.bad) idbSet(k, list).catch(function () {});
+    if (list.length) LS.del(mk(S.uid, conv));
+  }
+  MSG.mem.set(k, list || []);
+  return list || [];
+}
+function msgCacheSave(conv, list) {
+  if (!S.uid || !conv) return;
+  const k = msgKey(conv);
+  MSG.mem.set(k, list);
+  if (IDB.bad) { try { LS.set(mk(S.uid, conv), list); } catch (e) {} return; }
+  idbSet(k, list).catch(function () { try { LS.set(mk(S.uid, conv), list); } catch (e) {} });
+  try {                                              // 最多留 80 个会话的缓存，太久的删掉
+    let idx = LS.get('ch2mgi:' + S.uid, []) || [];
+    idx = idx.filter(function (x) { return x !== conv; }); idx.push(conv);
+    const drop = idx.length > 80 ? idx.splice(0, idx.length - 80) : [];
+    LS.set('ch2mgi:' + S.uid, idx);
+    drop.forEach(function (c) { const kk = msgKey(c); MSG.mem.delete(kk); if (!IDB.bad) idbDel(kk); });
+  } catch (e) {}
+}
+async function msgMigrate() {
+  if (!S.uid || IDB.bad) return;
+  try {
+    const uid = S.uid, pre = 'ch2m:' + uid + ':';
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0) keys.push(k); }
+    for (const k of keys) {
+      const conv = k.slice(pre.length), old = LS.get(k, []);
+      if (Array.isArray(old) && old.length) await idbSet(msgKey(conv), old);
+      LS.del(k);
+    }
+    LS.del('ch2midx:' + uid);
+  } catch (e) { IDB.bad = true; }
+}
 let saveT = 0, saveMT = 0;
 function saveCache() {
   clearTimeout(saveT);
@@ -1025,13 +1100,11 @@ function hydrate(c) {
 function saveMsgsNow() {
   clearTimeout(saveMT);
   if (!S.uid || !S.conv) return;
-  const list = S.msgs.filter(m => !m._st && !m._blob).slice(-PAGE).map(m => ({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, created_at: m.created_at }));
-  LS.set(mk(S.uid, S.conv), list);
-  const idx = LS.get('ch2midx:' + S.uid, []).filter(k => k !== S.conv); idx.push(S.conv);
-  while (idx.length > 12) LS.del(mk(S.uid, idx.shift()));
-  LS.set('ch2midx:' + S.uid, idx);
+  const list = S.msgs.filter(m => !m._st && !m._blob).slice(-80).map(m => ({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, created_at: m.created_at }));
+  msgCacheSave(S.conv, list);
 }
-function saveMsgsSoon() { clearTimeout(saveMT); saveMT = setTimeout(saveMsgsNow, 700); }
+let saveConv = null;
+function saveMsgsSoon() { clearTimeout(saveMT); saveConv = S.conv; saveMT = setTimeout(function () { if (saveConv && saveConv === S.conv) saveMsgsNow(); }, 700); }
 function peekUid() {
   try {
     const raw = localStorage.getItem('sb-' + AUTH_KEY_REF + '-auth-token'); if (!raw) return null;
@@ -1094,7 +1167,7 @@ function convPreview(c) {
     if (isGroupKey(c.convKey)) { fixPreview(c.convKey); return '群聊'; }
     return '开始聊天吧';
   }
-  let list = c.convKey === S.conv ? S.msgs : (LS.get(mk(S.uid, c.convKey), []) || []);
+  let list = c.convKey === S.conv ? S.msgs : ((MSG.mem.get(msgKey(c.convKey))) || (LS.get(mk(S.uid, c.convKey), []) || []));
   for (let i = list.length - 1; i >= 0; i--) { const m = list[i]; if (m && !isHidden(m)) { const p = previewOf(m); if (p) return p; } }
   fixPreview(c.convKey);
   return '[消息]';
@@ -1591,7 +1664,9 @@ async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
-  S.msgs = (LS.get(mk(S.uid, key), []) || []).slice();
+  const cachedMsgs = await msgCacheGet(key);
+  if (S.conv !== key) return;
+  S.msgs = cachedMsgs.slice();
   S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
   document.body.classList.add('chat-open');
   if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
@@ -2436,6 +2511,7 @@ function teardown() {
   S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
   clearInterval(GRP.chatT); GRP.chatT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
+  msgCacheClear();
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -2457,6 +2533,7 @@ async function start(user) {
   S.started = true;
   if (linkWait) setTimeout(() => goLink(linkWait), 0);   // 点通知打开的 App：直接进那个聊天
   setTimeout(pushSync, 2500);
+  setTimeout(msgMigrate, 1200);
   startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
 }
@@ -4013,6 +4090,7 @@ function bindSW() {
       if (d.t === 'open') goLink(d.url);
       else if (d.t === 'resub') pushSync();
       else if (d.t === 'pushed' && !document.hidden && d.from && S.me && S.conv === convKeyOf(ME(), d.from)) closeNotes(t => t === d.tag);   // 正看着这个聊天：推送来的通知直接收起
+      else if (d.t === 'pushed' && !document.hidden && d.kind === 'gmsg' && d.tag && S.conv === d.tag) closeNotes(t => t === d.tag);            // 正看着这个群：群通知收起
     });
   } catch (e) {}
 }
@@ -4325,7 +4403,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG };
 boot();
 })();
 
