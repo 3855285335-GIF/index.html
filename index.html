@@ -785,7 +785,7 @@ const fmtDur = s => pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
 const isTemp = id => S.out.has(id);
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { try { const idx = JSON.parse(localStorage.getItem('ch2midx:' + (S.uid || '')) || '[]'); idx.slice(0, 6).forEach(function (cc) { localStorage.removeItem('ch2m:' + (S.uid || '') + ':' + cc); }); localStorage.setItem(k, JSON.stringify(v)); } catch (x) {} } },
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 function fmtTime(t) {
@@ -3519,11 +3519,13 @@ function bindViewport() {
   const apply = () => {
     const root = document.documentElement;
     if (window.matchMedia('(min-width: 768px)').matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
-    root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px');
-    const kb = window.innerHeight - vv.height > 120; document.body.classList.toggle('kb', kb);
+    const kb = window.innerHeight - vv.height > 120;
+    document.body.classList.toggle('kb', kb);
+    if (kb) { root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px'); }
+    else { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); }
     if (kb && S.conv && S.stick) { const b = $('chat-messages'); b.scrollTop = b.scrollHeight; }
   };
-  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); apply();
+  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); }); apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
 const isNetErr = e => { if (!e) return false; if (e.status === 0 || e.name === 'AuthRetryableFetchError') return true; return /Failed to fetch|Load failed|NetworkError|fetch failed|Network request failed/i.test(String(e.message || e)); };
