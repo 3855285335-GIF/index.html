@@ -2027,12 +2027,12 @@ function onPcState(call) {
 async function startCall(video) {
   if (S.call || S.incoming || !S.peer) return;
   const pr = envProblem(); if (pr) { toast(pr); return; }
-  const ps = await mediaPerm(); if (ps.mic === 'denied' || (video && ps.cam === 'denied')) { callPermGuide(video); return; }
+  if (PERM.mic === 'denied' || (video && PERM.cam === 'denied')) { callPermGuide(video); return; }
   if (!S.rt.user && S.noSigDb) { toast('实时通道连不上，且还没有运行 setup-v4.sql，暂时不能通话（我的 → 环境诊断）'); return; }
   const call = mkCall(S.peer, !!video, true); S.call = call;
   showCallUI(call, '正在呼叫…'); SFX.backStart();
   try {
-    call.local = await getMedia(call); if (S.call !== call) { stopStream(call.local); return; }
+    call.local = await getMedia(call); refreshPerm(); if (S.call !== call) { stopStream(call.local); return; }
     const pc = makePC(call);
     const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
     const ok = await sig(call.peer, 'invite', { id: call.id, video: call.video, sdp: { type: offer.type, sdp: offer.sdp } });
@@ -2078,7 +2078,16 @@ function callPermGuide(video) {
     { label: '关闭', danger: true, fn: function () {} }
   ]);
 }
-async function requestCallPerm(video) {
+const PERM = { mic: 'unknown', cam: 'unknown' };
+async function refreshPerm() {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    PERM.mic = (await navigator.permissions.query({ name: 'microphone' })).state;
+    PERM.cam = (await navigator.permissions.query({ name: 'camera' })).state;
+  } catch (e) {}
+}
+refreshPerm();
+document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshPerm(); });async function requestCallPerm(video) {
   try {
     const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!video });
     stopStream(s); toast('权限已获取，可以正常通话了');
@@ -2093,13 +2102,12 @@ async function acceptCall() {
   SFX.ringStop();
   const pr = envProblem();
   if (pr) { toast(pr); declineCall(); return; }
-  const ps = await mediaPerm();
-  if (ps.mic === 'denied' || (inc.video && ps.cam === 'denied')) { callPermGuide(inc.video); return; }
+  if (PERM.mic === 'denied' || (inc.video && PERM.cam === 'denied')) { callPermGuide(inc.video); return; }
   clearIncoming();
   const call = mkCall(inc.from, inc.video, false, inc.id); S.call = call;
   showCallUI(call, '连接中…');
   try {
-    call.local = await getMedia(call); if (S.call !== call) { stopStream(call.local); return; }
+    call.local = await getMedia(call); refreshPerm(); if (S.call !== call) { stopStream(call.local); return; }
     const pc = makePC(call);
     await pc.setRemoteDescription(inc.sdp);
     await flushPendingIce(call);
