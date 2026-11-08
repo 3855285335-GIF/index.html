@@ -56,19 +56,13 @@
 
   .app-container { width: 100%; height: 100%; height: 100dvh; margin: 0 auto; background: var(--bg); position: relative; overflow: hidden; }
   @media (min-width: 768px) {
-    body { display: flex; align-items: center; justify-content: center; background: radial-gradient(1200px 600px at 20% 0%, #e4dcff 0%, transparent 60%), radial-gradient(900px 500px at 90% 100%, #ffd9e6 0%, transparent 60%), #ece8f4; }
-    .app-container { max-width: 720px; height: 96vh; border-radius: 22px; box-shadow: 0 24px 70px rgba(60,40,120,.28); }
-    .chat-view { left: 50% !important; right: auto !important; top: 50% !important; width: 100%; max-width: 720px; height: 96vh !important; border-radius: 22px; transform: translate(-50%, -50%); box-shadow: 0 24px 70px rgba(60,40,120,.3); overflow: hidden; }
+    body { display: flex; align-items: stretch; justify-content: flex-start; background: var(--bg); }
+    .app-container { width: 100%; max-width: none; height: 100vh; border-radius: 0; box-shadow: none; margin: 0; }
+    .chat-view { left: 0 !important; right: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: none; }
   }
-  /* 大屏：铺满窗口，去掉手机壳的边框和圆角 */
-  @media (min-width: 1100px) {
-    .app-container { max-width: 920px; height: 100vh; border-radius: 0; box-shadow: none; }
-    .chat-view { max-width: 920px; height: 100vh !important; border-radius: 0; box-shadow: none; }
-  }
-  /* 大屏 + 打开聊天：左侧会话列表固定 372px，右侧聊天铺满，像电脑版微信 */
   @media (min-width: 980px) {
     body.chat-open { justify-content: flex-start; }
-    body.chat-open .app-container { width: 372px; max-width: 372px; height: 100vh; border-radius: 0; box-shadow: none; }
+    body.chat-open .app-container { width: 372px; max-width: 372px; height: 100vh; flex: 0 0 372px; }
     body.chat-open .chat-view { left: 372px !important; right: 0 !important; top: 0 !important; width: auto !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: -8px 0 24px rgba(0,0,0,.10); }
   }
   .view { display: none; position: absolute; inset: 0; flex-direction: column; }
@@ -2645,7 +2639,7 @@ function searchMsgs() {
       const items = rows.slice(0, 12).map(function (m) {
         const other = m.from_acc === ME() ? m.to_acc : m.from_acc;
         const txt = (parseQ(m.body).text || ('[' + m.type + ']')).replace(/\s+/g, ' ').slice(0, 26);
-        return { label: peerName(other) + '：' + txt, fn: function () { openConv(convKeyOf(ME(), other)); } };
+        return { label: peerName(other) + '：' + txt, fn: function () { openConv(convKeyOf(ME(), other)); setTimeout(function () { try { const el = document.querySelector('.msg[data-id="' + m.id + '"]'); if (el) { el.scrollIntoView({ block: 'center' }); el.style.transition = 'background .3s'; el.style.background = 'rgba(255,214,0,.28)'; setTimeout(function () { el.style.background = ''; }, 1800); } } catch (x) {} }, 1400); } };
       });
       items.push({ label: '关闭', danger: true, fn: function () {} });
       openActs('找到 ' + rows.length + ' 条', items);
