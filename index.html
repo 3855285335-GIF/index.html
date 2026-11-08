@@ -2586,7 +2586,7 @@ async function clearChatBg() {
   const b = $('btn-bg'), cl = $('btn-bg-clear'), inp = $('bg-input');
   if (b && inp) b.onclick = function () { inp.value = ''; inp.click(); };
   if (inp) inp.onchange = function () { const f = inp.files && inp.files[0]; if (f) setChatBg(f).catch(function (e) { logErr('bg', e); toast('背景上传失败：' + (e && e.message ? e.message : e)); }); };
-  if (cl) cl.onclick = function () { clearChatBg().catch(function (e) { logErr('bg', e); toast('操作失败'); }); };
+  if (cl) cl.onclick = function () { openActs('恢复默认背景？', [{ label: '确认恢复', fn: function () { clearChatBg().catch(function (e) { logErr('bg', e); toast('操作失败'); }); } }, { label: '取消', danger: true, fn: function () {} }]); };
 })();
 
 /* ================= 全局健壮性：脚本错误上报 / 粘贴发图 / 离开提醒 ================= */
