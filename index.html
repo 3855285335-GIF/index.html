@@ -32,6 +32,17 @@
       --doodle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180' fill='none' stroke='%23ffffff' stroke-opacity='.05' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='18' y='22' width='34' height='24' rx='10'/%3E%3Cpath d='M26 46l-3 9 10-9'/%3E%3Ccircle cx='120' cy='34' r='3'/%3E%3Ccircle cx='132' cy='34' r='3'/%3E%3Ccircle cx='144' cy='34' r='3'/%3E%3Crect x='96' y='96' width='40' height='28' rx='12'/%3E%3Cpath d='M126 124l4 10-12-10'/%3E%3Cpath d='M28 118v14M36 112v26M44 120v10M52 114v22'/%3E%3Ccircle cx='70' cy='160' r='2.5'/%3E%3Ccircle cx='156' cy='150' r='2.5'/%3E%3C/svg%3E");
     }
   }
+  /* 手动主题：未设置=跟随系统，light/dark=强制 */
+  html[data-theme="light"] {
+    --bg: #f6f3ee; --surface: #ffffff; --surface2: #efebe4; --ink: #1d1b2e; --muted: #8a8799; --line: rgba(29,27,46,.08);
+    --them: #ffffff; --glass: rgba(255,255,255,.8); --accent: #6c5ce7;
+    --shadow: 0 1px 2px rgba(29,27,46,.06), 0 8px 22px rgba(29,27,46,.07);
+  }
+  html[data-theme="dark"] {
+    --bg: #12101c; --surface: #1c1a2b; --surface2: #272439; --ink: #f1eefb; --muted: #8f8ba6; --line: rgba(255,255,255,.08);
+    --them: #272439; --glass: rgba(28,26,43,.8); --accent: #8b7cf6;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
+  }
   * { box-sizing: border-box; touch-action: manipulation; }
   html, body { margin: 0; height: 100%; font-family: var(--font); background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent; overflow: hidden; -webkit-text-size-adjust: 100%; }
   button { font-family: inherit; cursor: pointer; border: none; border-radius: 12px; padding: 8px 14px; background: var(--surface2); color: var(--ink); font-size: 14px; transition: transform .12s ease, opacity .12s ease, background .12s ease; }
@@ -615,6 +626,7 @@
           <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
 <div class="btns" style="margin-bottom:10px"><button id="btn-ui" type="button">🔎 界面大小：100%</button><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
+<div class="btns" style="margin-bottom:10px"><button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-export" type="button">📄 导出聊天记录</button></div>
 <input id="bg-input" type="file" accept="image/*" hidden>
           <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
           <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
@@ -2609,6 +2621,43 @@ function searchMsgs() {
     } catch (e) { logErr('search', e); toast('搜索失败：' + (e && e.message ? e.message : e)); }
   });
 }
+/* ================= 主题切换 / 导出聊天记录 ================= */
+function applyTheme() {
+  const t = LS.get('ch2theme', 'auto');
+  try {
+    if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', t);
+    const b = $('btn-theme');
+    if (b) b.textContent = '🎨 主题：' + (t === 'auto' ? '跟随系统' : (t === 'dark' ? '深色' : '浅色'));
+  } catch (e) {}
+}
+function cycleTheme() {
+  const order = ['auto', 'light', 'dark'];
+  const cur = LS.get('ch2theme', 'auto');
+  const next = order[(order.indexOf(cur) + 1) % 3] || 'auto';
+  LS.set('ch2theme', next); applyTheme();
+}
+applyTheme();
+function exportChat() {
+  if (!S.conv) { toast('先打开一个聊天再导出'); return; }
+  const other = peerName(peerOf(S.conv, ME()));
+  const kind = { image: '图片', video: '视频', voice: '语音', file: '文件', sticker: '表情', call: '通话', recalled: '撤回' };
+  const out = ['Chatter 聊天记录', '对话：' + other, '导出时间：' + new Date().toLocaleString(), '--------------------------------'];
+  S.msgs.filter(function (m) { return m && m._st !== 'sending'; }).forEach(function (m) {
+    const who = m.from_acc === ME() ? '我' : other;
+    const t = m.type === 'text' ? parseQ(m.body).text : ('[' + (kind[m.type] || m.type) + ']');
+    out.push('[' + new Date(m.created_at).toLocaleString() + '] ' + who + '：' + t);
+  });
+  try {
+    const blob = new Blob([out.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'chat-' + other + '-' + Date.now() + '.txt';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 3000);
+    toast('已导出 ' + (out.length - 4) + ' 条');
+  } catch (e) { logErr('export', e); toast('导出失败'); }
+}
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
@@ -3789,6 +3838,8 @@ function bindUI() {
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
   $('btn-ui').onclick = cycleUi;
+$('btn-theme').onclick = cycleTheme;
+$('btn-export').onclick = exportChat;
 $('btn-msearch').onclick = searchMsgs;
 $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
   $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
