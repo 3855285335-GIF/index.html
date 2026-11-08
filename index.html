@@ -675,6 +675,7 @@
               <button id="btn-bg" type="button">🖼 聊天背景</button>
               <button id="btn-bg-clear" type="button">↩️ 默认背景</button>
               <button id="btn-sound" type="button">🔔 音效：开</button>
+              <button id="btn-imgq" type="button">🖼 图片：压缩</button>
               <button id="btn-relaysave" type="button">📶 中转省流量：关</button>
             </div>
           </div>
@@ -1695,16 +1696,17 @@ async function compressImage(file) {
     return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
   } catch (e) { logErr('img-compress', e); return file; }
 }
+const imgOrig = () => { try { return LS.get('ch2imgq', 'auto') === 'orig'; } catch (e) { return false; } };
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
-  const out = await compressImage(file);
+  const out = imgOrig() ? file : await compressImage(file);
   const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
   addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
 }
-function sendVoice(blob, dur) {
+function sendVoice(blob, dur, ext, ct) {
   if (!S.conv) return;
-  addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: 'wav', _ct: 'audio/wav' }));
+  addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
 }
 function retryMsg(id) {
   const m = S.out.get(id); if (!m || m._st !== 'failed') return;
@@ -1856,7 +1858,8 @@ function togglePlay(id, url) {
       if (!r.ok) { end(); toast('语音文件读取失败（HTTP ' + r.status + '）'); logErr('voice-http', r.status + ' ' + src.slice(0, 120)); return; }
       const buf = await r.arrayBuffer();
       if (playingId !== id) return;
-      const b = new Blob([buf], { type: 'audio/wav' }), u = URL.createObjectURL(b);
+      const typ = /\.m4a(\?|$)/i.test(src) || /\.mp4(\?|$)/i.test(src) ? 'audio/mp4' : /\.webm(\?|$)/i.test(src) ? 'audio/webm' : 'audio/wav';
+      const b = new Blob([buf], { type: typ }), u = URL.createObjectURL(b);
       const a2 = new Audio(); audioEl = a2; a2.preload = 'auto'; a2.src = u;
       a2.onended = () => { end(); try { URL.revokeObjectURL(u); } catch (e) {} };
       a2.onerror = () => { end(); toast('语音无法解码（错误码 ' + (a2.error ? a2.error.code : 0) + '，大小 ' + buf.byteLength + '）'); };
@@ -1866,8 +1869,14 @@ function togglePlay(id, url) {
   const p = a.play(); if (p && p.catch) p.catch(e => { if (e && e.name === 'NotAllowedError') { end(); toast('无法播放语音'); } });
 }
 
-/* ================= 录音（WAV，所有浏览器通用、不依赖 MediaRecorder）================= */
-const rec = { state: 'idle', token: 0, ctx: null, stream: null, src: null, proc: null, chunks: [], len: 0, rate: 44100, t0: 0, y0: 0, cancel: false, tm: 0 };
+/* ================= 录音（优先 AAC/M4A，失败回退 WAV；通话不受影响）================= */
+const rec = { state: 'idle', token: 0, ctx: null, stream: null, src: null, proc: null, chunks: [], len: 0, rate: 44100, t0: 0, y0: 0, cancel: false, tm: 0, mr: null, mrChunks: [], mime: '' };
+function pickVoiceMime() {
+  if (!window.MediaRecorder || !window.MediaRecorder.isTypeSupported) return '';
+  const list = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4'];   // AAC：iPhone/安卓/电脑都能放
+  for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return '';
+}
 function recProblem() {
   if (iosAppWebview()) return IOS_APP_MSG;
   if (!window.isSecureContext) return '录音需要 https 地址（或 localhost）';
@@ -1882,10 +1891,11 @@ function recUI(on, text) {
 }
 function recCleanup() {
   clearInterval(rec.tm);
+  try { if (rec.mr && rec.mr.state !== 'inactive') rec.mr.stop(); } catch (e) {}
   try { if (rec.proc) { rec.proc.onaudioprocess = null; rec.proc.disconnect(); } if (rec.src) rec.src.disconnect(); } catch (e) {}
   stopStream(rec.stream);
   try { if (rec.ctx && rec.ctx.state !== 'closed') { const p = rec.ctx.close(); if (p && p.catch) p.catch(() => {}); } } catch (e) {}
-  rec.stream = rec.src = rec.proc = rec.ctx = null; rec.chunks = []; rec.len = 0; rec.state = 'idle';
+  rec.stream = rec.src = rec.proc = rec.ctx = rec.mr = null; rec.chunks = []; rec.len = 0; rec.mrChunks = []; rec.mime = ''; rec.state = 'idle';
   recUI(false);
 }
 function recAbort() { if (rec.state === 'idle') return; rec.token++; recCleanup(); }
@@ -1898,7 +1908,7 @@ function recTick() {
 function recStart(y) {
   if (rec.state !== 'idle' || !S.conv) return;
   const pr = recProblem(); if (pr) { toast(pr); return; }
-  const token = ++rec.token; rec.state = 'starting'; rec.y0 = y || 0; rec.cancel = false; rec.chunks = []; rec.len = 0;
+  const token = ++rec.token; rec.state = 'starting'; rec.y0 = y || 0; rec.cancel = false; rec.chunks = []; rec.len = 0; rec.mrChunks = []; rec.mime = ''; rec.mr = null;
   recUI(true, '手指上滑，取消发送');
   let ctx;
   try {
@@ -1913,21 +1923,52 @@ function recStart(y) {
       const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = e => { if (rec.state !== 'recording') return; const d = e.inputBuffer.getChannelData(0); rec.chunks.push(new Float32Array(d)); rec.len += d.length; };
       src.connect(proc); proc.connect(ctx.destination); rec.src = src; rec.proc = proc;
+      rec.mime = pickVoiceMime();
+      if (rec.mime) {
+        try {
+          const mr = new MediaRecorder(stream, { mimeType: rec.mime, audioBitsPerSecond: 48000 });
+          mr.ondataavailable = e => { if (e.data && e.data.size) rec.mrChunks.push(e.data); };
+          mr.start(250); rec.mr = mr;
+        } catch (e) { logErr('mr-start', e); rec.mime = ''; rec.mr = null; }
+      }
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       rec.state = 'recording'; rec.t0 = now(); rec.tm = setInterval(recTick, 200);
     } catch (e) { logErr('rec-start', e); recCleanup(); toast('无法开始录音'); }
   }).catch(e => { if (token !== rec.token) return; logErr('rec-gum', e); recCleanup(); toast('无法录音：' + micError(e)); });
 }
 function recMove(y) { if (rec.state === 'idle') return; rec.cancel = rec.y0 - y > 60; }
-function recEnd(cancel) {
+async function recEnd(cancel) {
   if (rec.state === 'idle') return;
   if (rec.state === 'starting') { rec.token++; recCleanup(); return; }
+  if (rec.state !== 'recording') return;
+  const token = rec.token;
   const dc = cancel || rec.cancel, sec = (now() - rec.t0) / 1000;
-  const blob = dc ? null : encodeWav(rec.chunks, rec.len, rec.rate);
+  rec.state = 'stopping';
+  let blob = null, ext = 'wav', ct = 'audio/wav';
+  if (!dc && rec.mr) {
+    blob = await new Promise(function (res) {
+      let done = false;
+      const fin = function () {
+        if (done) return; done = true;
+        const b = new Blob(rec.mrChunks, { type: (rec.mime || 'audio/mp4').split(';')[0] });
+        res(b.size ? b : null);
+      };
+      try { rec.mr.onstop = fin; if (rec.mr.state !== 'inactive') rec.mr.stop(); else fin(); } catch (e) { fin(); }
+      setTimeout(fin, 1800);
+    });
+    if (blob) {
+      if (/mp4/i.test(rec.mime)) { ext = 'm4a'; ct = 'audio/mp4'; }
+      else if (/webm/i.test(rec.mime)) { ext = 'webm'; ct = 'audio/webm'; }
+    }
+  }
+  const wav = (!dc && !blob) ? encodeWav(rec.chunks, rec.len, rec.rate) : null;
   recCleanup();
+  if (token !== rec.token) return;          // 这期间被取消/关了聊天
   if (dc) { SFX.cancel(); return; }
-  if (sec < 0.8 || !blob) { toast('说话时间太短'); return; }
-  sendVoice(blob, Math.max(1, Math.round(sec)));
+  if (sec < 0.8) { toast('说话时间太短'); return; }
+  if (blob && blob.size) { sendVoice(blob, Math.max(1, Math.round(sec)), ext, ct); return; }
+  if (wav && wav.size) { sendVoice(wav, Math.max(1, Math.round(sec)), 'wav', 'audio/wav'); return; }
+  toast('录音失败，请再试一次');
 }
 function encodeWav(chunks, len, srcRate) {
   const target = 12000, ratio = srcRate / target, outLen = Math.max(1, Math.floor(len / ratio));
@@ -4482,6 +4523,12 @@ function bindUI() {
   /* 我 */
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
+  const paintImgQ = () => { const b = $('btn-imgq'); if (b) b.textContent = imgOrig() ? '🖼 图片：原图' : '🖼 图片：压缩'; };
+  paintImgQ();
+  $('btn-imgq').onclick = () => {
+    LS.set('ch2imgq', imgOrig() ? 'auto' : 'orig'); paintImgQ();
+    toast(imgOrig() ? '以后发图片用原图：更清晰，但更占空间' : '以后发图片自动压缩：省空间，日常够清晰');
+  };
   $('btn-theme').onclick = cycleTheme;
 $('btn-export').onclick = () => {
   if (S.conv) { exportChat(S.conv); return; }
@@ -4598,7 +4645,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime };
 boot();
 })();
 
