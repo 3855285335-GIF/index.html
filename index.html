@@ -2668,7 +2668,7 @@ async function grpLoad() {
     if (!ids.length) { GRP.list = []; el.innerHTML = '<div class="grp-empty">还没有群聊</div>'; return; }
     const g = await sb.from('chat_groups').select('id,name,owner_acc').in('id', ids);
     if (g.error) throw g.error;
-    GRP.list = g.data || [];
+    GRP.list = g.data || []; try { LS.set('ch2grp', GRP.list.map(function (x) { return { id: x.id, name: x.name }; })); } catch (e) {}
     el.innerHTML = GRP.list.map(function (x) {
       return '<div class="grp-item" data-id="' + x.id + '"><b>' + esc(x.name) + '</b><small>' + esc(x.owner_acc === ME() ? '我创建的' : '群成员') + '</small></div>';
     }).join('') || '<div class="grp-empty">还没有群聊</div>';
@@ -2729,7 +2729,7 @@ async function grpSend() {
   if (!GRP.cur.id) { toast('群 id 没取到，请重新进入群'); return; }
   inp.value = '';
   try {
-    const r = await sb.rpc('send_group_msg', { gid: GRP.cur.id, msg: t });
+    const r = await sb.rpc('send_group_msg', { conv: ('g:' + GRP.cur.id), msg: t });
     if (r.error) throw r.error;
     grpFetch(false);
   } catch (e) {
