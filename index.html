@@ -2693,7 +2693,7 @@ async function grpNew() {
   });
 }
 async function grpOpen(id) {
-  GRP.cur = GRP.list.find(function (x) { return x.id === id; }) || null;
+  GRP.cur = GRP.list.find(function (x) { return x.id === id; }) || null;`r`n  if (!GRP.cur) { try { const r = await sb.from('chat_groups').select('id,name,owner_acc').eq('id', id).maybeSingle(); if (r && r.data) GRP.cur = r.data; } catch (e) {} }`r`n  if (!GRP.cur) GRP.cur = { id: id, name: '群聊' };
   if (!GRP.cur) return;
   GRP.last = null; $('grp-msgs').innerHTML = '';
   grpShowChat(true);
@@ -2723,8 +2723,8 @@ async function grpFetch(reset) {
 }
 async function grpSend() {
   const inp = $('grp-text'); const t = (inp.value || '').trim();
-  if (!t || !GRP.cur) return;
-  if (!GRP.cur.id) { toast('群信息丢失，请返回重新进入群'); return; }
+  if (!t || !GRP.cur) { toast('请先选一个群'); return; }
+  if (!GRP.cur.id) { toast('群 id 没取到，请重新进入群'); return; }
   inp.value = '';
   try {
     const r = await sb.rpc('send_group_msg', { gid: GRP.cur.id, msg: t });
