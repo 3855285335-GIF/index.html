@@ -150,6 +150,13 @@
   .me-box pre { background: var(--surface); border-radius: 16px; padding: 12px 14px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; color: var(--ink); box-shadow: var(--shadow); margin: 0 0 12px; font-family: ui-monospace, Menlo, monospace; }
   .me-box .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-box .btns button { padding: 10px 16px; border-radius: 14px; font-weight: 600; }
+  .me-edit { margin-left: auto; padding: 8px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+  .me-sec { margin-bottom: 4px; }
+  .me-box .btns.me-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 14px 10px; }
+  .me-box .btns.me-grid button { width: 100%; padding: 12px 8px; font-size: 13.5px; background: var(--surface); box-shadow: var(--shadow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .me-diag { margin: 4px 14px 12px; background: var(--surface); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); }
+  .me-diag summary { font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.5; }
+  .me-diag pre { background: var(--surface2); box-shadow: none; margin: 10px 0 4px; }
 
   /* ---------- 聊天页 ---------- */
   .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); background: var(--bg); background-image: var(--chat-bg, none); background-size: cover; background-position: center; background-repeat: no-repeat; display: none; flex-direction: column; z-index: 50; }
@@ -286,6 +293,27 @@
   .pick-item .pk-ck { opacity: 0; color: #fff; background: var(--accent); border-radius: 50%; width: 22px; height: 22px; line-height: 22px; text-align: center; font-size: 14px; flex-shrink: 0; }
   .pick-item.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .pick-item.on .pk-ck { opacity: 1; }
+  .grp-contact .avatar { width: 46px; height: 46px; font-size: 17px; }
+  #gi-sheet { display: none; flex-direction: column; width: min(360px, 90vw); max-height: 82vh; }
+  #gi-sheet.active { display: flex; }
+  .gi-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 10px; border-bottom: 1px solid var(--line); }
+  .gi-head #gi-av .avatar { width: 54px; height: 54px; font-size: 20px; }
+  .gi-names { flex: 1; min-width: 0; }
+  #gi-name { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #gi-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #gi-x { background: none; color: var(--muted); font-size: 22px; padding: 4px 8px; border-radius: 10px; }
+  .gi-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 10px 16px 2px; }
+  .gi-members { display: flex; flex-wrap: wrap; gap: 14px 8px; padding: 2px 0 8px; }
+  .gi-m { width: 66px; text-align: center; cursor: pointer; border-radius: 12px; padding: 4px 0; }
+  .gi-m:active { background: var(--surface2); }
+  .gi-m .avatar-wrapper { margin: 0 auto; }
+  .gi-m .avatar { width: 50px; height: 50px; font-size: 18px; }
+  .gi-mn { font-size: 12px; margin-top: 4px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gi-owner { font-size: 10px; color: var(--accent); line-height: 1.4; }
+  .gi-pending { font-size: 12.5px; color: var(--muted); padding: 2px 0 10px; line-height: 1.55; }
+  .gi-acts { display: flex; gap: 8px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .gi-acts button { flex: 1; padding: 11px 0; border-radius: 14px; font-size: 14px; background: var(--surface2); font-weight: 600; }
+  .gi-acts .gi-danger { color: #fff; background: var(--danger); }
   #multi-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2600; display: none; align-items: center; gap: 10px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(0,0,0,.12); }
   #multi-bar.active { display: flex; }
   #multi-count { flex: 1; font-size: 14px; color: var(--muted); }
@@ -630,29 +658,58 @@
         </div>
         <div id="search-results" class="list-card" style="margin-bottom:12px"></div>
         <div class="btns" style="margin:12px 16px 4px"><button id="btn-groups" type="button">👥 新建群聊</button></div>
+<div class="section-title">我的群聊</div>
+        <div id="grp-contacts" class="list-card"></div>
 <div class="section-title">我的好友</div>
         <div id="friend-list" class="list-card"></div>
       </section>
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
       <section id="tab-me" class="tab-panel">
         <div class="me-box">
-          <div class="list-card me-card"><div id="me-avatar"></div><div class="name"><div class="name-main" id="me-name2" style="font-size:18px"></div><div class="name-sub">@<span id="me-acc2"></span></div></div></div>
-          <div class="section-title">账号</div>
-          <div class="btns" style="margin-bottom:16px"><button id="btn-avatar" type="button">🖼 修改头像</button><button id="btn-nick" type="button">✏️ 修改昵称</button><button id="btn-pass" type="button">🔑 修改密码</button></div>
-          <input id="avatar-input" type="file" accept="image/*" hidden>
-          <div class="section-title">设置</div>
-          <div class="btns" style="margin-bottom:10px"><button id="btn-sound" type="button">🔔 音效：开</button><button id="btn-store" type="button">🗂 存储空间</button><button id="btn-relaysave" type="button">📶 中转省流量：关</button><button id="btn-notify" type="button">📳 通知：关</button></div>
-<div class="btns" style="margin-bottom:10px"><button id="btn-bg" type="button">🖼 聊天背景</button><button id="btn-bg-clear" type="button">↩️ 恢复默认背景</button></div>
-<div class="btns" style="margin-bottom:10px"><button id="btn-msearch" type="button">🔍 搜索聊天记录</button></div>
-<div class="btns" style="margin-bottom:10px"><button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-export" type="button">📄 导出聊天记录</button></div>
-<input id="bg-input" type="file" accept="image/*" hidden>
-          <div id="store-box" style="display:none;margin-bottom:16px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
-          <div id="notify-box" style="display:none;margin-bottom:16px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
-          <div class="section-title">环境诊断（通话/语音打不开时看这里）</div>
-          <pre id="diag"></pre>
-          <div class="section-title">最近错误</div>
-          <pre id="errlog"></pre>
-          <div class="btns"><button id="btn-copylog" type="button">复制诊断信息</button><button id="btn-logout" class="btn-danger" type="button">退出登录</button></div>
+          <div class="list-card me-card"><div id="me-avatar"></div><div class="name"><div class="name-main" id="me-name2"></div><div class="name-sub">@<span id="me-acc2"></span></div></div><button id="btn-edit-profile" type="button" class="me-edit">编辑</button></div>
+
+          <div class="me-sec">
+            <div class="section-title">聊天设置</div>
+            <div class="btns me-grid">
+              <button id="btn-theme" type="button">🎨 主题：跟随系统</button>
+              <button id="btn-bg" type="button">🖼 聊天背景</button>
+              <button id="btn-bg-clear" type="button">↩️ 默认背景</button>
+              <button id="btn-sound" type="button">🔔 音效：开</button>
+              <button id="btn-relaysave" type="button">📶 中转省流量：关</button>
+            </div>
+          </div>
+
+          <div class="me-sec">
+            <div class="section-title">记录与存储</div>
+            <div class="btns me-grid">
+              <button id="btn-store" type="button">🗂 存储空间</button>
+              <button id="btn-cache" type="button">📱 本地缓存</button>
+              <button id="btn-export" type="button">📄 导出聊天记录</button>
+              <button id="btn-msearch" type="button">🔍 搜索聊天记录</button>
+              <button id="btn-notify" type="button">📳 通知：关</button>
+            </div>
+          </div>
+
+          <div id="store-box" style="display:none;margin:0 14px 12px"><div id="store-total" style="display:none"></div><div id="store-info" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="st-30" type="button">清理 30 天前的</button><button id="st-7" type="button">清理 7 天前的</button><button id="st-all" class="btn-danger" type="button">全部清理</button></div></div>
+          <div id="notify-box" style="display:none;margin:0 14px 12px"><div id="nt-state" class="store-info"></div><div class="btns" style="flex-wrap:wrap"><button id="nt-on" type="button" class="btn-primary">开启通知</button><button id="nt-test" type="button">发一条测试通知</button><button id="nt-pv" type="button">通知显示内容：开</button><button id="nt-off" type="button" class="btn-danger">关闭通知</button></div><div id="nt-tip"></div></div>
+
+          <div class="me-sec">
+            <div class="section-title">其他</div>
+            <div class="btns me-grid">
+              <button id="btn-copylog" type="button">复制诊断信息</button>
+              <button id="btn-logout" class="btn-danger" type="button">退出登录</button>
+            </div>
+          </div>
+
+          <details class="me-diag"><summary>环境诊断 / 最近错误（通话、语音、通知打不开时看这里）</summary><pre id="diag"></pre><pre id="errlog"></pre></details>
+
+          <div style="display:none">
+            <button id="btn-avatar" type="button">修改头像</button>
+            <button id="btn-nick" type="button">修改昵称</button>
+            <button id="btn-pass" type="button">修改密码</button>
+            <input id="avatar-input" type="file" accept="image/*" hidden>
+            <input id="bg-input" type="file" accept="image/*" hidden>
+          </div>
         </div>
       </section>
     </main>
@@ -717,6 +774,12 @@
 <div id="form-sheet" class="sheet"><div class="menu-title" id="fs-title"></div><div id="fs-fields"></div><div id="fs-msg"></div><div class="fs-btns"><button id="fs-cancel" type="button">取消</button><button id="fs-ok" type="button">确定</button></div></div>
 <div id="pick-backdrop" class="sheet-bd"></div>
 <div id="pick-sheet" class="sheet"><div class="menu-title" id="pick-title">选择成员</div><div id="pick-list"></div><div class="fs-btns"><button id="pick-cancel" type="button">取消</button><button id="pick-ok" type="button">确定</button></div></div>
+<div id="gi-backdrop" class="sheet-bd"></div>
+<div id="gi-sheet" class="sheet">
+  <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
+  <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div></div>
+  <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
+</div>
 <div id="msg-menu-backdrop"></div>
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
 <div id="msg-menu">
@@ -788,6 +851,7 @@ const TURN_DEFAULT = [
 // 所以 Metered 只留 TLS 443：国内顺序变成 ExpressTURN TCP（1）> Metered TLS（0）。
 const RECALL_MS = 2 * 60 * 1000;
 const PAGE = 40;
+const TEXT_MAX = 20000;   // 一条文字消息最多 2 万字（数据库触发器同步放宽）
 
 function validTurn(list) {
   if (!Array.isArray(list)) return [];
@@ -1195,15 +1259,27 @@ function renderList() {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? '' : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(convPreview(c))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(String(convPreview(c)).slice(0, 120))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
 function renderContacts() {
   const el = $('friend-list');
-  if (!S.friends.length) { el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧'); return; }
-  el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(peerName(a), avatarOf(a), isOnline(a), a) +
+  if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
+  else el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(peerName(a), avatarOf(a), isOnline(a), a) +
     '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
     '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>').join('');
+  renderGroupContacts();
+}
+function renderGroupContacts() {
+  const el = $('grp-contacts'); if (!el) return;
+  const list = (GRP.list || []).slice().sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh'); });
+  if (!list.length) { el.innerHTML = '<div class="grp-empty">还没有群聊，点上面「新建群聊」</div>'; return; }
+  el.innerHTML = list.map(function (g) {
+    const n = GRP.count[g.id] || 0;
+    return '<div class="friend-item grp-contact" data-gid="' + esc(g.id) + '">' + avatarHTML(g.name, '', false, 'g:' + g.id) +
+      '<div class="name"><div class="name-main">' + esc(g.name) + '<span class="grp-mark">群</span></div><div class="name-sub">' + (n ? n + ' 人' : '群聊') + '</div></div>' +
+      '<div class="row-actions"><button class="btn-primary act-grp-open">聊天</button></div></div>';
+  }).join('');
 }
 function renderRequests() {
   const el = $('request-list'), badge = $('req-badge'), inv = S.gInvites || [], n = S.requests.length + inv.length;
@@ -1439,7 +1515,7 @@ function onFastMsg(p) {
     if (typeof p.id !== 'string' || p.conv !== convKeyOf(p.from, p.to)) return;
     if (['text', 'image', 'voice', 'sticker', 'video', 'file'].indexOf(p.type) < 0) return;
     let body = typeof p.body === 'string' ? p.body : '';
-    if (p.type === 'text') body = body.slice(0, 5200);
+    if (p.type === 'text') body = body.slice(0, TEXT_MAX);
     else if (p.type === 'sticker') { if (!validStk(body)) return; }
     else if (p.type === 'file') { const f = parseFile(body); if (!f || !isStoreUrl(f.u) || body.length > 1000) return; }
     else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音/视频只接受本项目存储的地址
@@ -1533,7 +1609,8 @@ function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
   input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
-  let body = v.replace(/\u2063/g, '').slice(0, 5000);
+  let body = v.replace(/\u2063/g, '');
+  if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
   addLocal(newMsg('text', body));
@@ -1586,11 +1663,44 @@ function onReadReq(p) {
   const c = convOf(p.conv);
   if (c && !(c.unread > 0) && c.last_ts && S.token) bcast('u:' + p.from, 'rd', { from: ME(), conv: p.conv, ts: c.last_ts });
 }
+/* 图片先压缩再上传：手机原图几 MB，压到 1600px/JPEG 85% 能省一大半空间 */
+function loadImgEl(file) {
+  return new Promise(function (res, rej) {
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = function () { URL.revokeObjectURL(u); res(im); };
+    im.onerror = function (e) { URL.revokeObjectURL(u); rej(e); };
+    im.src = u;
+  });
+}
+async function compressImage(file) {
+  const t = String((file && file.type) || '');
+  if (!/^image\//.test(t) || /gif|svg/i.test(t) || file.size < 250 * 1024) return file;
+  try {
+    let src, w, h;
+    if (window.createImageBitmap) {
+      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(function () { return createImageBitmap(file); });
+      src = bmp; w = bmp.width; h = bmp.height;
+    } else {
+      const im = await loadImgEl(file);
+      src = im; w = im.naturalWidth || im.width; h = im.naturalHeight || im.height;
+    }
+    if (!w || !h) return file;
+    const max = 1600, r = Math.min(1, max / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * r)), ch = Math.max(1, Math.round(h * r));
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(src, 0, 0, cw, ch);
+    if (src.close) { try { src.close(); } catch (e) {} }
+    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.85); });
+    if (!blob || blob.size >= file.size * 0.92) return file;
+    return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (e) { logErr('img-compress', e); return file; }
+}
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
-  const ext = ((file.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
-  addLocal(newMsg('image', URL.createObjectURL(file), null, { _blob: file, _ext: ext, _ct: file.type }));
+  const out = await compressImage(file);
+  const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
+  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
 }
 function sendVoice(blob, dur) {
   if (!S.conv) return;
@@ -2790,6 +2900,10 @@ async function grpLoad(force) {
       const g = await sb.from('chat_groups').select('id,name,owner_acc').in('id', ids);
       if (g.error) throw g.error;
       list = g.data || [];
+      try {   // 成员数一次查出来，通讯录里的群聊也显示人数
+        const cm = await sb.from('chat_group_members').select('group_id').in('group_id', ids);
+        if (!cm.error) { const cnt = {}; (cm.data || []).forEach(function (r) { cnt[r.group_id] = (cnt[r.group_id] || 0) + 1; }); list.forEach(function (x) { GRP.count[x.id] = cnt[x.id] || 0; }); }
+      } catch (e) {}
     }
     GRP.list = list; grpCacheSave();
     const set = new Set(ids);
@@ -2801,6 +2915,7 @@ async function grpLoad(force) {
       if (!GRP.cursor['g:' + x.id]) GRP.cursor['g:' + x.id] = Date.parse(c && c.last_ts || 0) || (now() - 60000);
     });
     sched('list');
+    sched('contacts');
     if (S.conv && isGroupKey(S.conv)) { renderChatTitle(); grpOpenMeta(S.conv); }
   } catch (e) { logErr('grpLoad', e); }
 }
@@ -2811,6 +2926,7 @@ async function grpMembers(gid, force) {
   if (r.error) throw r.error;
   const ms = r.data || [];
   GRP.members[gid] = ms; GRP.membersAt[gid] = now(); GRP.count[gid] = ms.length;
+  sched('contacts');
   const need = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !S.profiles[a]; });
   if (need.length) {
     const p = await sb.from('profiles').select('account_id,nickname,avatar_url').in('account_id', need);
@@ -2931,6 +3047,8 @@ async function grpInvite(key) {
     sched('list');
   });
 }
+let giKey = null;
+function closeGrpInfo() { $('gi-backdrop').classList.remove('active'); $('gi-sheet').classList.remove('active'); giKey = null; }
 async function grpInfo(key) {
   const k = key || S.conv;
   if (!isGroupKey(k)) return;
@@ -2942,19 +3060,40 @@ async function grpInfo(key) {
     const p = await sb.from('group_invites').select('to_acc').eq('group_id', gid).eq('status', 'pending');
     pend = (p && p.data ? p.data : []).map(function (x) { return peerName(x.to_acc); });
   } catch (e) {}
-  const g = grpOf(k) || {};
-  const owner = g.owner_acc === ME();
-  const names = ms.map(function (m) { return peerName(m.account_id) + (m.account_id === ME() ? '（我）' : '') + (m.role === 'owner' ? '（群主）' : ''); }).join('、') || '暂无成员';
-  const items = [
-    { label: '邀请好友进群', fn: function () { setTimeout(function () { grpInvite(k); }, 50); } },
-    { label: '群成员：' + names, fn: null }
-  ];
-  if (pend.length) items.push({ label: '邀请中：' + pend.slice(0, 20).join('、') + (pend.length > 20 ? ' 等 ' + pend.length + ' 人' : ''), fn: null });
-  items.push({ label: '群名称：' + grpName(k), fn: null });
-  items.push({ label: '清空聊天记录', danger: true, fn: function () { setTimeout(function () { confirmClear(k, false); }, 50); } });
-  items.push({ label: owner ? '解散群聊' : '退出群聊', danger: true, fn: function () { setTimeout(function () { grpLeave(k); }, 50); } });
-  items.push({ label: '取消', fn: null });
-  openActs((owner ? '我是群主 · ' : '') + (ms.length || 0) + ' 人', items);
+  openGrpInfo(k, ms, pend);
+}
+function openGrpInfo(k, ms, pend) {
+  giKey = k;
+  const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
+  $('gi-av').innerHTML = avatarHTML(name, '', false, k);
+  $('gi-name').textContent = name;
+  $('gi-sub').textContent = (ms.length || 0) + ' 人' + (owner ? ' · 我是群主' : '');
+  const list = ms.slice().sort(function (a, b) {
+    if (a.role === 'owner') return -1; if (b.role === 'owner') return 1;
+    return String(peerName(a.account_id)).localeCompare(String(peerName(b.account_id)), 'zh');
+  });
+  $('gi-members').innerHTML = list.map(function (m) {
+    const acc = m.account_id;
+    const badge = acc === ME() ? (m.role === 'owner' ? '群主 · 我' : '我') : (m.role === 'owner' ? '群主' : '');
+    return '<div class="gi-m" data-acc="' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
+      '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' +
+      (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
+  }).join('');
+  $('gi-pending').textContent = pend.length ? '邀请中：' + pend.slice(0, 30).join('、') + (pend.length > 30 ? ' 等 ' + pend.length + ' 人' : '') : '';
+  $('gi-leave').textContent = owner ? '解散群聊' : '退出群聊';
+  $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
+}
+async function grpKick(gid, acc) {
+  try {
+    const { error } = await sb.from('chat_group_members').delete().eq('group_id', gid).eq('account_id', acc);
+    if (error) throw error;
+    delete GRP.members[gid];
+    try { await grpMembers(gid, true); } catch (e) {}
+    if (S.conv === 'g:' + gid) renderChatTitle();
+    sched('list'); sched('contacts');
+    await grpInfo('g:' + gid);
+    toast('已移出群聊');
+  } catch (e) { logErr('grpKick', e); toast('移出失败：' + grpErr(e)); }
 }
 async function grpLeave(key) {
   const k = key || S.conv;
@@ -3173,7 +3312,7 @@ function stRenderInfo() {
   const tot = $('store-total');
   if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">两个人一共用了 ' + fmtDec(S.stUsed) + ' / 1 GB（' + Math.round(r * 100) + '%）</div><div class="st-bar' + (r >= 0.8 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
   else tot.style.display = 'none';
-  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是你们两个人共用的）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。';
+  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是整个项目共用的）。文字消息几乎不占空间；图片发送前会自动压缩；语音按约每分钟 1.4MB 算；通话不占这里（只走中转流量）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。文字消息几乎不占空间；图片发送前会自动压缩。';
   [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
 }
 async function loadStore() {
@@ -4344,7 +4483,13 @@ function bindUI() {
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
   $('btn-theme').onclick = cycleTheme;
-$('btn-export').onclick = () => { if (!S.conv) { toast('先打开一个聊天，再导出'); return; } exportChat(S.conv); };
+$('btn-export').onclick = () => {
+  if (S.conv) { exportChat(S.conv); return; }
+  const list = S.convs.filter(c => !convGone(c)).slice(0, 15).map(c => ({ label: peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
+  if (!list.length) { toast('还没有聊天记录'); return; }
+  list.push({ label: '取消', fn: null });
+  openActs('导出哪个聊天？', list);
+};
 $('btn-msearch').onclick = searchMsgs;
 $('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
 $('multi-del').onclick = multiDel;
@@ -4355,6 +4500,48 @@ $('pick-list').onclick = function (e) { const it = e.target.closest ? e.target.c
 $('pick-ok').onclick = function () { const cb = pickCb, sel = Array.from(pickSel); closePick(); if (cb) cb(sel); };
 $('pick-cancel').onclick = closePick;
 $('pick-backdrop').onclick = closePick;
+$('gi-x').onclick = closeGrpInfo;
+$('gi-backdrop').onclick = closeGrpInfo;
+$('gi-invite').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpInvite(k); };
+$('gi-clear').onclick = function () { const k = giKey; closeGrpInfo(); if (k) confirmClear(k, false); };
+$('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpLeave(k); };
+$('gi-members').onclick = function (e) {
+  const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
+  const acc = it.getAttribute('data-acc'); if (!acc || acc === ME()) return;
+  const gid = gidOf(giKey), g = grpOf(giKey) || {};
+  if (g.owner_acc === ME()) {
+    openActs(peerName(acc), [
+      { label: '发消息', fn: function () { closeGrpInfo(); openConv(convKeyOf(ME(), acc), acc); } },
+      { label: '移出群聊', danger: true, fn: function () { closeGrpInfo(); grpKick(gid, acc); } },
+      { label: '取消', fn: null }
+    ]);
+  } else openProfile(acc);
+};
+$('btn-edit-profile').onclick = function () {
+  openActs('编辑个人信息', [
+    { label: '修改头像', fn: function () { $('avatar-input').click(); } },
+    { label: '修改昵称', fn: function () { editNick(); } },
+    { label: '修改密码', fn: function () { editPass(); } },
+    { label: '取消', fn: null }
+  ]);
+};
+$('btn-cache').onclick = async function () {
+  let size = '';
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e && e.usage) size = fmtDec(e.usage); } } catch (e) {}
+  openActs('本地缓存' + (size ? '：约 ' + size : ''), [
+    { label: '清理本地消息缓存（服务器记录还在）', danger: true, fn: async function () { await idbClear(); MSG.mem.clear(); toast('本地缓存已清理'); } },
+    { label: '取消', fn: null }
+  ]);
+};
+const gcl = $('grp-contacts');
+if (gcl) {
+  let gT = 0, gLpAt = 0;
+  const gOpen = it => { gLpAt = now(); grpInfo('g:' + it.getAttribute('data-gid')); };
+  gcl.addEventListener('click', e => { const it = e.target.closest('.grp-contact'); if (!it || now() - gLpAt < 700) return; const k = 'g:' + it.getAttribute('data-gid'); openConv(k, k); });
+  gcl.addEventListener('contextmenu', e => { const it = e.target.closest('.grp-contact'); if (!it) return; e.preventDefault(); gOpen(it); });
+  gcl.addEventListener('touchstart', e => { const it = e.target.closest('.grp-contact'); if (!it) return; clearTimeout(gT); gT = setTimeout(() => gOpen(it), 600); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => gcl.addEventListener(ev, () => clearTimeout(gT), { passive: true }));
+}
 $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
   $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
   $('nt-on').onclick = pushEnableClick;
@@ -4411,7 +4598,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick };
 boot();
 })();
 
