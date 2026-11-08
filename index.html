@@ -1042,6 +1042,12 @@ async function idbDel(k) {
     await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').delete(k); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
   } catch (e) { IDB.bad = true; }
 }
+async function idbClear() {
+  try {
+    const db = await idbOpen();
+    await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').clear(); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
+  } catch (e) { IDB.bad = true; }
+}
 const MSG = { mem: new Map(), uid: null };
 const msgKey = c => (S.uid || '') + ':' + c;
 function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; }
@@ -2512,6 +2518,7 @@ function teardown() {
   clearInterval(GRP.chatT); GRP.chatT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
+  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -4365,6 +4372,7 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
     await pushLogout();
     teardown();
     try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
+    try { await idbClear(); } catch (e) {}
     try { if (sb) await sb.auth.signOut(); } catch (e) {}
     location.reload();
   };
