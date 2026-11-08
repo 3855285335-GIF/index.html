@@ -1121,7 +1121,7 @@ function fixPreview(key) {   // 本机也没有记录：去取这个会话最后
 function renderList() {
   const el = $('conv-list');
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
-  const gh = (typeof GRP !== 'undefined' && GRP.list && GRP.list.length) ? GRP.list.map(function (x) { return '<div class="conv-item" data-key="g:' + x.id + '" data-peer="g:' + x.id + '"><div class="avatar" style="background:linear-gradient(140deg,#6c5ce7,#e8508c);font-size:15px">群</div><div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(x.name) + '</span></div><div class="conv-sub"><span class="preview">群聊</span></div></div></div>'; }).join('') : '';
+  const gh = '';
   if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   el.innerHTML = gh + shown.map(c => {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey);
