@@ -1093,7 +1093,7 @@ function renderMe() {
   if ($('me-avatar')) $('me-avatar').innerHTML = S.me ? avatarHTML(S.me.nickname, S.me.avatar_url, false, S.me.account_id) : '';
   paintPush();
 }
-function renderAll() { renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
+function renderAll() { try { grpLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 /* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
 function convPreview(c) {
   const t = parseQ(c.last_body).text; if (t) return t;
@@ -1114,8 +1114,9 @@ function fixPreview(key) {   // 本机也没有记录：去取这个会话最后
 function renderList() {
   const el = $('conv-list');
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
-  if (!shown.length) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
-  el.innerHTML = shown.map(c => {
+  const gh = (typeof GRP !== 'undefined' && GRP.list && GRP.list.length) ? GRP.list.map(function (x) { return '<div class="conv-item" data-key="g:' + x.id + '" data-peer="g:' + x.id + '"><div class="avatar" style="background:linear-gradient(140deg,#6c5ce7,#e8508c);font-size:15px">群</div><div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(x.name) + '</span></div><div class="conv-sub"><span class="preview">群聊</span></div></div></div>'; }).join('') : '';
+  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
+  el.innerHTML = gh + shown.map(c => {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, avatarOf(c.peer_acc), isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
@@ -2723,6 +2724,7 @@ async function grpFetch(reset) {
 async function grpSend() {
   const inp = $('grp-text'); const t = (inp.value || '').trim();
   if (!t || !GRP.cur) return;
+  if (!GRP.cur.id) { toast('群信息丢失，请返回重新进入群'); return; }
   inp.value = '';
   try {
     const r = await sb.rpc('send_group_msg', { gid: GRP.cur.id, msg: t });
@@ -2748,6 +2750,15 @@ document.addEventListener('click', function (e) {
   const it = e.target && e.target.closest ? e.target.closest('.grp-item') : null;
   if (it) { grpOpen(it.getAttribute('data-id')); }
 });
+document.addEventListener('click', function (e) {
+  const it = e.target && e.target.closest ? e.target.closest('.conv-item[data-key^="g:"]') : null;
+  if (!it) return;
+  e.preventDefault(); e.stopPropagation();
+  const gid = (it.getAttribute('data-key') || '').slice(2);
+  if (!gid) return;
+  grpOpenPanel();
+  setTimeout(function () { grpOpen(gid); }, 60);
+}, true);
 /* ================= 多选 ================= */
 let selMode = false, selSet = new Set();
 function paintMulti() {
