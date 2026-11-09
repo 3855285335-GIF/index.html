@@ -66,6 +66,10 @@
     body.chat-open { justify-content: flex-start; }
     body.chat-open .app-container { width: 372px; max-width: 372px; height: 100vh; flex: 0 0 372px; }
     body.chat-open .chat-view { left: 372px !important; right: 0 !important; top: 0 !important; width: auto !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: -8px 0 24px rgba(0,0,0,.10); }
+    /* 双栏时左右底栏同高，横线才能对齐 */
+    body.chat-open .app-nav { height: 64px; padding: 0 8px; }
+    body.chat-open .app-nav button { height: 100%; justify-content: center; padding: 4px 4px 2px; }
+    body.chat-open #chat-input-bar { height: 64px; padding: 0 10px; }
   }
   .view { display: none; position: absolute; inset: 0; flex-direction: column; }
   .view.active { display: flex; }
@@ -133,6 +137,44 @@
   .app-nav button.active { color: var(--accent); font-weight: 600; }
   .app-nav button.active .ic { transform: translateY(-1px) scale(1.12); stroke-width: 2.1; }
   .app-nav .badge { position: absolute; top: 1px; left: calc(50% + 6px); }
+
+  /* ---------- 朋友圈 ---------- */
+  .mo-top { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 10px; }
+  .mo-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
+  .mo-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .mo-new { background: var(--brand); color: #fff; border-radius: 14px; padding: 9px 14px; font-weight: 700; flex-shrink: 0; }
+  #moment-list { display: flex; flex-direction: column; gap: 10px; }
+  .moment { background: var(--surface); border-radius: 18px; padding: 12px; box-shadow: var(--shadow); }
+  .mo-head { display: flex; align-items: center; gap: 9px; }
+  .mo-head .avatar { width: 38px; height: 38px; font-size: 15px; border-radius: 13px; }
+  .mo-meta { flex: 1; min-width: 0; }
+  .mo-name { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mo-time { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .mo-del { background: none; color: var(--muted); padding: 4px 6px; font-size: 12px; }
+  .mo-text { margin: 9px 2px 0; font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .mo-imgs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px; }
+  .mo-imgs.two { grid-template-columns: repeat(2, 1fr); }
+  .mo-imgs.one { grid-template-columns: 1fr; }
+  .mo-imgs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 9px; display: block; background: var(--surface2); cursor: pointer; }
+  .mo-imgs.one img { max-height: 320px; aspect-ratio: auto; }
+  .mo-acts { display: flex; gap: 16px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
+  .mo-act { background: none; color: var(--muted); font-size: 12.5px; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
+  .mo-act.on { color: var(--accent2); font-weight: 600; }
+  .mo-comments { margin-top: 7px; background: var(--surface2); border-radius: 12px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; }
+  .mo-comment { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
+  .mo-comment b { color: var(--accent); font-weight: 600; }
+  .mo-more { width: 100%; margin: 10px 0; background: var(--surface); color: var(--muted); border-radius: 14px; padding: 10px; box-shadow: var(--shadow); }
+  .mo-editor { padding: 0 14px; }
+  #moment-text { width: 100%; min-height: 110px; max-height: 34vh; resize: none; border: 1.5px solid var(--line); border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.5; background: var(--surface2); color: var(--ink); font-family: inherit; }
+  .mo-imgs-edit { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .mo-thumb { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--surface2); }
+  .mo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .mo-thumb button { position: absolute; right: 2px; top: 2px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; padding: 0; font-size: 12px; line-height: 20px; }
+  .mo-tools { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 12px; font-size: 12px; color: var(--muted); }
+  .mo-tools button { background: var(--surface2); color: var(--accent); font-weight: 600; padding: 7px 12px; border-radius: 12px; }
+  #moment-sheet { width: min(420px, 92vw); }
+  body.kb #moment-sheet { top: calc(var(--vvt, 0px) + 8px); transform: translateX(-50%); max-height: calc(var(--vvh, 100dvh) - 16px); overflow-y: auto; }
+  body.kb #moment-text { min-height: 80px; max-height: 26vh; }
 
   .conv-item { display: flex; align-items: center; gap: 13px; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--line); transition: background .12s; }
   .conv-item:last-child { border-bottom: none; }
@@ -712,6 +754,11 @@
         <div id="friend-list" class="list-card"></div>
       </section>
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
+      <section id="tab-moments" class="tab-panel">
+        <div class="mo-top"><div><div class="mo-title">朋友圈</div><div class="mo-sub">朋友们的近况</div></div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
+        <div id="moment-list"></div>
+        <button id="moment-more" type="button" class="mo-more">加载更多</button>
+      </section>
       <section id="tab-me" class="tab-panel">
         <div class="me-box">
           <div class="list-card me-card"><div id="me-avatar"></div><div class="name"><div class="name-main" id="me-name2"></div><div class="name-sub">@<span id="me-acc2"></span><button id="btn-copy-id" type="button" class="copy-id">复制</button></div><div class="me-sign" id="me-sign"></div></div><button id="btn-edit-profile" type="button" class="me-edit">编辑</button></div>
@@ -766,6 +813,7 @@
       <button data-tab="convs" class="active"><svg class="ic" viewBox="0 0 24 24"><path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V15h-.5A2.5 2.5 0 0 1 4 12.5z"/><path d="M8.5 9.5h7M8.5 12h4"/></svg>消息</button>
       <button data-tab="contacts"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.2 19c.5-3.2 3-5 5.8-5s5.3 1.8 5.8 5"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.8 14.3c2.6-.4 4.7 1 5.1 3.9"/></svg>通讯录</button>
       <button data-tab="requests"><svg class="ic" viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.8a2.2 2.2 0 0 0 4 0"/></svg>请求<span id="req-badge" class="badge" style="display:none"></span></button>
+      <button data-tab="moments"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></svg>朋友圈</button>
       <button data-tab="me"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8.3" r="3.6"/><path d="M4.8 20c.6-3.9 3.6-6.2 7.2-6.2s6.6 2.3 7.2 6.2"/></svg>我</button>
     </nav>
   </div>
@@ -830,6 +878,17 @@
   <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
   <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div></div>
   <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-settings" type="button">群设置</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
+</div>
+<div id="moment-backdrop" class="sheet-bd"></div>
+<div id="moment-sheet" class="sheet">
+  <div class="menu-title">发朋友圈</div>
+  <div class="mo-editor">
+    <textarea id="moment-text" maxlength="1000" placeholder="这一刻的想法…"></textarea>
+    <div id="moment-imgs" class="mo-imgs-edit"></div>
+    <div class="mo-tools"><button id="moment-add-img" type="button">＋ 图片</button><span id="moment-count">0/9</span></div>
+    <input id="moment-file" type="file" accept="image/*" multiple hidden>
+  </div>
+  <div class="fs-btns"><button id="moment-cancel" type="button">取消</button><button id="moment-post" class="btn-primary" type="button">发表</button></div>
 </div>
 <div id="msg-menu-backdrop"></div>
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
@@ -2807,8 +2866,15 @@ function draftSave(conv, text) {
 }
 
 /* ================= 通用弹窗 / 菜单 ================= */
-let fsOk = null, actItems = [];
+let fsOk = null, actItems = [], sheetZ = 2700;
+function raiseSheet(sheetId, backdropId) {
+  sheetZ += 20;
+  const b = document.getElementById(backdropId), s = document.getElementById(sheetId);
+  if (b) b.style.zIndex = sheetZ;
+  if (s) s.style.zIndex = sheetZ + 1;
+}
 function openForm(title, fields, onOk, okText) {
+  raiseSheet('form-sheet', 'form-backdrop');
   $('fs-title').textContent = title; $('fs-msg').textContent = '';
   $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">').join('');
   $('fs-ok').textContent = okText || '确定'; $('fs-ok').disabled = false;
@@ -2822,6 +2888,7 @@ function openForm(title, fields, onOk, okText) {
 }
 function closeForm() { $('form-backdrop').classList.remove('active'); $('form-sheet').classList.remove('active'); fsOk = null; }
 function openActs(title, items) {
+  raiseSheet('act-sheet', 'act-backdrop');
   actItems = items; $('as-title').textContent = title;
   $('as-items').innerHTML = items.map((it, i) => '<button type="button" class="menu-item' + (it.danger ? '' : ' plain') + '" data-i="' + i + '">' + esc(it.label) + '</button>').join('');
   $('act-backdrop').classList.add('active'); $('act-sheet').classList.add('active'); actOpenAt = now();
@@ -3013,6 +3080,7 @@ function searchMsgs() {
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, invAt: 0, invLoaded: false };
+const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [] };
 function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
 function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
 function grpErr(e) {
@@ -3204,6 +3272,7 @@ async function grpInfo(key) {
   openGrpInfo(k, ms, pend);
 }
 function openGrpInfo(k, ms, pend, loading) {
+  raiseSheet('gi-sheet', 'gi-backdrop');
   giKey = k;
   const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
   const mine = (ms || []).find(function (m) { return m.account_id === ME(); });
@@ -3365,6 +3434,7 @@ function openGroupSettings(gid) {
 async function uploadGroupIcon(gid, file) {
   if (!file || !/^image\//.test(file.type)) { toast('请选择图片'); return; }
   toast('正在上传群图标…');
+  const old = (grpOf('g:' + gid) || {}).avatar_url || '';
   let blob = null;
   try { blob = await squareJpeg(file, 400); } catch (e) { logErr('groupIcon', e); }
   if (!blob) blob = file;
@@ -3374,6 +3444,11 @@ async function uploadGroupIcon(gid, file) {
   const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
   const { error } = await sb.rpc('set_group_avatar', { p_gid: gid, p_url: url });
   if (error) throw error;
+  if (old) {
+    const m = /\/chat-media\/([^?]+)/.exec(old);
+    const key = m ? decodeURIComponent(m[1]) : '';
+    if (key && key.indexOf(ME() + '/g_') === 0) sb.storage.from('chat-media').remove([key]).catch(function () {});
+  }
   await afterGroupChange(gid, '群图标已更新');
 }
 function groupMuteState(gid) {
@@ -3469,9 +3544,152 @@ async function grpPoll() {
     if (fresh) resyncSoon();
   } catch (e) { logErr('grpPoll', e); }
 }
+/* ================= 朋友圈 ================= */
+async function momentsLoad(reset) {
+  if (!sb || !S.me || MO.loading) return;
+  MO.loading = true;
+  if (reset) { MO.list = []; MO.cursor = null; MO.has = true; }
+  const el = $('moment-list');
+  if (el && reset) el.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    let q = sb.from('moments').select('id,author_acc,body,images,visibility,created_at').order('created_at', { ascending: false }).limit(15);
+    if (!reset && MO.cursor) q = q.lt('created_at', MO.cursor);
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = data || [];
+    if (reset) MO.list = rows; else MO.list = MO.list.concat(rows);
+    MO.has = rows.length === 15;
+    if (rows.length) MO.cursor = rows[rows.length - 1].created_at;
+    const ids = rows.map(function (r) { return r.id; });
+    const likes = reset ? {} : Object.assign({}, MO.likes), cmts = reset ? {} : Object.assign({}, MO.comments);
+    if (ids.length) {
+      const [lk, cm] = await Promise.all([
+        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
+        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at').in('moment_id', ids).order('created_at', { ascending: true })
+      ]);
+      if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
+      if (!cm.error) (cm.data || []).forEach(function (x) { (cmts[x.moment_id] = cmts[x.moment_id] || []).push(x); });
+      const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); });
+      await Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); }));
+    }
+    MO.likes = likes; MO.comments = cmts;
+    renderMoments();
+  } catch (e) {
+    logErr('moments', e);
+    if (el && !MO.list.length) el.innerHTML = '<div class="empty">朋友圈加载失败：' + esc((e && e.message) || '请重试') + '</div>';
+  } finally { MO.loading = false; }
+}
+function renderMoments() {
+  const el = $('moment-list'); if (!el) return;
+  if (!MO.list.length) { el.innerHTML = emptyHTML('还没有朋友圈<br>点右上角发一条'); $('moment-more').style.display = 'none'; return; }
+  el.innerHTML = MO.list.map(function (m) {
+    const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
+    const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
+    const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
+    const like = MO.likes[m.id] || [], liked = like.indexOf(ME()) >= 0;
+    const cms = MO.comments[m.id] || [];
+    return '<div class="moment" data-id="' + esc(m.id) + '">' +
+      '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
+        '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtTime(m.created_at) + '</div></div>' +
+        (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
+      (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid +
+      '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' +
+      (cms.length ? '<div class="mo-comments">' + cms.map(function (c) { return '<div class="mo-comment"><b>' + esc(peerName(c.author_acc)) + '：</b>' + esc(c.body) + '</div>'; }).join('') + '</div>' : '') +
+      '</div>';
+  }).join('');
+  $('moment-more').style.display = MO.has ? '' : 'none';
+}
+function openMomentCompose() {
+  MO.imgs = []; MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); MO.urls = [];
+  $('moment-text').value = ''; renderMomentEditor();
+  raiseSheet('moment-sheet', 'moment-backdrop');
+  $('moment-backdrop').classList.add('active'); $('moment-sheet').classList.add('active');
+  setTimeout(function () { $('moment-text').focus(); }, 60);
+}
+function closeMomentCompose() {
+  $('moment-backdrop').classList.remove('active'); $('moment-sheet').classList.remove('active');
+  MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+  MO.imgs = []; MO.urls = [];
+}
+function renderMomentEditor() {
+  $('moment-count').textContent = MO.imgs.length + '/9';
+  $('moment-imgs').innerHTML = MO.imgs.map(function (f, i) {
+    return '<div class="mo-thumb"><img src="' + esc(MO.urls[i]) + '" alt=""><button type="button" data-i="' + i + '">×</button></div>';
+  }).join('');
+  $('moment-add-img').style.display = MO.imgs.length >= 9 ? 'none' : '';
+}
+function addMomentFiles(files) {
+  Array.from(files || []).forEach(function (f) {
+    if (MO.imgs.length >= 9) return;
+    if (!f || !/^image\//.test(f.type || '')) return;
+    MO.imgs.push(f);
+    try { MO.urls.push(URL.createObjectURL(f)); } catch (e) { MO.urls.push(''); }
+  });
+  renderMomentEditor();
+}
+async function postMoment() {
+  const body = $('moment-text').value.trim();
+  if (!body && !MO.imgs.length) { toast('写点什么，或者选一张图片'); return; }
+  if (body.length > 1000) { toast('最多 1000 个字'); return; }
+  const btn = $('moment-post'); if (btn.disabled) return; btn.disabled = true;
+  toast('正在发表…');
+  try {
+    const urls = [];
+    for (let i = 0; i < MO.imgs.length; i++) {
+      let blob = MO.imgs[i];
+      try { blob = await fitJpeg(blob, 1600, 0.85); } catch (e) { logErr('momentImg', e); }
+      const path = ME() + '/moment_' + now() + '_' + i + '.jpg';
+      const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+      if (up.error) throw up.error;
+      urls.push(canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl));
+    }
+    const { error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends' });
+    if (error) throw error;
+    closeMomentCompose(); toast('已发表'); await momentsLoad(true);
+  } catch (e) { logErr('momentPost', e); toast('发表失败：' + ((e && e.message) || '请重试')); }
+  finally { btn.disabled = false; }
+}
+async function toggleMomentLike(id) {
+  const arr = MO.likes[id] || [], liked = arr.indexOf(ME()) >= 0;
+  try {
+    if (liked) await sb.from('moment_likes').delete().eq('moment_id', id).eq('account_id', ME());
+    else await sb.from('moment_likes').insert({ moment_id: id, account_id: ME() });
+    await momentsLoad(true);
+  } catch (e) { logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
+}
+function commentMoment(id) {
+  openForm('评论', [{ ph: '写评论…（最多 200 字）', max: 200 }], async ([v]) => {
+    v = String(v || '').trim(); if (!v) return '写点什么';
+    const { error } = await sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v });
+    if (error) return '评论失败：' + ((error && error.message) || '请重试');
+    await momentsLoad(true); return null;
+  }, '发送');
+}
+function deleteMoment(id) {
+  const mm = MO.list.find(function (m) { return m.id === id; });
+  openActs('删除这条朋友圈？\n点赞和评论也会一起删除。', [
+    { label: '删除', danger: true, fn: async function () {
+      const { error } = await sb.from('moments').delete().eq('id', id);
+      if (error) { toast('删除失败：' + ((error && error.message) || '请重试')); return; }
+      if (mm && Array.isArray(mm.images)) {
+        const keys = mm.images.map(function (u) { const m = /\/chat-media\/([^?]+)/.exec(u || ''); return m ? decodeURIComponent(m[1]) : ''; })
+          .filter(function (k) { return k && k.indexOf(ME() + '/moment_') === 0; });
+        if (keys.length) sb.storage.from('chat-media').remove(keys).catch(function () {});
+      }
+      toast('已删除'); await momentsLoad(true);
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
+function openMomentImage(url) {
+  lbList = [{ id: 'moment', url: url }]; lbIdx = 0;
+  $('lb-save').style.display = 'none'; lbShow(); $('lightbox').classList.add('active');
+}
+
 /* 选择成员弹窗 */
 let pickCb = null, pickSel = new Set();
 function openPick(title, items, cb) {
+  raiseSheet('pick-sheet', 'pick-backdrop');
   pickCb = cb; pickSel = new Set();
   $('pick-title').textContent = title || '选择成员';
   $('pick-list').innerHTML = (items || []).length
@@ -4124,6 +4342,7 @@ function editRemark(acc) {
 /* ---- 好友资料页 ---- */
 let pfAcc = null;
 function openProfile(acc) {
+  raiseSheet('profile-card', 'pf-backdrop');
   if (!acc) return; pfAcc = acc; renderProfile();
   $('pf-backdrop').classList.add('active'); $('profile-card').classList.add('active'); pfOpenAt = now();
   fetchProfile(acc, true).then(function () { if (pfAcc === acc) renderProfile(); }, function () {});
@@ -4639,6 +4858,7 @@ function bindUI() {
       $('tab-' + btn.dataset.tab).classList.add('active');
       if (btn.dataset.tab === 'me') renderEnv();
       if (btn.dataset.tab === 'requests') grpInvitesLoad(true);
+      if (btn.dataset.tab === 'moments') momentsLoad(true);
     };
   });
   setInterval(() => { try { if (!document.hidden && $('tab-me').classList.contains('active')) renderEnv(); } catch (e) {} }, 1500);   // 诊断页自动刷新：实时通道连上后会自己变绿
@@ -4827,6 +5047,29 @@ function bindUI() {
     toast(imgOrig() ? '以后发图片用原图：更清晰，但更占空间' : '以后发图片自动压缩：省空间，日常够清晰');
   };
   $('btn-theme').onclick = cycleTheme;
+  /* 朋友圈 */
+  $('moment-new').onclick = openMomentCompose;
+  $('moment-cancel').onclick = closeMomentCompose;
+  $('moment-backdrop').onclick = closeMomentCompose;
+  $('moment-post').onclick = postMoment;
+  $('moment-more').onclick = function () { momentsLoad(false); };
+  $('moment-add-img').onclick = function () { $('moment-file').click(); };
+  $('moment-file').onchange = function (e) { const fs = Array.from(e.target.files || []); e.target.value = ''; addMomentFiles(fs); };
+  $('moment-imgs').onclick = function (e) {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    const i = +b.dataset.i; if (!(i >= 0)) return;
+    try { URL.revokeObjectURL(MO.urls[i]); } catch (x) {}
+    MO.imgs.splice(i, 1); MO.urls.splice(i, 1); renderMomentEditor();
+  };
+  $('moment-list').onclick = function (e) {
+    const card = e.target.closest('.moment'); if (!card) return;
+    const id = card.dataset.id;
+    if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
+    if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
+    if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
+    const im = e.target.closest('.mo-imgs img'); if (im && im.dataset.url) openMomentImage(im.dataset.url);
+  };
+
 $('btn-export').onclick = () => {
   if (S.conv) { exportChat(S.conv); return; }
   const list = S.convs.filter(c => !convGone(c)).slice(0, 15).map(c => ({ label: peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
@@ -4960,7 +5203,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile };
 boot();
 })();
 
