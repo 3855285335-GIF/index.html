@@ -77,33 +77,23 @@
   #auth-view::after { width: 300px; height: 300px; right: -100px; bottom: -70px; background: #ff7a90; animation: drift 17s ease-in-out infinite alternate-reverse; }
   @keyframes drift { to { transform: translate(40px, 30px) scale(1.15); } }
 
-  /* ---------- 启动画面：图标语言 + 轻微动效，不额外请求图片 ---------- */
-  #splash { position: fixed; inset: 0; z-index: 7000; display: flex; align-items: center; justify-content: center; overflow: hidden; background: radial-gradient(circle at 30% 18%, #2a1f6e 0%, #14102e 58%, #0b0918 100%); transition: opacity .45s ease, visibility .45s ease; }
+  /* ---------- 启动画面：只用渐变和图标，避免大滤镜拖慢首屏 ---------- */
+  #splash { position: fixed; inset: 0; z-index: 7000; display: flex; align-items: center; justify-content: center; overflow: hidden; background: radial-gradient(circle at 28% 16%, rgba(123,92,255,.48), transparent 42%), radial-gradient(circle at 80% 86%, rgba(255,79,139,.34), transparent 46%), linear-gradient(160deg, #1b1548 0%, #14102e 56%, #0b0918 100%); transition: opacity .28s ease, visibility .28s ease; contain: layout paint style; }
   #splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
-  #splash::before { content: ""; position: absolute; inset: 0; background-image: var(--doodle); background-size: 200px 200px; opacity: .3; }
-  .sp-blob { position: absolute; border-radius: 50%; filter: blur(48px); opacity: .45; animation: spDrift 12s ease-in-out infinite alternate; }
-  .sp-blob.a { width: 300px; height: 300px; background: #7b5cff; left: -80px; top: -60px; }
-  .sp-blob.b { width: 260px; height: 260px; background: #ff4f8b; right: -70px; bottom: -50px; animation-delay: -4s; }
-  .sp-blob.c { width: 170px; height: 170px; background: #3ec6c0; right: 18%; top: 8%; opacity: .18; animation-delay: -7s; }
   .sp-stage { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding: 24px; text-align: center; }
-  .sp-art { width: min(62vw, 250px); height: min(62vw, 250px); position: relative; animation: spFloat 4.5s ease-in-out infinite; }
-  .sp-art svg { width: 100%; height: 100%; overflow: visible; }
-  .sp-ring { transform-origin: 130px 130px; animation: spOrbit 26s linear infinite; }
-  .sp-dot { animation: spPulse 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-  .sp-dot.d2 { animation-delay: .25s; }
-  .sp-dot.d3 { animation-delay: .5s; }
-  .sp-star { animation: spTwinkle 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-  .sp-star.s2 { animation-delay: -1.2s; }
-  .sp-star.s3 { animation-delay: -2.1s; }
-  .sp-word { margin-top: 20px; font-size: 30px; font-weight: 800; letter-spacing: .5px; color: #fff; text-shadow: 0 8px 30px rgba(123,92,255,.55); }
+  .sp-art { width: min(56vw, 190px); height: min(56vw, 190px); position: relative; animation: spFloat 4.5s ease-in-out infinite; }
+  .sp-logo { display: block; width: 100%; height: 100%; border-radius: 26%; box-shadow: 0 22px 55px rgba(91,59,216,.42), inset 0 0 0 1px rgba(255,255,255,.08); }
+  .sp-art::before { content: ""; position: absolute; inset: -16px; border-radius: 50%; border: 1px dashed rgba(255,255,255,.22); animation: spOrbit 30s linear infinite; }
+  .sp-spark { position: absolute; width: 5px; height: 5px; background: #fff; transform: rotate(45deg); opacity: .7; animation: spTwinkle 3.2s ease-in-out infinite; }
+  .sp-spark.s1 { right: 6%; top: 6%; }
+  .sp-spark.s2 { left: 2%; bottom: 14%; width: 3px; height: 3px; animation-delay: -1.4s; }
+  .sp-word { margin-top: 24px; font-size: 30px; font-weight: 800; letter-spacing: .5px; color: #fff; text-shadow: 0 8px 30px rgba(123,92,255,.45); }
   .sp-sub { margin-top: 7px; font-size: 10.5px; letter-spacing: 3px; color: rgba(255,255,255,.62); }
   .sp-line { margin-top: 24px; width: 88px; height: 2px; border-radius: 2px; background: rgba(255,255,255,.14); overflow: hidden; }
   .sp-line::after { content: ""; display: block; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, transparent, #ff8ab0, #8b7cf6, transparent); animation: spSweep 1.7s ease-in-out infinite; }
-  @keyframes spFloat { 50% { transform: translateY(-7px); } }
+  @keyframes spFloat { 50% { transform: translateY(-6px); } }
   @keyframes spOrbit { to { transform: rotate(360deg); } }
-  @keyframes spPulse { 0%, 100% { transform: scale(1); opacity: .55; } 50% { transform: scale(1.18); opacity: 1; } }
-  @keyframes spTwinkle { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.12); } }
-  @keyframes spDrift { to { transform: translate(18px, 22px) scale(1.08); } }
+  @keyframes spTwinkle { 0%, 100% { opacity: .25; } 50% { opacity: .9; } }
   @keyframes spSweep { 0% { transform: translateX(-115%); } 100% { transform: translateX(260%); } }
 
   .auth-card { position: relative; z-index: 1; width: 350px; max-width: 90vw; background: rgba(255,255,255,.14); backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4); border: 1px solid rgba(255,255,255,.28); padding: 30px 24px 22px; border-radius: 28px; box-shadow: 0 30px 80px rgba(10,0,50,.35); color: #fff; }
@@ -247,6 +237,9 @@
 
   #chat-input-bar { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-top: 1px solid var(--line); position: relative; z-index: 2; }
   body.kb #chat-input-bar { padding-bottom: 8px; }
+  #chat-mute-tip { display: none; padding: 7px 14px; font-size: 12px; line-height: 1.45; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); border-top: 1px solid var(--line); text-align: center; flex-shrink: 0; }
+  #chat-mute-tip.show { display: block; }
+  #chat-input-bar.muted #chat-input, #chat-input-bar.muted #btn-send, #chat-input-bar.muted #btn-img, #chat-input-bar.muted #btn-audio-toggle, #chat-input-bar.muted #btn-audio, #chat-input-bar.muted #btn-emoji { opacity: .42; pointer-events: none; }
   #chat-input-bar .icon-btn { width: 40px; height: 40px; flex-shrink: 0; color: var(--muted); padding: 0; }
   #chat-input-bar .icon-btn:active { color: var(--accent); }
   #btn-audio-toggle .i-kbd { display: none; }
@@ -321,6 +314,7 @@
   #msg-menu-backdrop.active { display: block; }
   .grp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 14px; }
   .msg-sender { font-size: 11.5px; color: var(--muted); margin: 0 0 3px 4px; line-height: 1.2; max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-sender .msg-tag { color: var(--accent); font-size: 10px; margin-left: 2px; }
   .grp-mark { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   #pick-sheet { display: none; flex-direction: column; max-height: 76vh; }
   #pick-sheet.active { display: flex; }
@@ -347,6 +341,10 @@
   .gi-m .avatar { width: 50px; height: 50px; font-size: 18px; }
   .gi-mn { font-size: 12px; margin-top: 4px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gi-owner { font-size: 10px; color: var(--accent); line-height: 1.4; }
+  .gi-title { font-size: 10px; color: var(--ok); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gi-muted { font-size: 10px; color: var(--danger); line-height: 1.4; }
+  #gi-av, #gi-name { cursor: pointer; }
+  .gi-acts button { font-size: 13px; }
   .gi-pending { font-size: 12.5px; color: var(--muted); padding: 2px 0 10px; line-height: 1.55; }
   .gi-acts { display: flex; gap: 8px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
   .gi-acts button { flex: 1; padding: 11px 0; border-radius: 14px; font-size: 14px; background: var(--surface2); font-weight: 600; }
@@ -654,34 +652,10 @@
 </g></symbol></svg>
 
 <div id="splash" role="status" aria-label="Chatter 正在打开">
-  <i class="sp-blob a"></i><i class="sp-blob b"></i><i class="sp-blob c"></i>
   <div class="sp-stage">
     <div class="sp-art">
-      <svg viewBox="0 0 260 260" aria-hidden="true">
-        <defs>
-          <linearGradient id="spTile" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#8B6CFF"/><stop offset=".52" stop-color="#5B3BD8"/><stop offset="1" stop-color="#C0467F"/>
-          </linearGradient>
-          <filter id="spGlow" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <circle class="sp-ring" cx="130" cy="130" r="104" fill="none" stroke="rgba(255,255,255,.24)" stroke-width="1.2" stroke-dasharray="1 9" stroke-linecap="round"/>
-        <g filter="url(#spGlow)">
-          <rect x="45" y="45" width="170" height="170" rx="44" fill="url(#spTile)"/>
-          <rect x="77" y="86" width="106" height="78" rx="34" fill="#fff"/>
-          <path d="M97 162 L84 189 L121 166 Z" fill="#fff"/>
-          <circle class="sp-dot" cx="106" cy="125" r="7" fill="#6C4DF0" opacity=".45"/>
-          <circle class="sp-dot d2" cx="130" cy="125" r="9.5" fill="#6C4DF0" opacity=".75"/>
-          <circle class="sp-dot d3" cx="157" cy="125" r="11.5" fill="#FF4F8B"/>
-        </g>
-        <g fill="#fff">
-          <path class="sp-star" d="M210 62 l2.2 6.8 6.8 2.2 -6.8 2.2 -2.2 6.8 -2.2 -6.8 -6.8 -2.2 6.8 -2.2 z" opacity=".7"/>
-          <path class="sp-star s2" d="M48 188 l1.7 5.1 5.1 1.7 -5.1 1.7 -1.7 5.1 -1.7 -5.1 -5.1 -1.7 5.1 -1.7 z" opacity=".45"/>
-          <circle class="sp-star s3" cx="220" cy="178" r="2" opacity=".5"/>
-          <circle cx="38" cy="92" r="1.6" opacity=".35"/>
-        </g>
-      </svg>
+      <svg class="sp-logo" viewBox="0 0 512 512" aria-hidden="true"><use href="#logo"/></svg>
+      <i class="sp-spark s1"></i><i class="sp-spark s2"></i>
     </div>
     <div class="sp-word">Chatter</div>
     <div class="sp-sub">絮 语 · 随 时 说 点 什 么</div>
@@ -820,6 +794,7 @@
     <input id="stk-input" type="file" accept="image/*" multiple hidden>
     <input id="doc-input" type="file" multiple hidden>
     <div id="reply-bar"><div id="reply-text"></div><button id="reply-x" type="button" aria-label="取消回复">×</button></div>
+    <div id="chat-mute-tip"></div>
     <div id="chat-input-bar">
       <button id="btn-emoji" type="button" class="icon-btn" title="表情"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2c.9 1.3 2.1 2 3.5 2s2.6-.7 3.5-2"/><path d="M9 9.8h.01M15 9.8h.01" stroke-width="2.6"/></svg></button>
       <button id="btn-img" type="button" class="icon-btn" title="发送图片"><svg class="ic" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/></svg></button>
@@ -831,6 +806,7 @@
       <button id="btn-send" type="button" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5.5M6 11.5l6-6 6 6"/></svg></button>
     </div>
     <input id="file-input" type="file" accept="image/*,video/*" multiple hidden>
+    <input id="group-icon-input" type="file" accept="image/*" hidden>
   </div>
 </div>
 
@@ -853,7 +829,7 @@
 <div id="gi-sheet" class="sheet">
   <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
   <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div></div>
-  <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
+  <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-settings" type="button">群设置</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
 </div>
 <div id="msg-menu-backdrop"></div>
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
@@ -1340,8 +1316,8 @@ function renderList() {
   const gh = '';
   if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   el.innerHTML = gh + shown.map(c => {
-    const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey);
-    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? '' : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
+    const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
+    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
       '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(String(convPreview(c)).slice(0, 120))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
   }).join('');
@@ -1360,7 +1336,7 @@ function renderGroupContacts() {
   if (!list.length) { el.innerHTML = '<div class="grp-empty">还没有群聊，点上面「新建群聊」</div>'; return; }
   el.innerHTML = list.map(function (g) {
     const n = GRP.count[g.id] || 0;
-    return '<div class="friend-item grp-contact" data-gid="' + esc(g.id) + '">' + avatarHTML(g.name, '', false, 'g:' + g.id) +
+    return '<div class="friend-item grp-contact" data-gid="' + esc(g.id) + '">' + avatarHTML(g.name, g.avatar_url || '', false, 'g:' + g.id) +
       '<div class="name"><div class="name-main">' + esc(g.name) + '<span class="grp-mark">群</span></div><div class="name-sub">' + (n ? n + ' 人' : '群聊') + '</div></div>' +
       '<div class="row-actions"><button class="btn-primary act-grp-open">聊天</button></div></div>';
   }).join('');
@@ -1530,9 +1506,18 @@ function msgHTML(m) {
   }
   const st = m._st === 'sending' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
+  let senderTag = '';
+  if (!mine && gp) {
+    const gm = groupMemberOf(gidOf(m.conv), m.from_acc);
+    if (gm) {
+      const role = gm.role === 'owner' ? '群主' : gm.role === 'admin' ? '管理员' : '';
+      const title = (gm.title && gm.title_on) ? gm.title : '';
+      senderTag = role + (title ? (role ? ' · ' : '') + title : '');
+    }
+  }
   return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
     (mine ? '' : avatarHTML(peerName(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
-    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
+    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
 }
 function chatRender(stick) {
   const b = $('chat-messages');
@@ -1697,6 +1682,7 @@ async function deliver(m, silent) {
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
+  if (!canSendHere()) return;
   input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
   let body = v.replace(/\u2063/g, '');
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
@@ -1787,6 +1773,7 @@ async function compressImage(file) {
 const imgOrig = () => { try { return LS.get('ch2imgq', 'auto') === 'orig'; } catch (e) { return false; } };
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
+  if (!canSendHere()) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
   const out = imgOrig() ? file : await compressImage(file);
   const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
@@ -1794,6 +1781,7 @@ async function sendImage(file) {
 }
 function sendVoice(blob, dur, ext, ct) {
   if (!S.conv) return;
+  if (!canSendHere()) return;
   addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
 }
 function retryMsg(id) {
@@ -3034,7 +3022,7 @@ function grpErr(e) {
   if (/invalid input syntax/i.test(m)) return '群 id 格式不对';
   return m || '请重试';
 }
-function grpCacheSave() { try { LS.set('ch2grp:' + (S.uid || ''), GRP.list.map(function (x) { return { id: x.id, name: x.name, owner_acc: x.owner_acc }; })); } catch (e) {} }
+function grpCacheSave() { try { LS.set('ch2grp:' + (S.uid || ''), GRP.list.map(function (x) { return { id: x.id, name: x.name, owner_acc: x.owner_acc, avatar_url: x.avatar_url || '', mute_all: !!x.mute_all }; })); } catch (e) {} }
 async function grpLoad(force) {
   if (!sb || !S.me) return;
   if (!force && now() - GRP.loadAt < 5000) return;
@@ -3046,7 +3034,7 @@ async function grpLoad(force) {
     (r.data || []).forEach(function (x) { if (x && x.group_id && ids.indexOf(x.group_id) < 0) ids.push(x.group_id); });
     let list = [];
     if (ids.length) {
-      const g = await sb.from('chat_groups').select('id,name,owner_acc').in('id', ids);
+      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all').in('id', ids);
       if (g.error) throw g.error;
       list = g.data || [];
       try {   // 成员数一次查出来，通讯录里的群聊也显示人数
@@ -3071,10 +3059,11 @@ async function grpLoad(force) {
 async function grpMembers(gid, force) {
   if (!gid) return [];
   if (!force && GRP.members[gid] && now() - (GRP.membersAt[gid] || 0) < 10000) return GRP.members[gid];
-  const r = await sb.from('chat_group_members').select('account_id,role').eq('group_id', gid);
+  const r = await sb.from('chat_group_members').select('account_id,role,title,title_on,muted_until').eq('group_id', gid);
   if (r.error) throw r.error;
   const ms = r.data || [];
   GRP.members[gid] = ms; GRP.membersAt[gid] = now(); GRP.count[gid] = ms.length;
+  if (S.conv === 'g:' + gid) { applyMuteState(); if (S.msgs.length) chatRender(S.stick); }
   sched('contacts');
   const need = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !S.profiles[a]; });
   if (need.length) {
@@ -3094,6 +3083,7 @@ function grpChatMode() {
   $('btn-video-call').style.display = gp ? 'none' : '';
   clearInterval(GRP.chatT); GRP.chatT = 0;
   if (gp) GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+  applyMuteState();
 }
 /* ---- 群邀请（要对方同意才进群） ---- */
 async function grpInvitesLoad(force) {
@@ -3216,30 +3206,42 @@ async function grpInfo(key) {
 function openGrpInfo(k, ms, pend, loading) {
   giKey = k;
   const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
-  $('gi-av').innerHTML = avatarHTML(name, '', false, k);
+  const mine = (ms || []).find(function (m) { return m.account_id === ME(); });
+  const myRole = mine ? mine.role : (owner ? 'owner' : 'member');
+  const canManage = owner || myRole === 'admin';
+  $('gi-av').innerHTML = avatarHTML(name, g.avatar_url || '', false, k);
   $('gi-name').textContent = name;
-  $('gi-sub').textContent = loading ? '正在读取成员…' : (ms.length || 0) + ' 人' + (owner ? ' · 我是群主' : '');
-  const list = ms.slice().sort(function (a, b) {
-    if (a.role === 'owner') return -1; if (b.role === 'owner') return 1;
+  const bits = [(ms.length || 0) + ' 人'];
+  if (g.mute_all) bits.push('全员禁言');
+  if (owner) bits.push('我是群主'); else if (myRole === 'admin') bits.push('我是管理员');
+  $('gi-sub').textContent = loading ? '正在读取成员…' : bits.join(' · ');
+  const rank = m => m.role === 'owner' ? 0 : m.role === 'admin' ? 1 : 2;
+  const list = (ms || []).slice().sort(function (a, b) {
+    const d = rank(a) - rank(b); if (d) return d;
     return String(peerName(a.account_id)).localeCompare(String(peerName(b.account_id)), 'zh');
   });
   $('gi-members').innerHTML = list.map(function (m) {
-    const acc = m.account_id;
-    const badge = acc === ME() ? (m.role === 'owner' ? '群主 · 我' : '我') : (m.role === 'owner' ? '群主' : '');
-    return '<div class="gi-m" data-acc="' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
-      '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' +
+    const acc = m.account_id, me = acc === ME();
+    const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
+    const badge = me ? (role ? role + ' · 我' : '我') : role;
+    const title = (m.title && m.title_on) ? '<div class="gi-title">' + esc(m.title) + '</div>' : '';
+    const muted = (m.muted_until && Date.parse(m.muted_until) > now()) ? '<div class="gi-muted">禁言中</div>' : '';
+    return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
+      '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' + title + muted +
       (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
   }).join('');
   $('gi-pending').textContent = pend.length ? '邀请中：' + pend.slice(0, 30).join('、') + (pend.length > 30 ? ' 等 ' + pend.length + ' 人' : '') : '';
   $('gi-leave').textContent = owner ? '解散群聊' : '退出群聊';
+  $('gi-settings').style.display = (canManage || (mine && mine.title)) ? '' : 'none';
   $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
 }
 async function grpKick(gid, acc) {
   try {
-    const { error } = await sb.from('chat_group_members').delete().eq('group_id', gid).eq('account_id', acc);
+    const { error } = await sb.rpc('kick_group_member', { p_gid: gid, p_acc: acc });
     if (error) throw error;
     delete GRP.members[gid];
     try { await grpMembers(gid, true); } catch (e) {}
+    grpLoad(true);
     if (S.conv === 'g:' + gid) renderChatTitle();
     sched('list'); sched('contacts');
     await grpInfo('g:' + gid);
@@ -3261,6 +3263,156 @@ function confirmGrpLeave(key) {
     { label: owner ? '解散群聊' : '退出群聊', danger: true, fn: function () { grpLeave(k); } },
     { label: '取消', fn: null }
   ]);
+}
+function groupMemberOf(gid, acc) {
+  return (GRP.members[gid] || []).find(function (m) { return m.account_id === acc; }) || null;
+}
+function grpRoleOf(gid, acc) {
+  const mine = groupMemberOf(gid, acc);
+  return mine ? mine.role : '';
+}
+function grpCanManage(gid) { return (grpOf('g:' + gid) || {}).owner_acc === ME() || grpRoleOf(gid, ME()) === 'admin'; }
+async function afterGroupChange(gid, msg) {
+  delete GRP.members[gid];
+  try { await grpMembers(gid, true); } catch (e) {}
+  try { await grpLoad(true); } catch (e) {}
+  if (S.conv === 'g:' + gid) { renderChatTitle(); applyMuteState(); }
+  sched('list'); sched('contacts');
+  if (giKey === 'g:' + gid) { try { await grpInfo('g:' + gid); } catch (e) {} }
+  if (msg) toast(msg);
+}
+async function setGroupAdmin(gid, acc, on) {
+  try { const { error } = await sb.rpc('set_group_admin', { p_gid: gid, p_acc: acc, p_on: !!on }); if (error) throw error; await afterGroupChange(gid, on ? '已设为管理员' : '已取消管理员'); }
+  catch (e) { logErr('setGroupAdmin', e); toast('操作失败：' + grpErr(e)); }
+}
+function editGroupName(gid) {
+  const g = grpOf('g:' + gid) || {};
+  openForm('修改群名称', [{ ph: '群名称（1-20 字）', val: g.name || '', max: 20 }], async ([v]) => {
+    v = String(v || '').trim(); if (!v) return '群名称不能为空'; if (v.length > 20) return '最多 20 个字';
+    const { error } = await sb.rpc('set_group_name', { p_gid: gid, p_name: v });
+    if (error) return '保存失败：' + grpErr(error);
+    await afterGroupChange(gid, '群名称已修改'); return null;
+  }, '保存');
+}
+async function toggleGroupMuteAll(gid) {
+  const g = grpOf('g:' + gid) || {};
+  try { const { error } = await sb.rpc('set_group_mute_all', { p_gid: gid, p_on: !g.mute_all }); if (error) throw error; await afterGroupChange(gid, g.mute_all ? '已关闭全员禁言' : '已开启全员禁言'); }
+  catch (e) { logErr('muteAll', e); toast('操作失败：' + grpErr(e)); }
+}
+function editMemberTitle(gid, acc) {
+  const m = (GRP.members[gid] || []).find(function (x) { return x.account_id === acc; });
+  openForm('设置头衔（对方可选择不戴）', [{ ph: '例如：摸鱼王（最多 12 字，留空删除）', val: (m && m.title) || '', max: 12 }], async ([v]) => {
+    v = String(v || '').trim(); if (v.length > 12) return '最多 12 个字';
+    const { error } = await sb.rpc('set_member_title', { p_gid: gid, p_acc: acc, p_title: v });
+    if (error) return '保存失败：' + grpErr(error);
+    await afterGroupChange(gid, v ? '头衔已设置' : '头衔已删除'); return null;
+  }, '保存');
+}
+function muteMember(gid, acc) {
+  const m = (GRP.members[gid] || []).find(function (x) { return x.account_id === acc; });
+  const until = m && m.muted_until ? Date.parse(m.muted_until) : 0;
+  const items = [
+    { label: '禁言 10 分钟', fn: () => doMute(gid, acc, 10) },
+    { label: '禁言 1 小时', fn: () => doMute(gid, acc, 60) },
+    { label: '禁言 1 天', fn: () => doMute(gid, acc, 1440) }
+  ];
+  if (until > now()) items.push({ label: '解除禁言', fn: () => doMute(gid, acc, 0) });
+  items.push({ label: '取消', fn: null });
+  openActs('禁言“' + peerName(acc) + '”', items);
+}
+async function doMute(gid, acc, mins) {
+  try { const { error } = await sb.rpc('set_group_member_mute', { p_gid: gid, p_acc: acc, p_minutes: mins }); if (error) throw error; await afterGroupChange(gid, mins ? '已禁言 ' + (mins >= 1440 ? '1 天' : mins + ' 分钟') : '已解除禁言'); }
+  catch (e) { logErr('muteMember', e); toast('操作失败：' + grpErr(e)); }
+}
+async function setMyTitleVisible(gid, on) {
+  try { const { error } = await sb.rpc('set_title_visible', { p_gid: gid, p_visible: !!on }); if (error) throw error; await afterGroupChange(gid, on ? '已戴上头衔' : '已收起头衔'); }
+  catch (e) { logErr('titleVisible', e); toast('操作失败：' + grpErr(e)); }
+}
+function transferOwner(gid) {
+  const ms = (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); });
+  if (!ms.length) { toast('群里还没有别的成员'); return; }
+  const items = ms.map(function (m) {
+    return { label: peerName(m.account_id), fn: function () { confirmTransfer(gid, m.account_id); } };
+  });
+  items.push({ label: '取消', fn: null });
+  openActs('转让群主给谁？', items);
+}
+function confirmTransfer(gid, acc) {
+  openActs('把群主转让给“' + peerName(acc) + '”？\n转让后你会变成管理员，不能再收回；确认要转让吗？', [
+    { label: '确认转让', danger: true, fn: async function () {
+      try { const { error } = await sb.rpc('transfer_group_owner', { p_gid: gid, p_acc: acc }); if (error) throw error; await afterGroupChange(gid, '群主已转让'); }
+      catch (e) { logErr('transfer', e); toast('转让失败：' + grpErr(e)); }
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
+let groupIconGid = null;
+function openGroupSettings(gid) {
+  const g = grpOf('g:' + gid) || {}, owner = g.owner_acc === ME(), can = grpCanManage(gid);
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const items = [];
+  if (can) {
+    items.push({ label: '更换群图标', fn: function () { groupIconGid = gid; $('group-icon-input').click(); } });
+    items.push({ label: '修改群名称', fn: function () { editGroupName(gid); } });
+    items.push({ label: g.mute_all ? '关闭全员禁言' : '开启全员禁言', fn: function () { toggleGroupMuteAll(gid); } });
+  }
+  if (mine && mine.title) items.push({ label: mine.title_on ? '我的头衔：戴上（点一下收起）' : '我的头衔：已收起（点一下戴上）', fn: function () { setMyTitleVisible(gid, !mine.title_on); } });
+  if (owner) items.push({ label: '转让群主', fn: function () { transferOwner(gid); } });
+  if (!items.length) { toast('这里还没有可设置的'); return; }
+  items.push({ label: '取消', fn: null });
+  openActs('群设置', items);
+}
+async function uploadGroupIcon(gid, file) {
+  if (!file || !/^image\//.test(file.type)) { toast('请选择图片'); return; }
+  toast('正在上传群图标…');
+  let blob = null;
+  try { blob = await squareJpeg(file, 400); } catch (e) { logErr('groupIcon', e); }
+  if (!blob) blob = file;
+  const path = ME() + '/g_' + gid + '_' + now() + '.jpg';
+  const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  const { error } = await sb.rpc('set_group_avatar', { p_gid: gid, p_url: url });
+  if (error) throw error;
+  await afterGroupChange(gid, '群图标已更新');
+}
+function groupMuteState(gid) {
+  const g = grpOf('g:' + gid) || {}, mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const until = mine && mine.muted_until ? Date.parse(mine.muted_until) : 0;
+  const role = mine ? mine.role : '';
+  const muted = !!mine && (until > now() || (!!g.mute_all && role !== 'owner' && role !== 'admin'));
+  return { muted: muted, all: !!g.mute_all, until: until, role: role };
+}
+function applyMuteState() {
+  const tip = $('chat-mute-tip'), bar = $('chat-input-bar'), inp = $('chat-input'), send = $('btn-send');
+  if (!S.conv || !isGroupKey(S.conv)) {
+    if (tip) tip.classList.remove('show');
+    if (bar) bar.classList.remove('muted');
+    if (inp) { inp.disabled = false; inp.placeholder = '说点什么…'; }
+    if (send) send.disabled = false;
+    return;
+  }
+  const st = groupMuteState(gidOf(S.conv));
+  if (!st.muted) {
+    if (tip) tip.classList.remove('show');
+    if (bar) bar.classList.remove('muted');
+    if (inp) { inp.disabled = false; inp.placeholder = '说点什么…'; }
+    if (send) send.disabled = false;
+    return;
+  }
+  const d = new Date(st.until || now());
+  const when = (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (tip) { tip.textContent = st.all ? '全员禁言中，只有群主/管理员可以发言' : '你被禁言到 ' + when + '，暂时不能发言'; tip.classList.add('show'); }
+  if (bar) bar.classList.add('muted');
+  if (inp) { inp.disabled = true; inp.placeholder = '你已被禁言'; }
+  if (send) send.disabled = true;
+}
+function canSendHere() {
+  if (!S.conv || !isGroupKey(S.conv)) return true;
+  const st = groupMuteState(gidOf(S.conv));
+  if (!st.muted) return true;
+  toast(st.all ? '全员禁言中，只有群主/管理员可以发言' : '你已被禁言，暂时不能发言');
+  return false;
 }
 async function grpLeave(key) {
   const k = key || S.conv;
@@ -3807,6 +3959,7 @@ function videoProbe(file) {
   });
 }
 async function sendVideo(file) {
+  if (!S.conv || !canSendHere()) return;
   const pr = await videoProbe(file);
   if (!S.conv) return;
   const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
@@ -3821,6 +3974,7 @@ function sendDoc(file) {
 }
 const kindOf = f => /^image\//.test((f && f.type) || '') ? 'image' : /^video\//.test((f && f.type) || '') ? 'video' : 'file';
 async function sendFiles(files) {
+  if (!canSendHere()) return;
   const list = Array.from(files || []).filter(f => f && f.size > 0);
   if (!list.length) { if (files && files.length) toast('这个文件是空的'); return; }
   if (list.length > 9) toast('一次最多 9 个，已发送前 9 个');
@@ -4695,17 +4849,27 @@ $('gi-backdrop').onclick = closeGrpInfo;
 $('gi-invite').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpInvite(k); };
 $('gi-clear').onclick = function () { const k = giKey; closeGrpInfo(); if (k) confirmClear(k, false); };
 $('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) setTimeout(function () { confirmGrpLeave(k); }, 50); };
+$('gi-settings').onclick = function () { if (giKey) openGroupSettings(gidOf(giKey)); };
+$('gi-av').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) { groupIconGid = gid; $('group-icon-input').click(); } };
+$('gi-name').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) editGroupName(gid); };
+$('group-icon-input').onchange = function (e) { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!groupIconGid || !f) return; uploadGroupIcon(groupIconGid, f).catch(function (x) { logErr('groupIcon', x); toast('群图标上传失败：' + ((x && x.message) || '请重试')); }); };
 $('gi-members').onclick = function (e) {
   const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
-  const acc = it.getAttribute('data-acc'); if (!acc || acc === ME()) return;
-  const gid = gidOf(giKey), g = grpOf(giKey) || {};
-  if (g.owner_acc === ME()) {
-    openActs(peerName(acc), [
-      { label: '发消息', fn: function () { closeGrpInfo(); openConv(convKeyOf(ME(), acc), acc); } },
-      { label: '移出群聊', danger: true, fn: function () { setTimeout(function () { confirmGrpKick(gid, acc); }, 30); } },
-      { label: '取消', fn: null }
-    ]);
-  } else openProfile(acc);
+  const acc = it.getAttribute('data-acc'); if (!acc) return;
+  const gid = gidOf(giKey);
+  if (acc === ME()) { openGroupSettings(gid); return; }
+  const my = grpRoleOf(gid, ME()), target = grpRoleOf(gid, acc);
+  const can = my === 'owner' || my === 'admin';
+  if (!can) { openProfile(acc); return; }
+  const items = [{ label: '发消息', fn: function () { closeGrpInfo(); openConv(convKeyOf(ME(), acc), acc); } }];
+  if (my === 'owner' && target !== 'owner') items.push({ label: target === 'admin' ? '取消管理员' : '设为管理员', fn: function () { setGroupAdmin(gid, acc, target !== 'admin'); } });
+  if (target !== 'owner') {
+    items.push({ label: '设置头衔', fn: function () { editMemberTitle(gid, acc); } });
+    if (!(my === 'admin' && target === 'admin')) items.push({ label: '禁言', fn: function () { muteMember(gid, acc); } });
+  }
+  if (target !== 'owner' && !(my === 'admin' && target === 'admin')) items.push({ label: '移出群聊', danger: true, fn: function () { setTimeout(function () { confirmGrpKick(gid, acc); }, 30); } });
+  items.push({ label: '取消', fn: null });
+  openActs(peerName(acc), items);
 };
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
@@ -4794,7 +4958,7 @@ function boot() {
     const c = LS.get(ck(uid));
     if (c && c.me) { S.uid = uid; hydrate(c); }
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
-  } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); setTimeout(hideSplash, 700); }
+  } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
 if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting };
 boot();
