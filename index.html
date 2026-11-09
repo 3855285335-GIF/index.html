@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#12101c" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
@@ -46,7 +46,7 @@
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
   }
   * { box-sizing: border-box; touch-action: manipulation; }
-  html, body { margin: 0; height: 100%; font-family: var(--font); background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent; overflow: hidden; -webkit-text-size-adjust: 100%; }
+  html, body { margin: 0; height: 100%; font-family: var(--font); background: var(--bg); color: var(--ink); -webkit-tap-highlight-color: transparent; overflow: hidden; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
   button { font-family: inherit; cursor: pointer; border: none; border-radius: 12px; padding: 8px 14px; background: var(--surface2); color: var(--ink); font-size: 14px; transition: transform .12s ease, opacity .12s ease, background .12s ease; }
   button:active { transform: scale(.96); }
   button:disabled { opacity: .55; }
@@ -3246,6 +3246,22 @@ async function grpKick(gid, acc) {
     toast('已移出群聊');
   } catch (e) { logErr('grpKick', e); toast('移出失败：' + grpErr(e)); }
 }
+function confirmGrpKick(gid, acc) {
+  openActs('把“' + peerName(acc) + '”移出群聊？\n移出后对方要重新被邀请才能进来。', [
+    { label: '移出群聊', danger: true, fn: function () { grpKick(gid, acc); } },
+    { label: '取消', fn: null }
+  ]);
+}
+function confirmGrpLeave(key) {
+  const k = key || S.conv;
+  if (!isGroupKey(k)) return;
+  const owner = (grpOf(k) || {}).owner_acc === ME();
+  openActs((owner ? '解散群聊？' : '退出群聊？') + '\n' +
+    (owner ? '群里的消息、成员和会话都会被删除，不能恢复。' : '退出后不再接收这个群的消息，要重新被邀请才能进来。'), [
+    { label: owner ? '解散群聊' : '退出群聊', danger: true, fn: function () { grpLeave(k); } },
+    { label: '取消', fn: null }
+  ]);
+}
 async function grpLeave(key) {
   const k = key || S.conv;
   if (!isGroupKey(k)) return;
@@ -3885,7 +3901,7 @@ function convActs(it) {
   ];
   if (gp) {
     items.push({ label: '群信息 / 邀请好友', fn: () => setTimeout(() => grpInfo(k), 50) });
-    items.push({ label: '退出群聊', danger: true, fn: () => setTimeout(() => grpLeave(k), 50) });
+    items.push({ label: '退出群聊', danger: true, fn: () => setTimeout(() => confirmGrpLeave(k), 50) });
   }
   items.push({ label: '删除会话', danger: true, fn: () => setTimeout(() => confirmClear(k, true), 50) });
   items.push({ label: '取消', fn: null });
@@ -4032,24 +4048,35 @@ async function checkStorage(force) {
 let exporting = false;
 async function exportChat(conv) {
   if (exporting || !conv) return; exporting = true;
-  const peer = peerOf(conv, ME()); toast('正在导出聊天记录…');
+  const peer = peerOf(conv, ME()), MAX = 20000;
+  toast('正在导出聊天记录…');
   try {
-    const all = []; let cur = '1970-01-01T00:00:00Z';
-    for (let page = 0; page < 200; page++) {
-      const { data, error } = await sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,dur,created_at').eq('conv_key', conv).gt('created_at', cur).order('created_at', { ascending: true }).limit(1000);
+    const all = []; let cur = null, truncated = false;
+    for (let page = 0; page < 25; page++) {
+      let q = sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,dur,created_at').eq('conv_key', conv).order('created_at', { ascending: false }).limit(1000);
+      if (cur) q = q.lt('created_at', cur);
+      const { data, error } = await q;
       if (error) throw error;
-      const rows = data || []; rows.forEach(r => all.push(r));
-      if (rows.length < 1000) break; cur = rows[rows.length - 1].created_at;
+      const rows = data || [];
+      rows.forEach(r => { if (all.length < MAX) all.push(r); });
+      if (all.length >= MAX) { truncated = true; break; }
+      if (rows.length < 1000) break;
+      cur = rows[rows.length - 1].created_at;
+      if (page % 4 === 3) { toast('正在导出… 已读取 ' + all.length + ' 条'); await new Promise(r => setTimeout(r, 0)); }   // 让手机有机会喘口气、把提示画出来
     }
-    const list = all.map(r => rowToMsg(r)).filter(m => !isHidden(m));
-    const f = new File([exportHTML(peer, list)], 'Chatter聊天记录_' + peerName(peer).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 20) + '_' + stampName().slice(8) + '.html', { type: 'text/html' });
+    const list = all.map(r => rowToMsg(r)).filter(m => !isHidden(m)).reverse();
+    if (!list.length) { toast('这个聊天还没有可导出的消息'); return; }
+    toast('正在整理 ' + list.length + ' 条消息…');
+    await new Promise(r => setTimeout(r, 30));
+    const f = new File([exportHTML(peer, list, truncated)], 'Chatter聊天记录_' + peerName(peer).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 20) + '_' + stampName().slice(8) + '.html', { type: 'text/html' });
     let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
-    if (can) openActs('导出好了：一共 ' + list.length + ' 条消息（' + fmtSize(f.size) + '）', [{ label: '保存 / 分享', fn: () => shareFile(f, true) }, { label: '取消', fn: null }]);
-    else dlFile(f);
+    const more = truncated ? '，只导出了最近 ' + MAX + ' 条' : '';
+    if (can) openActs('导出好了：一共 ' + list.length + ' 条消息（' + fmtSize(f.size) + '）' + more, [{ label: '保存 / 分享', fn: () => shareFile(f, true) }, { label: '取消', fn: null }]);
+    else { dlFile(f); toast('已开始下载（' + list.length + ' 条' + more + '）'); }
   } catch (e) { logErr('export', e); toast(isNetErr(e) ? NET_MSG : '导出失败：' + ((e && e.message) || '请重试')); }
-  exporting = false;
+  finally { exporting = false; }
 }
-function exportHTML(peer, list) {
+function exportHTML(peer, list, truncated) {
   const gp = isGroupKey(peer), titleName = gp ? grpName(peer) : peerName(peer);
   const d2 = t => { const d = new Date(t); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
   const link = (u, t) => '<a href="' + esc(disp(u)) + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
@@ -4072,7 +4099,7 @@ function exportHTML(peer, list) {
     'header{padding:8px 0 14px;border-bottom:1px solid #ddd8ee;margin-bottom:10px}h1{font-size:19px;margin:0 0 4px}header p{margin:0;color:#6d6884;font-size:13px}' +
     '.m{padding:8px 0;border-bottom:1px solid #ebe8f4}.h{font-size:13px;color:#6d6884}.h b{color:#3a3360}.me .h b{color:#6c5ce7}.b{margin-top:2px;word-break:break-word}' +
     '.b img{max-width:240px;max-height:240px;border-radius:8px;display:block}.b img.stk{max-width:120px}.emo{font-size:40px}blockquote{margin:0 0 4px;padding:2px 8px;border-left:3px solid #c9c2ea;color:#6d6884;font-size:13px}audio{height:32px;vertical-align:middle}' +
-    '</style></head><body><header><h1>' + (gp ? '群聊「' + esc(titleName) + '」的聊天记录' : '和 ' + esc(titleName) + '（@' + esc(peer) + '）的聊天记录') + '</h1><p>导出时间 ' + d2(now()) + '，一共 ' + list.length + ' 条。图片、视频、语音、文件是存储空间里的链接：在“存储空间”里清理掉以后就打不开了，重要的请单独保存。</p></header>\n' +
+    '</style></head><body><header><h1>' + (gp ? '群聊「' + esc(titleName) + '」的聊天记录' : '和 ' + esc(titleName) + '（@' + esc(peer) + '）的聊天记录') + '</h1><p>导出时间 ' + d2(now()) + '，一共 ' + list.length + ' 条。图片、视频、语音、文件是存储空间里的链接：在“存储空间”里清理掉以后就打不开了，重要的请单独保存。</p>' + (truncated ? '<p><b>注意：</b>消息太多，只导出了最近的一部分（' + list.length + ' 条），更早的没有包含。</p>' : '') + '</header>\n' +
     rows + '\n</body></html>';
 }
 
@@ -4401,11 +4428,13 @@ function bindViewport() {
   const apply = () => {
     const root = document.documentElement;
     if (window.matchMedia('(min-width: 768px)').matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
-    const kb = window.innerHeight - vv.height > 120;
+    if (!vv.height) return;
+    // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
+    root.style.setProperty('--vvh', vv.height + 'px');
+    root.style.setProperty('--vvt', Math.max(0, vv.offsetTop || 0) + 'px');
+    const kb = (window.innerHeight - vv.height > 100) || (vv.height < (window.screen.height || 0) * 0.68);
     document.body.classList.toggle('kb', kb);
-    if (kb) { root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px'); }
-    else { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); }
-    if (kb && S.conv && S.stick) { const b = $('chat-messages'); b.scrollTop = b.scrollHeight; }
+    if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
   };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); }); apply();
 }
@@ -4543,7 +4572,7 @@ function bindUI() {
   $('btn-more').onclick = () => {
     if (!S.conv) return; const key = S.conv;
     if (isGroupKey(key)) {
-      openActs('群聊选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '群信息 / 邀请好友', fn: () => setTimeout(() => grpInfo(key), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '退出群聊', danger: true, fn: () => setTimeout(() => grpLeave(key), 50) }, { label: '取消', fn: null }]);
+      openActs('群聊选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '群信息 / 邀请好友', fn: () => setTimeout(() => grpInfo(key), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '退出群聊', danger: true, fn: () => setTimeout(() => confirmGrpLeave(key), 50) }, { label: '取消', fn: null }]);
       return;
     }
     openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
@@ -4665,7 +4694,7 @@ $('gi-x').onclick = closeGrpInfo;
 $('gi-backdrop').onclick = closeGrpInfo;
 $('gi-invite').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpInvite(k); };
 $('gi-clear').onclick = function () { const k = giKey; closeGrpInfo(); if (k) confirmClear(k, false); };
-$('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpLeave(k); };
+$('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) setTimeout(function () { confirmGrpLeave(k); }, 50); };
 $('gi-members').onclick = function (e) {
   const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
   const acc = it.getAttribute('data-acc'); if (!acc || acc === ME()) return;
@@ -4673,7 +4702,7 @@ $('gi-members').onclick = function (e) {
   if (g.owner_acc === ME()) {
     openActs(peerName(acc), [
       { label: '发消息', fn: function () { closeGrpInfo(); openConv(convKeyOf(ME(), acc), acc); } },
-      { label: '移出群聊', danger: true, fn: function () { closeGrpInfo(); grpKick(gid, acc); } },
+      { label: '移出群聊', danger: true, fn: function () { setTimeout(function () { confirmGrpKick(gid, acc); }, 30); } },
       { label: '取消', fn: null }
     ]);
   } else openProfile(acc);
@@ -4718,13 +4747,18 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
   nb.addEventListener('touchstart', e => { nbY = e.touches[0].clientY; clearTimeout(nbT); }, { passive: true });
   nb.addEventListener('touchmove', e => { if (nbY != null && e.touches[0].clientY - nbY < -18) { nbY = null; hideNBar(); } }, { passive: true });
   nb.addEventListener('touchend', () => { if (nbY != null && nbCur) nbT = setTimeout(hideNBar, 3000); nbY = null; }, { passive: true });
-  $('btn-logout').onclick = async () => {
-    await pushLogout();
-    teardown();
-    try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
-    try { await idbClear(); } catch (e) {}
-    try { if (sb) await sb.auth.signOut(); } catch (e) {}
-    location.reload();
+  $('btn-logout').onclick = () => {
+    openActs('退出登录？\n会清掉这台手机上的消息缓存，服务器里的记录还在。', [
+      { label: '退出登录', danger: true, fn: async function () {
+        await pushLogout();
+        teardown();
+        try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
+        try { await idbClear(); } catch (e) {}
+        try { if (sb) await sb.auth.signOut(); } catch (e) {}
+        location.reload();
+      } },
+      { label: '取消', fn: null }
+    ]);
   };
 
   /* 页面回到前台：立刻校对 */
@@ -4760,9 +4794,9 @@ function boot() {
     const c = LS.get(ck(uid));
     if (c && c.me) { S.uid = uid; hydrate(c); }
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
-  } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); }
+  } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); setTimeout(hideSplash, 700); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting };
 boot();
 })();
 
