@@ -8,6 +8,8 @@
 <meta name="color-scheme" content="light dark">
 <title>Chatter</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
+<link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/png;base64,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">
 <meta name="mobile-web-app-capable" content="yes">
@@ -74,6 +76,36 @@
   #auth-view::before { width: 320px; height: 320px; left: -90px; top: -60px; background: #8b7cf6; animation: drift 14s ease-in-out infinite alternate; }
   #auth-view::after { width: 300px; height: 300px; right: -100px; bottom: -70px; background: #ff7a90; animation: drift 17s ease-in-out infinite alternate-reverse; }
   @keyframes drift { to { transform: translate(40px, 30px) scale(1.15); } }
+
+  /* ---------- 启动画面：图标语言 + 轻微动效，不额外请求图片 ---------- */
+  #splash { position: fixed; inset: 0; z-index: 7000; display: flex; align-items: center; justify-content: center; overflow: hidden; background: radial-gradient(circle at 30% 18%, #2a1f6e 0%, #14102e 58%, #0b0918 100%); transition: opacity .45s ease, visibility .45s ease; }
+  #splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  #splash::before { content: ""; position: absolute; inset: 0; background-image: var(--doodle); background-size: 200px 200px; opacity: .3; }
+  .sp-blob { position: absolute; border-radius: 50%; filter: blur(48px); opacity: .45; animation: spDrift 12s ease-in-out infinite alternate; }
+  .sp-blob.a { width: 300px; height: 300px; background: #7b5cff; left: -80px; top: -60px; }
+  .sp-blob.b { width: 260px; height: 260px; background: #ff4f8b; right: -70px; bottom: -50px; animation-delay: -4s; }
+  .sp-blob.c { width: 170px; height: 170px; background: #3ec6c0; right: 18%; top: 8%; opacity: .18; animation-delay: -7s; }
+  .sp-stage { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding: 24px; text-align: center; }
+  .sp-art { width: min(62vw, 250px); height: min(62vw, 250px); position: relative; animation: spFloat 4.5s ease-in-out infinite; }
+  .sp-art svg { width: 100%; height: 100%; overflow: visible; }
+  .sp-ring { transform-origin: 130px 130px; animation: spOrbit 26s linear infinite; }
+  .sp-dot { animation: spPulse 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .sp-dot.d2 { animation-delay: .25s; }
+  .sp-dot.d3 { animation-delay: .5s; }
+  .sp-star { animation: spTwinkle 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .sp-star.s2 { animation-delay: -1.2s; }
+  .sp-star.s3 { animation-delay: -2.1s; }
+  .sp-word { margin-top: 20px; font-size: 30px; font-weight: 800; letter-spacing: .5px; color: #fff; text-shadow: 0 8px 30px rgba(123,92,255,.55); }
+  .sp-sub { margin-top: 7px; font-size: 10.5px; letter-spacing: 3px; color: rgba(255,255,255,.62); }
+  .sp-line { margin-top: 24px; width: 88px; height: 2px; border-radius: 2px; background: rgba(255,255,255,.14); overflow: hidden; }
+  .sp-line::after { content: ""; display: block; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, transparent, #ff8ab0, #8b7cf6, transparent); animation: spSweep 1.7s ease-in-out infinite; }
+  @keyframes spFloat { 50% { transform: translateY(-7px); } }
+  @keyframes spOrbit { to { transform: rotate(360deg); } }
+  @keyframes spPulse { 0%, 100% { transform: scale(1); opacity: .55; } 50% { transform: scale(1.18); opacity: 1; } }
+  @keyframes spTwinkle { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.12); } }
+  @keyframes spDrift { to { transform: translate(18px, 22px) scale(1.08); } }
+  @keyframes spSweep { 0% { transform: translateX(-115%); } 100% { transform: translateX(260%); } }
+
   .auth-card { position: relative; z-index: 1; width: 350px; max-width: 90vw; background: rgba(255,255,255,.14); backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4); border: 1px solid rgba(255,255,255,.28); padding: 30px 24px 22px; border-radius: 28px; box-shadow: 0 30px 80px rgba(10,0,50,.35); color: #fff; }
   .auth-logo { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; }
   .auth-logo .logo { width: 76px; height: 76px; filter: drop-shadow(0 10px 22px rgba(10,0,50,.45)); animation: bob 4s ease-in-out infinite; }
@@ -181,6 +213,8 @@
   @keyframes popc { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
   .msg.mine { flex-direction: row-reverse; }
   .msg .avatar { width: 32px; height: 32px; font-size: 13px; border-radius: 12px; }
+  .msg.theirs .avatar-wrapper { cursor: pointer; transition: transform .12s ease; }
+  .msg.theirs .avatar-wrapper:active { transform: scale(.92); }
   .msg-body { display: flex; flex-direction: column; gap: 3px; max-width: 74%; min-width: 0; }
   .msg.mine .msg-body { align-items: flex-end; }
   .msg .row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
@@ -618,6 +652,42 @@
 <g fill="#fff"><rect x="96" y="120" width="320" height="236" rx="96"/><path d="M158 340 L132 416 L236 350 Z"/></g>
 <circle cx="180" cy="238" r="20" fill="#6C4DF0" fill-opacity=".45"/><circle cx="256" cy="238" r="27" fill="#6C4DF0" fill-opacity=".75"/><circle cx="342" cy="238" r="35" fill="#FF4F8B"/>
 </g></symbol></svg>
+
+<div id="splash" role="status" aria-label="Chatter 正在打开">
+  <i class="sp-blob a"></i><i class="sp-blob b"></i><i class="sp-blob c"></i>
+  <div class="sp-stage">
+    <div class="sp-art">
+      <svg viewBox="0 0 260 260" aria-hidden="true">
+        <defs>
+          <linearGradient id="spTile" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#8B6CFF"/><stop offset=".52" stop-color="#5B3BD8"/><stop offset="1" stop-color="#C0467F"/>
+          </linearGradient>
+          <filter id="spGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <circle class="sp-ring" cx="130" cy="130" r="104" fill="none" stroke="rgba(255,255,255,.24)" stroke-width="1.2" stroke-dasharray="1 9" stroke-linecap="round"/>
+        <g filter="url(#spGlow)">
+          <rect x="45" y="45" width="170" height="170" rx="44" fill="url(#spTile)"/>
+          <rect x="77" y="86" width="106" height="78" rx="34" fill="#fff"/>
+          <path d="M97 162 L84 189 L121 166 Z" fill="#fff"/>
+          <circle class="sp-dot" cx="106" cy="125" r="7" fill="#6C4DF0" opacity=".45"/>
+          <circle class="sp-dot d2" cx="130" cy="125" r="9.5" fill="#6C4DF0" opacity=".75"/>
+          <circle class="sp-dot d3" cx="157" cy="125" r="11.5" fill="#FF4F8B"/>
+        </g>
+        <g fill="#fff">
+          <path class="sp-star" d="M210 62 l2.2 6.8 6.8 2.2 -6.8 2.2 -2.2 6.8 -2.2 -6.8 -6.8 -2.2 6.8 -2.2 z" opacity=".7"/>
+          <path class="sp-star s2" d="M48 188 l1.7 5.1 5.1 1.7 -5.1 1.7 -1.7 5.1 -1.7 -5.1 -5.1 -1.7 5.1 -1.7 z" opacity=".45"/>
+          <circle class="sp-star s3" cx="220" cy="178" r="2" opacity=".5"/>
+          <circle cx="38" cy="92" r="1.6" opacity=".35"/>
+        </g>
+      </svg>
+    </div>
+    <div class="sp-word">Chatter</div>
+    <div class="sp-sub">絮 语 · 随 时 说 点 什 么</div>
+    <div class="sp-line"></div>
+  </div>
+</div>
 
 <div class="app-container">
   <div id="auth-view" class="view">
@@ -1209,7 +1279,14 @@ function updateTitle() {
   if (!flashI) document.title = baseTitle;
   try { if (navigator.setAppBadge) { if (n) navigator.setAppBadge(n).catch(() => {}); else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); } } catch (e) {}
 }
-function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); }
+let splashGone = false;
+function hideSplash() {
+  if (splashGone) return; splashGone = true;
+  const s = document.getElementById('splash'); if (!s) return;
+  s.classList.add('done');
+  setTimeout(function () { try { s.remove(); } catch (e) {} }, 700);
+}
+function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); hideSplash(); }
 function showAuth(msg) {
   $('app-view').classList.remove('active'); $('auth-view').classList.add('active');
   document.body.classList.remove('chat-open');
@@ -1221,7 +1298,7 @@ function avatarHTML(name, url, online, key) {
   const hue = hueOf(key || name), letter = esc(((name || '?') + '').trim().slice(0, 1).toUpperCase());
   const inner = url ? '<img src="' + esc(disp(url)) + '" alt="">' : letter;
   const st = url ? '' : ' style="background:linear-gradient(140deg,hsl(' + hue + ',72%,64%),hsl(' + ((hue + 42) % 360) + ',74%,52%))"';
-  return '<div class="avatar-wrapper"><div class="avatar"' + st + '>' + inner + '</div>' + (online ? '<span class="online-dot"></span>' : '') + '</div>';
+  return '<div class="avatar-wrapper" data-acc="' + esc(key || '') + '"><div class="avatar"' + st + '>' + inner + '</div>' + (online ? '<span class="online-dot"></span>' : '') + '</div>';
 }
 const EMPTY_SVG = '<svg viewBox="0 0 84 84" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="14" width="46" height="32" rx="14" fill="#6c5ce7" fill-opacity=".14" stroke="#6c5ce7" stroke-width="2.5"/><path d="M22 46l-3 12 14-12" fill="#6c5ce7" fill-opacity=".14" stroke="#6c5ce7" stroke-width="2.5"/><rect x="38" y="34" width="36" height="26" rx="12" fill="#e8508c" fill-opacity=".16" stroke="#e8508c" stroke-width="2.5"/><circle cx="48" cy="47" r="2" fill="#e8508c"/><circle cx="56" cy="47" r="2.6" fill="#e8508c"/><circle cx="65" cy="47" r="3.2" fill="#e8508c"/></svg>';
 const emptyHTML = t => '<div class="empty">' + EMPTY_SVG + t + '</div>';
@@ -1310,7 +1387,7 @@ function renderChatTitle() {
   if (!S.peer) return;
   if (isGroupKey(S.peer)) {
     const gid = gidOf(S.peer), n = GRP.count[gid] || 0;
-    $('chat-title').innerHTML = '<span>' + esc(grpName(S.peer)) + '</span><span class="sub"><i></i>' + (n ? n + ' 人' : '群聊') + '</span>';
+    $('chat-title').innerHTML = '<span>' + esc(grpName(S.peer)) + '</span><span class="sub">' + (n ? n + ' 人' : '群聊') + '</span>';
     return;
   }
   const on = isOnline(S.peer);
@@ -3125,8 +3202,10 @@ async function grpInfo(key) {
   const k = key || S.conv;
   if (!isGroupKey(k)) return;
   const gid = gidOf(k);
+  const cached = GRP.members[gid] || [];
+  openGrpInfo(k, cached, [], !cached.length);   // 先用缓存/占位打开，网络回来再补，不要等
   let ms = [];
-  try { ms = await grpMembers(gid, true); } catch (e) { toast('读取群成员失败：' + grpErr(e)); return; }
+  try { ms = await grpMembers(gid, true); } catch (e) { $('gi-sub').textContent = '读取成员失败，点群名重试'; toast('读取群成员失败：' + grpErr(e)); return; }
   let pend = [];
   try {
     const p = await sb.from('group_invites').select('to_acc').eq('group_id', gid).eq('status', 'pending');
@@ -3134,12 +3213,12 @@ async function grpInfo(key) {
   } catch (e) {}
   openGrpInfo(k, ms, pend);
 }
-function openGrpInfo(k, ms, pend) {
+function openGrpInfo(k, ms, pend, loading) {
   giKey = k;
   const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
   $('gi-av').innerHTML = avatarHTML(name, '', false, k);
   $('gi-name').textContent = name;
-  $('gi-sub').textContent = (ms.length || 0) + ' 人' + (owner ? ' · 我是群主' : '');
+  $('gi-sub').textContent = loading ? '正在读取成员…' : (ms.length || 0) + ' 人' + (owner ? ' · 我是群主' : '');
   const list = ms.slice().sort(function (a, b) {
     if (a.role === 'owner') return -1; if (b.role === 'owner') return 1;
     return String(peerName(a.account_id)).localeCompare(String(peerName(b.account_id)), 'zh');
@@ -4427,6 +4506,7 @@ function bindUI() {
   box.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG' && S.stick) box.scrollTop = box.scrollHeight; }, true);
   box.addEventListener('loadedmetadata', e => { if (e.target && e.target.tagName === 'VIDEO' && S.stick) box.scrollTop = box.scrollHeight; }, true);
   box.addEventListener('click', e => {
+    const av = e.target.closest('.msg.theirs .avatar-wrapper'); if (av && av.dataset.acc) { openProfile(av.dataset.acc); return; }
     const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
     const v = e.target.closest('.bubble.voice'); if (v) { togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
@@ -4664,8 +4744,9 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
 /* ================= 启动 ================= */
 function boot() {
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
-  ready.then(() => { if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
+  ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
   ready.catch(e => {
+    hideSplash();
     logErr('lib', e);
     var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
   });
