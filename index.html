@@ -151,6 +151,9 @@
   .me-box .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-box .btns button { padding: 10px 16px; border-radius: 14px; font-weight: 600; }
   .me-edit { margin-left: auto; padding: 8px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+  .me-sign { margin-top: 5px; font-size: 12px; color: var(--muted); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .copy-id { margin-left: 6px; padding: 1px 7px; border-radius: 8px; background: var(--surface2); color: var(--muted); font-size: 11px; font-weight: 500; vertical-align: 1px; }
+  .exact-tag { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); font-size: 10px; font-weight: 600; vertical-align: 2px; }
   .me-sec { margin-bottom: 4px; }
   .me-box .btns.me-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 14px 10px; }
   .me-box .btns.me-grid button { width: 100%; padding: 12px 8px; font-size: 13.5px; background: var(--surface); box-shadow: var(--shadow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -407,6 +410,7 @@
   .pf-names { min-width: 0; }
   #pf-name { font-size: 20px; font-weight: 700; word-break: break-all; }
   #pf-sub { font-size: 13px; color: var(--muted); line-height: 1.55; margin-top: 2px; word-break: break-all; }
+  #pf-sign { font-size: 13px; color: var(--muted); line-height: 1.55; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
   .pf-on::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #b9b4cc; margin-right: 5px; vertical-align: 1px; }
   .pf-on.on::before { background: var(--ok); }
   .pf-acts { display: flex; gap: 8px; padding: 0 16px 12px; }
@@ -653,7 +657,7 @@
       <section id="tab-convs" class="tab-panel active"><div id="conv-list" class="list-card"></div></section>
       <section id="tab-contacts" class="tab-panel">
         <div class="search-bar">
-          <input id="search-input" placeholder="搜索账号或昵称" autocomplete="off">
+          <input id="search-input" placeholder="输入账号 ID 或昵称" autocomplete="off">
           <button id="search-btn" type="button">搜索</button>
         </div>
         <div id="search-results" class="list-card" style="margin-bottom:12px"></div>
@@ -666,7 +670,7 @@
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
       <section id="tab-me" class="tab-panel">
         <div class="me-box">
-          <div class="list-card me-card"><div id="me-avatar"></div><div class="name"><div class="name-main" id="me-name2"></div><div class="name-sub">@<span id="me-acc2"></span></div></div><button id="btn-edit-profile" type="button" class="me-edit">编辑</button></div>
+          <div class="list-card me-card"><div id="me-avatar"></div><div class="name"><div class="name-main" id="me-name2"></div><div class="name-sub">@<span id="me-acc2"></span><button id="btn-copy-id" type="button" class="copy-id">复制</button></div><div class="me-sign" id="me-sign"></div></div><button id="btn-edit-profile" type="button" class="me-edit">编辑</button></div>
 
           <div class="me-sec">
             <div class="section-title">聊天设置</div>
@@ -765,7 +769,7 @@
 <div id="act-sheet" class="sheet"><div class="menu-title" id="as-title"></div><div id="as-items"></div></div>
 <div id="pf-backdrop" class="sheet-bd"></div>
 <div id="profile-card" class="sheet">
-  <div class="pf-top"><div id="pf-av"></div><div class="pf-names"><div id="pf-name"></div><div id="pf-sub"></div></div></div>
+  <div class="pf-top"><div id="pf-av"></div><div class="pf-names"><div id="pf-name"></div><div id="pf-sub"></div><div id="pf-sign"></div></div></div>
   <div class="pf-acts"><button id="pf-chat" type="button">发消息</button><button id="pf-voice" type="button">语音通话</button><button id="pf-video" type="button">视频通话</button></div>
   <button id="pf-remark" type="button" class="menu-item plain">设置备注</button>
   <button id="pf-del" type="button" class="menu-item">删除好友</button>
@@ -1228,6 +1232,8 @@ function renderMe() {
   $('me-acc2').textContent = S.me ? S.me.account_id : '';
   if ($('me-name2')) $('me-name2').textContent = S.me ? S.me.nickname : '';
   if ($('me-avatar')) $('me-avatar').innerHTML = S.me ? avatarHTML(S.me.nickname, S.me.avatar_url, false, S.me.account_id) : '';
+  const sg = S.me && typeof S.me.signature === 'string' ? S.me.signature.trim() : '';
+  const sgEl = $('me-sign'); if (sgEl) { sgEl.textContent = sg; sgEl.style.display = sg ? '' : 'none'; }
   paintPush();
 }
 function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
@@ -1348,10 +1354,15 @@ function touchConv(key, preview, t, inc) {
   S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
   sched('list'); saveCache();
 }
-async function fetchProfile(acc) {
-  if (!sb || S.profiles[acc]) return;
-  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url').eq('account_id', acc).maybeSingle();
-  if (data) { S.profiles[acc] = data; sched('list'); sched('contacts'); sched('title'); saveCache(); }
+async function fetchProfile(acc, force) {
+  if (!sb) return;
+  if (!force && S.profiles[acc]) return;
+  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature').eq('account_id', acc).maybeSingle();
+  if (data) {
+    S.profiles[acc] = Object.assign({}, S.profiles[acc] || {}, data);
+    if (acc === ME()) S.me = S.profiles[acc];
+    sched('list'); sched('contacts'); sched('title'); saveCache();
+  }
 }
 let readT = {};
 const isMissingFn = e => /42883|PGRST202|PGRST204|schema cache|does not exist|Could not find the function/i.test(String((e && (e.code || '')) + ' ' + (e && e.message || '')));
@@ -1996,13 +2007,22 @@ async function runSearch(q) {
   if (!q) { el.innerHTML = ''; return; }
   const safe = q.replace(/[,%_\\()[\]*]/g, ''); if (!safe) { el.innerHTML = ''; return; }
   el.innerHTML = '<div class="empty">搜索中…</div>';
-  const { data, error } = await sb.from('profiles').select('account_id,nickname,avatar_url').or('account_id.ilike.%' + safe + '%,nickname.ilike.%' + safe + '%').neq('account_id', ME()).limit(20);
+  const acc = safe.toLowerCase(), sel = 'account_id,nickname,avatar_url,signature';
+  const [ex, fz] = await Promise.all([
+    sb.from('profiles').select(sel).eq('account_id', acc).neq('account_id', ME()).maybeSingle(),
+    sb.from('profiles').select(sel).or('account_id.ilike.%' + safe + '%,nickname.ilike.%' + safe + '%').neq('account_id', ME()).limit(20)
+  ]);
   if ($('search-input').value.trim() !== q) return;
-  if (error) { el.innerHTML = '<div class="empty">搜索失败：' + esc(error.message) + '</div>'; return; }
+  if (fz.error) { el.innerHTML = '<div class="empty">搜索失败：' + esc(fz.error.message) + '</div>'; return; }
+  const rows = [];
+  if (!ex.error && ex.data) rows.push(ex.data);
+  const rank = p => p.account_id === acc ? 0 : String(p.account_id).indexOf(acc) === 0 ? 1 : String(p.nickname || '').toLowerCase() === acc ? 2 : String(p.nickname || '').toLowerCase().indexOf(acc) === 0 ? 3 : 4;
+  (fz.data || []).slice().sort((a, b) => rank(a) - rank(b)).forEach(p => { if (!rows.some(x => x.account_id === p.account_id)) rows.push(p); });
+  const data = rows.slice(0, 20);
   if (!data.length) { el.innerHTML = '<div class="empty">没有找到匹配用户</div>'; return; }
-  data.forEach(p => { if (!S.profiles[p.account_id]) S.profiles[p.account_id] = p; });
+  data.forEach(p => { S.profiles[p.account_id] = Object.assign({}, S.profiles[p.account_id] || {}, p); });
   el.innerHTML = data.map(p => '<div class="search-result">' + avatarHTML(p.nickname, p.avatar_url, isOnline(p.account_id), p.account_id) +
-    '<div class="name"><div class="name-main">' + esc(p.nickname) + '</div><div class="name-sub">@' + esc(p.account_id) + '</div></div>' +
+    '<div class="name"><div class="name-main">' + esc(p.nickname) + (p.account_id === acc ? '<span class="exact-tag">账号</span>' : '') + '</div><div class="name-sub">@' + esc(p.account_id) + '</div></div>' +
     '<div class="row-actions">' + (S.friends.includes(p.account_id) ? '<button class="btn-primary act-chat" data-acc="' + esc(p.account_id) + '">聊天</button>' : '<button class="btn-primary act-add" data-acc="' + esc(p.account_id) + '">加好友</button>') + '</div></div>').join('');
 }
 async function addFriend(btn) {
@@ -2754,6 +2774,17 @@ function editNick() {
     if (error || !data || !data.length) return '保存失败：' + ((error && error.message) || '没有权限');
     S.me = Object.assign({}, S.me, { nickname: v }); S.profiles[ME()] = S.me;
     renderMe(); saveCache(); notifyFriends(); toast('昵称已修改'); return null;
+  }, '保存');
+}
+function editSign() {
+  openForm('修改个性签名', [{ ph: '一句话介绍自己（最多 40 字，留空则不显示）', val: (S.me && S.me.signature) || '', max: 40 }], async ([v]) => {
+    v = String(v || '').replace(/\s+/g, ' ').trim();
+    if (v.length > 40) return '最多 40 个字';
+    if (v === ((S.me && S.me.signature) || '')) return null;
+    const { data, error } = await sb.from('profiles').update({ signature: v }).eq('id', S.uid).select('id');
+    if (error || !data || !data.length) return '保存失败：' + ((error && error.message) || '没有权限');
+    S.me = Object.assign({}, S.me, { signature: v }); S.profiles[ME()] = S.me;
+    renderMe(); saveCache(); notifyFriends(); toast(v ? '个性签名已修改' : '个性签名已清空'); return null;
   }, '保存');
 }
 function editPass() {
@@ -3846,6 +3877,7 @@ let pfAcc = null;
 function openProfile(acc) {
   if (!acc) return; pfAcc = acc; renderProfile();
   $('pf-backdrop').classList.add('active'); $('profile-card').classList.add('active'); pfOpenAt = now();
+  fetchProfile(acc, true).then(function () { if (pfAcc === acc) renderProfile(); }, function () {});
 }
 let pfOpenAt = 0;
 function closeProfile() { pfAcc = null; $('pf-backdrop').classList.remove('active'); $('profile-card').classList.remove('active'); }
@@ -3855,6 +3887,8 @@ function renderProfile() {
   $('pf-av').innerHTML = avatarHTML(peerName(a), avatarOf(a), isOnline(a), a);
   $('pf-name').textContent = peerName(a);
   $('pf-sub').innerHTML = (rm ? '<div>昵称：' + esc(nickOf(a)) + '</div>' : '') + '<div>账号：@' + esc(a) + '</div><div class="pf-on' + (isOnline(a) ? ' on' : '') + '">' + (isOnline(a) ? '在线' : '离线') + '</div>';
+  const sg = (S.profiles[a] && typeof S.profiles[a].signature === 'string') ? S.profiles[a].signature.trim() : '';
+  const se = $('pf-sign'); if (se) { se.textContent = sg; se.style.display = sg ? '' : 'none'; }
   $('pf-remark').textContent = rm ? '修改备注' : '设置备注';
   ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-del'].forEach(id => { $(id).style.display = friend ? '' : 'none'; });
 }
@@ -4568,10 +4602,12 @@ $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
     { label: '修改昵称', fn: function () { editNick(); } },
+    { label: '修改个性签名', fn: function () { editSign(); } },
     { label: '修改密码', fn: function () { editPass(); } },
     { label: '取消', fn: null }
   ]);
 };
+$('btn-copy-id').onclick = function (e) { e.stopPropagation(); const id = ME(); if (id) copyText(id); };
 $('btn-cache').onclick = async function () {
   let size = '';
   try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e && e.usage) size = fmtDec(e.usage); } } catch (e) {}
