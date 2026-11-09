@@ -57,12 +57,12 @@
   .logo { display: block; }
 
   .app-container { width: 100%; height: 100%; height: 100dvh; margin: 0 auto; background: var(--bg); position: relative; overflow: hidden; }
-  @media (min-width: 768px) {
+  @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
     body { display: flex; align-items: stretch; justify-content: flex-start; background: var(--bg); }
     .app-container { width: 100%; max-width: none; height: 100vh; border-radius: 0; box-shadow: none; margin: 0; }
     .chat-view { left: 0 !important; right: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: none; }
   }
-  @media (min-width: 980px) {
+  @media (min-width: 980px) and (hover: hover) and (pointer: fine) {
     body.chat-open { justify-content: flex-start; }
     body.chat-open .app-container { width: 372px; max-width: 372px; height: 100vh; flex: 0 0 372px; }
     body.chat-open .chat-view { left: 372px !important; right: 0 !important; top: 0 !important; width: auto !important; max-width: none !important; height: 100vh !important; border-radius: 0 !important; transform: none !important; box-shadow: -8px 0 24px rgba(0,0,0,.10); }
@@ -164,6 +164,14 @@
   .mo-comment { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
   .mo-comment b { color: var(--accent); font-weight: 600; }
   .mo-more { width: 100%; margin: 10px 0; background: var(--surface); color: var(--muted); border-radius: 14px; padding: 10px; box-shadow: var(--shadow); }
+  .mo-likers { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
+  .mo-likers b { color: var(--accent2); font-weight: 600; }
+  .mo-notify { background: var(--surface); border-radius: 16px; padding: 9px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .mo-notify-title { font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+  .mo-notice { font-size: 12.5px; line-height: 1.55; color: var(--ink); padding: 3px 0; border-top: 1px solid var(--line); }
+  .mo-notice:first-of-type { border-top: 0; }
+  .mo-notice b { color: var(--accent); font-weight: 600; }
+  .mo-notice span { color: var(--muted); font-size: 11px; float: right; margin-left: 8px; }
   .mo-editor { padding: 0 14px; }
   #moment-text { width: 100%; min-height: 110px; max-height: 34vh; resize: none; border: 1.5px solid var(--line); border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.5; background: var(--surface2); color: var(--ink); font-family: inherit; }
   .mo-imgs-edit { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
@@ -756,6 +764,7 @@
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
       <section id="tab-moments" class="tab-panel">
         <div class="mo-top"><div><div class="mo-title">朋友圈</div><div class="mo-sub">朋友们的近况</div></div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
+        <div id="moment-notify" class="mo-notify" style="display:none"></div>
         <div id="moment-list"></div>
         <button id="moment-more" type="button" class="mo-more" style="display:none">加载更多</button>
       </section>
@@ -813,7 +822,7 @@
       <button data-tab="convs" class="active"><svg class="ic" viewBox="0 0 24 24"><path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V15h-.5A2.5 2.5 0 0 1 4 12.5z"/><path d="M8.5 9.5h7M8.5 12h4"/></svg>消息</button>
       <button data-tab="contacts"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.2 19c.5-3.2 3-5 5.8-5s5.3 1.8 5.8 5"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.8 14.3c2.6-.4 4.7 1 5.1 3.9"/></svg>通讯录</button>
       <button data-tab="requests"><svg class="ic" viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.8a2.2 2.2 0 0 0 4 0"/></svg>请求<span id="req-badge" class="badge" style="display:none"></span></button>
-      <button data-tab="moments"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></svg>朋友圈</button>
+      <button data-tab="moments"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2"/></svg>朋友圈<span id="moment-badge" class="badge" style="display:none"></span></button>
       <button data-tab="me"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8.3" r="3.6"/><path d="M4.8 20c.6-3.9 3.6-6.2 7.2-6.2s6.6 2.3 7.2 6.2"/></svg>我</button>
     </nav>
   </div>
@@ -2838,6 +2847,7 @@ async function start(user) {
   setTimeout(msgMigrate, 1200);
   startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
+  setTimeout(momentNotifyCheck, 3000);
 }
 async function onAuth(ev, session) {
   if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
@@ -3080,7 +3090,7 @@ function searchMsgs() {
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, invAt: 0, invLoaded: false };
-const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [] };
+const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], loadAt: 0 };
 function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
 function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
 function grpErr(e) {
@@ -3548,9 +3558,9 @@ async function grpPoll() {
 async function momentsLoad(reset) {
   if (!sb || !S.me || MO.loading) return;
   MO.loading = true;
-  if (reset) { MO.list = []; MO.cursor = null; MO.has = true; }
-  const el = $('moment-list');
-  if (el && reset) el.innerHTML = '<div class="empty">加载中…</div>';
+  const el = $('moment-list'), had = MO.list.length;
+  if (reset && !had) { MO.list = []; MO.cursor = null; MO.has = true; }
+  if (reset) { MO.cursor = null; MO.has = true; if (!had) el.innerHTML = '<div class="empty">加载中…</div>'; else renderMoments(); }
   try {
     let q = sb.from('moments').select('id,author_acc,body,images,visibility,created_at').order('created_at', { ascending: false }).limit(15);
     if (!reset && MO.cursor) q = q.lt('created_at', MO.cursor);
@@ -3569,11 +3579,14 @@ async function momentsLoad(reset) {
       ]);
       if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
       if (!cm.error) (cm.data || []).forEach(function (x) { (cmts[x.moment_id] = cmts[x.moment_id] || []).push(x); });
+      MO.likes = likes; MO.comments = cmts;
+      MO.loadAt = now();
+      renderMoments();   // 先把内容画出来，头像资料慢慢补
       const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); });
-      await Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); }));
+      Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (S.me) renderMoments(); }, function () {});
+    } else {
+      MO.likes = likes; MO.comments = cmts; MO.loadAt = now(); renderMoments();
     }
-    MO.likes = likes; MO.comments = cmts;
-    renderMoments();
   } catch (e) {
     logErr('moments', e);
     if (el && !MO.list.length) el.innerHTML = '<div class="empty">朋友圈加载失败：' + esc((e && e.message) || '请重试') + '</div>';
@@ -3588,12 +3601,13 @@ function renderMoments() {
     const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
     const like = MO.likes[m.id] || [], liked = like.indexOf(ME()) >= 0;
     const cms = MO.comments[m.id] || [];
+    const likers = like.length ? '<div class="mo-likers">♥ ' + like.slice(0, 6).map(function (a) { return esc(peerName(a)); }).join('、') + (like.length > 6 ? ' 等 ' + like.length + ' 人' : '') + '</div>' : '';
     return '<div class="moment" data-id="' + esc(m.id) + '">' +
       '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
         '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtTime(m.created_at) + '</div></div>' +
         (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
       (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid +
-      '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' +
+      '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' + likers +
       (cms.length ? '<div class="mo-comments">' + cms.map(function (c) { return '<div class="mo-comment"><b>' + esc(peerName(c.author_acc)) + '：</b>' + esc(c.body) + '</div>'; }).join('') + '</div>' : '') +
       '</div>';
   }).join('');
@@ -3643,26 +3657,37 @@ async function postMoment() {
       if (up.error) throw up.error;
       urls.push(canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl));
     }
-    const { error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends' });
+    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends' }).select('id,author_acc,body,images,visibility,created_at').single();
     if (error) throw error;
-    closeMomentCompose(); toast('已发表'); await momentsLoad(true);
+    closeMomentCompose(); toast('已发表');
+    if (data) { MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments(); }
   } catch (e) { logErr('momentPost', e); toast('发表失败：' + ((e && e.message) || '请重试')); }
   finally { btn.disabled = false; }
 }
 async function toggleMomentLike(id) {
   const arr = MO.likes[id] || [], liked = arr.indexOf(ME()) >= 0;
+  MO.likes[id] = liked ? arr.filter(function (a) { return a !== ME(); }) : arr.concat([ME()]);
+  renderMoments();
   try {
     if (liked) await sb.from('moment_likes').delete().eq('moment_id', id).eq('account_id', ME());
     else await sb.from('moment_likes').insert({ moment_id: id, account_id: ME() });
-    await momentsLoad(true);
-  } catch (e) { logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
+  } catch (e) { MO.likes[id] = arr; renderMoments(); logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
 }
 function commentMoment(id) {
   openForm('评论', [{ ph: '写评论…（最多 200 字）', max: 200 }], async ([v]) => {
     v = String(v || '').trim(); if (!v) return '写点什么';
-    const { error } = await sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v });
-    if (error) return '评论失败：' + ((error && error.message) || '请重试');
-    await momentsLoad(true); return null;
+    const tmp = { id: 'tmp' + now(), moment_id: id, author_acc: ME(), body: v, created_at: new Date().toISOString() };
+    (MO.comments[id] = MO.comments[id] || []).push(tmp); renderMoments();
+    sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v }).select('id,created_at').single().then(function (r) {
+      if (r.error) {
+        MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); renderMoments();
+        toast('评论失败：' + ((r.error && r.error.message) || '请重试'));
+      } else if (r.data) { tmp.id = r.data.id; tmp.created_at = r.data.created_at; renderMoments(); }
+    }, function (e) {
+      MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); renderMoments();
+      logErr('momentComment', e); toast('评论失败：' + ((e && e.message) || '请重试'));
+    });
+    return null;
   }, '发送');
 }
 function deleteMoment(id) {
@@ -3676,7 +3701,9 @@ function deleteMoment(id) {
           .filter(function (k) { return k && k.indexOf(ME() + '/moment_') === 0; });
         if (keys.length) sb.storage.from('chat-media').remove(keys).catch(function () {});
       }
-      toast('已删除'); await momentsLoad(true);
+      MO.list = MO.list.filter(function (m) { return m.id !== id; });
+      delete MO.likes[id]; delete MO.comments[id];
+      renderMoments(); toast('已删除');
     } },
     { label: '取消', fn: null }
   ]);
@@ -3684,6 +3711,51 @@ function deleteMoment(id) {
 function openMomentImage(url) {
   lbList = [{ id: 'moment', url: url }]; lbIdx = 0;
   $('lb-save').style.display = 'none'; lbShow(); $('lightbox').classList.add('active');
+}
+function paintMomentBadge() {
+  const b = $('moment-badge'); if (!b) return;
+  const n = (MO.notices || []).length;
+  b.style.display = n ? '' : 'none';
+  b.textContent = n > 9 ? '9+' : n;
+}
+function renderMomentNotices() {
+  const el = $('moment-notify'); if (!el) return;
+  if (!MO.notices.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = '<div class="mo-notify-title">最近互动</div>' + MO.notices.map(function (n) {
+    return '<div class="mo-notice" data-id="' + esc(n.moment_id) + '"><b>' + esc(peerName(n.actor)) + '</b> ' +
+      (n.kind === 'like' ? '赞了' : '评论了') + '你的朋友圈<span>' + fmtTime(n.created_at) + '</span>' +
+      (n.kind === 'comment' ? '<div>' + esc(n.preview) + '</div>' : '') + '</div>';
+  }).join('');
+}
+async function momentNotifyCheck() {
+  if (!sb || !S.me || document.hidden) return;
+  try {
+    const { data: ms, error } = await sb.from('moments').select('id,body,created_at').eq('author_acc', ME()).order('created_at', { ascending: false }).limit(60);
+    if (error || !ms || !ms.length) { MO.notices = []; paintMomentBadge(); renderMomentNotices(); return; }
+    const ids = ms.map(function (m) { return m.id; }), map = {}; ms.forEach(function (m) { map[m.id] = m; });
+    const since = S.me.moments_seen_at || '1970-01-01T00:00:00Z';
+    const [lk, cm] = await Promise.all([
+      sb.from('moment_likes').select('moment_id,account_id,created_at').in('moment_id', ids).neq('account_id', ME()).gt('created_at', since),
+      sb.from('moment_comments').select('moment_id,author_acc,body,created_at').in('moment_id', ids).neq('author_acc', ME()).gt('created_at', since)
+    ]);
+    const list = [];
+    (lk.data || []).forEach(function (x) { list.push({ kind: 'like', actor: x.account_id, moment_id: x.moment_id, created_at: x.created_at, preview: (map[x.moment_id] && map[x.moment_id].body) || '你的朋友圈' }); });
+    (cm.data || []).forEach(function (x) { list.push({ kind: 'comment', actor: x.author_acc, moment_id: x.moment_id, created_at: x.created_at, preview: x.body }); });
+    list.sort(function (a, b) { return Date.parse(b.created_at) - Date.parse(a.created_at); });
+    MO.notices = list.slice(0, 30);
+    const actors = Array.from(new Set(MO.notices.map(function (n) { return n.actor; })));
+    await Promise.all(actors.map(function (a) { return fetchProfile(a); }));
+    paintMomentBadge(); renderMomentNotices();
+  } catch (e) { logErr('momentNotify', e); }
+}
+async function markMomentsSeen() {
+  if (!S.me) return;
+  const t = new Date().toISOString();
+  try {
+    await sb.from('profiles').update({ moments_seen_at: t }).eq('id', S.uid);
+    S.me.moments_seen_at = t; saveCache(); paintMomentBadge();
+  } catch (e) { logErr('momentSeen', e); }
 }
 
 /* 选择成员弹窗 */
@@ -4796,11 +4868,14 @@ function bindSW() {
 }
 
 /* ================= 事件绑定 ================= */
+let viewportApply = null;
 function bindViewport() {
   const vv = window.visualViewport; if (!vv) return;
+  const desktop = window.matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)');
   const apply = () => {
     const root = document.documentElement;
-    if (window.matchMedia('(min-width: 768px)').matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
+    // 只有真正的鼠标桌面才切成双栏；平板/触屏即使宽度够，也按手机的可视区处理。
+    if (desktop.matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
     if (!vv.height) return;
     // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
     root.style.setProperty('--vvh', vv.height + 'px');
@@ -4809,7 +4884,12 @@ function bindViewport() {
     document.body.classList.toggle('kb', kb);
     if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
   };
-  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); }); apply();
+  viewportApply = apply;
+  const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
+  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) resync(); });
+  window.addEventListener('pageshow', resync); window.addEventListener('focus', resync);
+  apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
 const isNetErr = e => { if (!e) return false; if (e.status === 0 || e.name === 'AuthRetryableFetchError') return true; return /Failed to fetch|Load failed|NetworkError|fetch failed|Network request failed/i.test(String(e.message || e)); };
@@ -4858,7 +4938,7 @@ function bindUI() {
       $('tab-' + btn.dataset.tab).classList.add('active');
       if (btn.dataset.tab === 'me') renderEnv();
       if (btn.dataset.tab === 'requests') grpInvitesLoad(true);
-      if (btn.dataset.tab === 'moments') momentsLoad(true);
+      if (btn.dataset.tab === 'moments') { momentNotifyCheck(); momentsLoad(true); setTimeout(markMomentsSeen, 1500); }
     };
   });
   setInterval(() => { try { if (!document.hidden && $('tab-me').classList.contains('active')) renderEnv(); } catch (e) {} }, 1500);   // 诊断页自动刷新：实时通道连上后会自己变绿
@@ -4946,7 +5026,18 @@ function bindUI() {
   $('btn-more').onclick = () => {
     if (!S.conv) return; const key = S.conv;
     if (isGroupKey(key)) {
-      openActs('群聊选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '群信息 / 邀请好友', fn: () => setTimeout(() => grpInfo(key), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '退出群聊', danger: true, fn: () => setTimeout(() => confirmGrpLeave(key), 50) }, { label: '取消', fn: null }]);
+      openActs('群聊选项', [
+        { label: '群信息', fn: () => setTimeout(() => grpInfo(key), 50) },
+        { label: '发送文件', fn: () => $('doc-input').click() },
+        { label: '聊天记录', fn: () => setTimeout(() => openActs('聊天记录', [
+          { label: '搜索聊天记录', fn: openSearch },
+          { label: '导出聊天记录', fn: () => exportChat(key) },
+          { label: '取消', fn: null }
+        ]), 50) },
+        { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) },
+        { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) },
+        { label: '取消', fn: null }
+      ]);
       return;
     }
     openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
@@ -5069,6 +5160,12 @@ function bindUI() {
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
     const im = e.target.closest('.mo-imgs img'); if (im && im.dataset.url) openMomentImage(im.dataset.url);
   };
+  $('moment-notify').onclick = function (e) {
+    const n = e.target.closest('.mo-notice'); if (!n) return;
+    const id = n.dataset.id, card = document.querySelector('.moment[data-id="' + id + '"]');
+    if (card) card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    else { momentsLoad(true); setTimeout(function () { const c = document.querySelector('.moment[data-id="' + id + '"]'); if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 800); }
+  };
 
 $('btn-export').onclick = () => {
   if (S.conv) { exportChat(S.conv); return; }
@@ -5175,6 +5272,7 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
     if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
     grpLoad(true); grpInvitesLoad(true); grpPoll().catch(() => {});
+    momentNotifyCheck();
     if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
   };
   document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
