@@ -139,16 +139,27 @@
   .app-nav .badge { position: absolute; top: 1px; left: calc(50% + 6px); }
 
   /* ---------- 朋友圈 ---------- */
-  .mo-cover { height: 132px; margin: 4px 0 10px; border-radius: 18px; background: linear-gradient(135deg, #6c5ce7, #e8508c); background-size: cover; background-position: center; position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: 14px 16px; box-shadow: var(--shadow); }
-  .mo-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.42)); pointer-events: none; }
-  .mo-cover-t { position: relative; z-index: 1; color: #fff; font-size: 22px; font-weight: 800; letter-spacing: .4px; text-shadow: 0 2px 12px rgba(0,0,0,.35); }
-  #mo-cover-btn { position: absolute; right: 12px; top: 12px; z-index: 2; background: rgba(0,0,0,.32); color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 10px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .mo-cover { height: 148px; margin: 4px 0 10px; border-radius: 18px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 14px 16px; box-shadow: var(--shadow);
+    background: linear-gradient(135deg, #6c5ce7, #e8508c 55%, #f0a14a); background-size: 190% 190%; animation: moBg 18s ease-in-out infinite; }
+  @keyframes moBg { 0%, 100% { background-position: 0% 25%; } 50% { background-position: 100% 75%; } }
+  .mo-cover-img { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity .5s ease; transform: scale(1.04); }
+  .mo-cover.has-cover .mo-cover-img { opacity: 1; animation: moPan 24s ease-in-out infinite alternate; }
+  @keyframes moPan { from { transform: scale(1.04) translate3d(-.5%, -.3%, 0); } to { transform: scale(1.1) translate3d(.7%, .5%, 0); } }
+  .mo-cover::before { content: ""; position: absolute; inset: 0; background: radial-gradient(120% 80% at 12% 0%, rgba(255,255,255,.3), transparent 58%); pointer-events: none; }
+  .mo-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.02), rgba(0,0,0,.44)); pointer-events: none; }
+  .mo-cover-t { position: relative; z-index: 2; color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .4px; padding: 5px 10px; border-radius: 10px; background: rgba(0,0,0,.24); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .mo-me { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; }
+  .mo-me .avatar { width: 46px; height: 46px; font-size: 18px; border-radius: 15px; border: 2px solid rgba(255,255,255,.88); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+  .mo-me-name { font-size: 17px; font-weight: 800; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.45); letter-spacing: .3px; }
+  #mo-cover-btn { position: absolute; right: 12px; top: 12px; z-index: 3; background: rgba(0,0,0,.32); color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 10px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   .mo-top { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; }
   .mo-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
   .mo-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .mo-new { background: var(--brand); color: #fff; border-radius: 14px; padding: 9px 14px; font-weight: 700; flex-shrink: 0; }
   #moment-list { display: flex; flex-direction: column; gap: 10px; }
-  .moment { background: var(--surface); border-radius: 18px; padding: 12px; box-shadow: var(--shadow); }
+  .moment { background: var(--surface); border-radius: 18px; padding: 12px; box-shadow: var(--shadow); animation: moIn .3s cubic-bezier(.2,.8,.3,1) both; transition: transform .16s ease, box-shadow .16s ease; }
+  .moment:active { transform: scale(.994); }
+  @keyframes moIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
   .mo-head { display: flex; align-items: center; gap: 9px; }
   .mo-head .avatar { width: 38px; height: 38px; font-size: 15px; border-radius: 13px; }
   .mo-meta { flex: 1; min-width: 0; }
@@ -163,14 +174,21 @@
   .mo-imgs.one img { max-height: 320px; aspect-ratio: auto; }
   .mo-acts { display: flex; gap: 16px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
   .mo-act { background: none; color: var(--muted); font-size: 12.5px; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
-  .mo-act.on { color: var(--accent2); font-weight: 600; }
-  .mo-comments { margin-top: 7px; background: var(--surface2); border-radius: 12px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; }
-  .mo-comment { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
+  .mo-act.on { color: var(--accent2); font-weight: 600; animation: heartPop .36s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes heartPop { 0% { transform: scale(1); } 35% { transform: scale(1.3); } 70% { transform: scale(.94); } 100% { transform: scale(1); } }
+  .mo-comments { margin-top: 7px; background: var(--surface2); border-radius: 12px; padding: 7px 9px; display: flex; flex-direction: column; gap: 1px; }
+  .mo-comment { font-size: 12.5px; line-height: 1.5; word-break: break-word; padding: 3px 4px; border-radius: 8px; animation: cmtIn .22s ease both; }
+  .mo-comment:active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  @keyframes cmtIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  .mo-rep { color: var(--muted); }
   .mo-comment b { color: var(--accent); font-weight: 600; }
   .mo-more { width: 100%; margin: 10px 0; background: var(--surface); color: var(--muted); border-radius: 14px; padding: 10px; box-shadow: var(--shadow); }
   .mo-likers { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
   .mo-likers b { color: var(--accent2); font-weight: 600; }
   .mo-liker { color: var(--accent2); cursor: pointer; }
+  .mo-end { text-align: center; color: var(--muted); font-size: 11.5px; padding: 16px 0 20px; letter-spacing: .3px; opacity: .75; }
+  .empty svg { animation: floaty 5.5s ease-in-out infinite; }
+  @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
   .mo-cauthor { cursor: pointer; }
   .mo-notify { background: var(--surface); border-radius: 16px; padding: 9px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
   .mo-notify-title { font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
@@ -640,6 +658,10 @@
   #gc-mute { background: rgba(255,255,255,.16); }
   #gc-mute.off { background: rgba(255,255,255,.3); }
   #gc-leave { background: var(--danger); box-shadow: 0 10px 26px rgba(255,61,90,.4); }
+
+  /* 按压反馈：点哪儿都有回应，不是死板的 */
+  button:not(:disabled) { transition: transform .14s ease, filter .14s ease; }
+  button:not(:disabled):active { transform: scale(.97); filter: brightness(.97); }
 </style>
 <script>
 /* 依赖库加载：先读本地缓存（二次打开零网络）；没有缓存则同时请求多个来源，谁先到用谁，并缓存下来。
@@ -808,8 +830,8 @@
       </section>
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
       <section id="tab-moments" class="tab-panel">
-        <div id="mo-cover" class="mo-cover"><div class="mo-cover-t">朋友圈</div><button id="mo-cover-btn" type="button">换封面</button></div>
-        <div class="mo-top"><div class="mo-sub">朋友们的近况</div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
+        <div id="mo-cover" class="mo-cover"><div id="mo-cover-img" class="mo-cover-img"></div><div class="mo-cover-t">朋友圈</div><div class="mo-me"><div id="mo-me-av"></div><div class="mo-me-name" id="mo-me-name"></div></div><button id="mo-cover-btn" type="button">换封面</button></div>
+        <div class="mo-top"><div class="mo-sub" id="mo-sub">朋友们的近况</div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
         <div id="moment-notify" class="mo-notify" style="display:none"></div>
         <div id="moment-list"></div>
         <button id="moment-more" type="button" class="mo-more" style="display:none">加载更多</button>
@@ -1405,6 +1427,7 @@ const EMPTY_SVG = '<svg viewBox="0 0 84 84" fill="none" stroke-linecap="round" s
 const emptyHTML = t => '<div class="empty">' + EMPTY_SVG + t + '</div>';
 function renderMe() {
   try { ensureChatBg(); } catch (e) {}
+  try { paintMomentsHead(); } catch (e) {}
   $('me-name').textContent = S.me ? S.me.nickname : '加载中…';
   $('me-acc').textContent = S.me ? '@' + S.me.account_id : '';
   $('me-acc2').textContent = S.me ? S.me.account_id : '';
@@ -3272,11 +3295,46 @@ function applyChatFor(conv, peer) {
   if (conv && !isGroupKey(conv) && peer) { const u = friendBgOf(peer); if (u) { applyChatBg(u); return; } }
   applyChatBg((S.me && S.me.bg_url) || '');
 }
+let moCoverApplied = '', moCoverTried = '';
+const moCoverKey = () => 'ch2cov:' + (S.uid || 'anon');
+function moCoverURL() {
+  const u = (S.me && S.me.cover_url) || '';
+  if (u) return u;
+  try { return LS.get(moCoverKey(), '') || ''; } catch (e) { return ''; }
+}
+// 朋友圈封面：只用 cover_url，不再拿聊天背景顶（聊天背景是聊天背景，两回事）。
+// 先预加载图片，加载完再淡入，避免“先空一下再闪出来”；同一张不重复设。
 function applyMomentCover() {
-  const el = $('mo-cover'); if (!el) return;
-  const u = S.me && (S.me.cover_url || S.me.bg_url);
-  el.style.backgroundImage = u ? 'url("' + String(u).replace(/"/g, '%22') + '")' : '';
-  el.classList.toggle('has-cover', !!u);
+  const el = $('mo-cover'), img = $('mo-cover-img'); if (!el || !img) return;
+  const u = moCoverURL();
+  if (!u) { el.classList.remove('has-cover'); img.style.backgroundImage = ''; moCoverApplied = ''; moCoverTried = ''; return; }
+  if (u === moCoverApplied) { el.classList.add('has-cover'); return; }
+  if (u === moCoverTried) return;
+  moCoverTried = u;
+  const done = function () {
+    if (moCoverTried !== u || !img) return;
+    img.style.backgroundImage = 'url("' + String(u).replace(/"/g, '%22') + '")';
+    el.classList.add('has-cover'); moCoverApplied = u;
+    try { LS.set(moCoverKey(), u); } catch (e) {}
+  };
+  const pre = new Image();
+  pre.onload = done;
+  pre.onerror = function () { if (moCoverTried === u) el.classList.remove('has-cover'); };
+  pre.src = u;
+  if (pre.complete && pre.naturalWidth) done();
+}
+// bootstrap 不带 cover_url：单独拉一次自己的封面，不然刚打开时只能拿聊天背景顶（那正是之前“封面不对/有时不出现”的根因）
+let myCoverAt = 0;
+function loadMyCover() {
+  if (!sb || !S.uid || now() - myCoverAt < 30000) return;
+  myCoverAt = now();
+  sb.from('profiles').select('cover_url').eq('id', S.uid).maybeSingle().then(function (r) {
+    if (!r || r.error) return;
+    const u = (r.data && r.data.cover_url) || '';
+    if (S.me) { S.me.cover_url = u; S.profiles[ME()] = S.me; }
+    try { if (u) LS.set(moCoverKey(), u); else LS.del(moCoverKey()); } catch (e) {}
+    applyMomentCover();
+  }, function () {});
 }
 async function loadFriendBgs() {
   if (!sb || !S.me) return;
@@ -3333,6 +3391,7 @@ async function setPersonalCover(file) {
   if (error || !data || !data.length) throw error || new Error('保存失败');
   const old = S.me.cover_url;
   S.me = Object.assign({}, S.me, { cover_url: url }); S.profiles[ME()] = S.me;
+  try { LS.set(moCoverKey(), url); } catch (e) {}
   applyMomentCover(); saveCache(); toast('封面已更新');
   try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/cover_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
 }
@@ -3947,7 +4006,7 @@ async function momentsLoad(reset) {
   MO.loading = true;
   const el = $('moment-list'), had = MO.list.length;
   if (reset && !had) { MO.list = []; MO.cursor = null; MO.has = true; }
-  if (reset) { MO.cursor = null; MO.has = true; if (!had) el.innerHTML = '<div class="empty">加载中…</div>'; else renderMoments(); }
+  if (reset) { MO.cursor = null; MO.has = true; if (!had) el.innerHTML = '<div class="empty">加载中…</div>'; }   // 已有内容就先留着，不重画（重画会闪）
   try {
     let q = sb.from('moments').select('id,author_acc,body,images,visibility,created_at').order('created_at', { ascending: false }).limit(15);
     if (!reset && MO.cursor) q = q.lt('created_at', MO.cursor);
@@ -3962,15 +4021,17 @@ async function momentsLoad(reset) {
     if (ids.length) {
       const [lk, cm] = await Promise.all([
         sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
-        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at').in('moment_id', ids).order('created_at', { ascending: true })
+        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at,reply_to_acc,parent_id').in('moment_id', ids).order('created_at', { ascending: true })
       ]);
       if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
       if (!cm.error) (cm.data || []).forEach(function (x) { (cmts[x.moment_id] = cmts[x.moment_id] || []).push(x); });
       MO.likes = likes; MO.comments = cmts;
       MO.loadAt = now();
-      renderMoments();   // 先把内容画出来，头像资料慢慢补
       const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); }); (lk.data || []).forEach(function (x) { accs.add(x.account_id); });
-      Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (S.me) renderMoments(); }, function () {});
+      const needProf = Array.from(accs).some(function (a) { return !S.profiles[a]; });
+      const sig = ids.map(function (id) { return id + ':' + (likes[id] || []).length + ':' + (cmts[id] || []).length; }).join(',') + '|' + rows.length;
+      if (sig !== MO.sig) { MO.sig = sig; renderMoments(); }   // 内容没变就不重画：切回来不会闪、图片不重新加载
+      Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (S.me && needProf) { MO.sig = sig; renderMoments(); } }, function () {});
     } else {
       MO.likes = likes; MO.comments = cmts; MO.loadAt = now(); renderMoments();
     }
@@ -3979,26 +4040,61 @@ async function momentsLoad(reset) {
     if (el && !MO.list.length) el.innerHTML = '<div class="empty">朋友圈加载失败：' + esc((e && e.message) || '请重试') + '</div>';
   } finally { MO.loading = false; }
 }
+function momentReactHTML(id) {
+  const like = MO.likes[id] || [], liked = like.indexOf(ME()) >= 0, cms = MO.comments[id] || [];
+  const likers = like.length ? '<div class="mo-likers">♥ ' + like.map(function (a) { return '<span class="mo-liker" data-acc="' + esc(a) + '">' + esc(peerName(a)) + '</span>'; }).join('、') + '</div>' : '';
+  const list = cms.length ? '<div class="mo-comments">' + cms.map(function (c) {
+    const to = c.reply_to_acc ? '<span class="mo-rep"> 回复 </span><b class="mo-cauthor" data-acc="' + esc(c.reply_to_acc) + '">' + esc(peerName(c.reply_to_acc)) + '</b>' : '';
+    return '<div class="mo-comment" data-cid="' + esc(c.id) + '" data-acc="' + esc(c.author_acc) + '"><b class="mo-cauthor" data-acc="' + esc(c.author_acc) + '">' + esc(peerName(c.author_acc)) + '</b>' + to + '：' + esc(c.body) + '</div>';
+  }).join('') + '</div>' : '';
+  return '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' + likers + list;
+}
+function momentCardHTML(m, i) {
+  const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
+  const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
+  const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
+  return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
+    '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
+      '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div></div>' +
+      (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
+    (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid +
+    '<div class="mo-react">' + momentReactHTML(m.id) + '</div>' +
+    '</div>';
+}
 function renderMoments() {
   const el = $('moment-list'); if (!el) return;
   if (!MO.list.length) { el.innerHTML = emptyHTML('还没有朋友圈<br>点右上角发一条'); $('moment-more').style.display = 'none'; return; }
-  el.innerHTML = MO.list.map(function (m) {
-    const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
-    const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
-    const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
-    const like = MO.likes[m.id] || [], liked = like.indexOf(ME()) >= 0;
-    const cms = MO.comments[m.id] || [];
-    const likers = like.length ? '<div class="mo-likers">♥ ' + like.map(function (a) { return '<span class="mo-liker" data-acc="' + esc(a) + '">' + esc(peerName(a)) + '</span>'; }).join('、') + '</div>' : '';
-    return '<div class="moment" data-id="' + esc(m.id) + '">' +
-      '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
-        '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtTime(m.created_at) + '</div></div>' +
-        (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
-      (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid +
-      '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' + likers +
-      (cms.length ? '<div class="mo-comments">' + cms.map(function (c) { return '<div class="mo-comment"><b class="mo-cauthor" data-acc="' + esc(c.author_acc) + '">' + esc(peerName(c.author_acc)) + '：</b>' + esc(c.body) + '</div>'; }).join('') + '</div>' : '') +
-      '</div>';
-  }).join('');
+  el.innerHTML = MO.list.map(momentCardHTML).join('') + (!MO.has ? '<div class="mo-end">— 就这些了 —</div>' : '');
   $('moment-more').style.display = MO.has ? '' : 'none';
+}
+function paintMomentsHead() {
+  const av = $('mo-me-av'), nm = $('mo-me-name'); if (!av || !nm) return;
+  const n = S.me ? (S.me.nickname || S.me.account_id || '') : '';
+  av.innerHTML = S.me ? avatarHTML(n, S.me.avatar_url, false, S.me.account_id) : '';
+  nm.textContent = n;
+  const sub = $('mo-sub');
+  if (sub) {
+    const h = new Date().getHours();
+    const g = h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : h < 23 ? '晚上好' : '夜深了';
+    sub.textContent = n ? g + '，' + n : '朋友们的近况';
+  }
+}
+function fmtMomentTime(t) {
+  const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
+  const diff = (n - d) / 1000;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (d.toDateString() === n.toDateString()) return '今天 ' + hm;
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天 ' + hm;
+  if (d.getFullYear() === n.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+// 点赞/评论只重画这一块，不整页重建：图片不会重新加载，也就不会闪
+function refreshMomentReact(id) {
+  const card = document.querySelector('#moment-list .moment[data-id="' + String(id).replace(/[^a-zA-Z0-9_-]/g, '') + '"]');
+  const zone = card && card.querySelector('.mo-react');
+  if (zone) zone.innerHTML = momentReactHTML(id);
 }
 function openMomentCompose() {
   MO.imgs = []; MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); MO.urls = [];
@@ -4054,24 +4150,28 @@ async function postMoment() {
 async function toggleMomentLike(id) {
   const arr = MO.likes[id] || [], liked = arr.indexOf(ME()) >= 0;
   MO.likes[id] = liked ? arr.filter(function (a) { return a !== ME(); }) : arr.concat([ME()]);
-  renderMoments();
+  refreshMomentReact(id);
   try {
     if (liked) await sb.from('moment_likes').delete().eq('moment_id', id).eq('account_id', ME());
     else await sb.from('moment_likes').insert({ moment_id: id, account_id: ME() });
-  } catch (e) { MO.likes[id] = arr; renderMoments(); logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
+  } catch (e) { MO.likes[id] = arr; refreshMomentReact(id); logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
 }
-function commentMoment(id) {
-  openForm('评论', [{ ph: '写评论…（最多 200 字）', max: 200 }], async ([v]) => {
+function commentMoment(id, reply) {
+  const toAcc = (reply && reply.acc) || '';
+  const toName = toAcc ? peerName(toAcc) : '';
+  const title = toName ? '回复 ' + toName : '评论';
+  openForm(title, [{ ph: title + '…（最多 200 字）', max: 200 }], async ([v]) => {
     v = String(v || '').trim(); if (!v) return '写点什么';
-    const tmp = { id: 'tmp' + now(), moment_id: id, author_acc: ME(), body: v, created_at: new Date().toISOString() };
-    (MO.comments[id] = MO.comments[id] || []).push(tmp); renderMoments();
-    sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v }).select('id,created_at').single().then(function (r) {
+    const parent = reply && reply.cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reply.cid) ? reply.cid : null;
+    const tmp = { id: 'tmp' + now(), moment_id: id, author_acc: ME(), body: v, created_at: new Date().toISOString(), reply_to_acc: toAcc || null, parent_id: parent };
+    (MO.comments[id] = MO.comments[id] || []).push(tmp); refreshMomentReact(id);
+    sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v, reply_to_acc: tmp.reply_to_acc, parent_id: tmp.parent_id }).select('id,created_at').single().then(function (r) {
       if (r.error) {
-        MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); renderMoments();
+        MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
         toast('评论失败：' + ((r.error && r.error.message) || '请重试'));
-      } else if (r.data) { tmp.id = r.data.id; tmp.created_at = r.data.created_at; renderMoments(); }
+      } else if (r.data) { tmp.id = r.data.id; tmp.created_at = r.data.created_at; refreshMomentReact(id); }
     }, function (e) {
-      MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); renderMoments();
+      MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
       logErr('momentComment', e); toast('评论失败：' + ((e && e.message) || '请重试'));
     });
     return null;
@@ -4827,7 +4927,7 @@ function renderProfile() {
   $('pf-av').innerHTML = avatarHTML(peerName(a), avatarOf(a), isOnline(a), a);
   const coverEl = $('pf-cover');
   if (coverEl) {
-    const cu = (S.profiles[a] && (S.profiles[a].cover_url || S.profiles[a].bg_url)) || '';
+    const cu = (S.profiles[a] && S.profiles[a].cover_url) || '';
     if (cu) { coverEl.style.backgroundImage = 'url("' + String(cu).replace(/"/g, '%22') + '")'; coverEl.style.background = 'url("' + String(cu).replace(/"/g, '%22') + '") center/cover no-repeat'; }
     else { coverEl.style.backgroundImage = ''; const h = hueOf(a); coverEl.style.background = 'linear-gradient(135deg,hsl(' + h + ',68%,62%),hsl(' + ((h + 55) % 360) + ',70%,52%))'; }
   }
@@ -5344,7 +5444,7 @@ function bindUI() {
       $('tab-' + btn.dataset.tab).classList.add('active');
       if (btn.dataset.tab === 'me') renderEnv();
       if (btn.dataset.tab === 'requests') grpInvitesLoad(true);
-      if (btn.dataset.tab === 'moments') { momentNotifyCheck(); momentsLoad(true); setTimeout(markMomentsSeen, 1500); }
+      if (btn.dataset.tab === 'moments') { momentNotifyCheck(); paintMomentsHead(); applyMomentCover(); loadMyCover(); momentsLoad(true); setTimeout(markMomentsSeen, 1500); }
     };
   });
   setInterval(() => { try { if (!document.hidden && $('tab-me').classList.contains('active')) renderEnv(); } catch (e) {} }, 1500);   // 诊断页自动刷新：实时通道连上后会自己变绿
@@ -5571,6 +5671,8 @@ function bindUI() {
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
+    const cm = e.target.closest('.mo-comment');
+    if (cm && cm.dataset.cid) { commentMoment(id, { acc: cm.dataset.acc, cid: cm.dataset.cid }); return; }   // 点评论 = 回复他
     const im = e.target.closest('.mo-imgs img'); if (im && im.dataset.url) openMomentImage(im.dataset.url);
   };
   $('moment-notify').onclick = function (e) {
@@ -5715,7 +5817,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML };
 boot();
 })();
 
