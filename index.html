@@ -195,11 +195,24 @@
   .vis-item { display: flex; align-items: center; gap: 10px; padding: 9px 4px; font-size: 14px; border-bottom: 1px solid var(--line); }
   .vis-item input { width: 18px; height: 18px; accent-color: var(--accent); }
   .vis-empty { padding: 14px 4px; color: var(--muted); font-size: 13px; }
-  .ie-stage { display: flex; align-items: center; justify-content: center; padding: 4px 12px 10px; background: #000; border-radius: 14px; margin: 0 12px 10px; min-height: 160px; }
-  #ie-canvas { max-width: 100%; max-height: 46vh; display: block; border-radius: 10px; }
-  .ie-tools { display: flex; gap: 8px; padding: 0 12px 10px; overflow-x: auto; }
-  .ie-tools button { flex: 0 0 auto; padding: 8px 12px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 13px; }
-  .ie-tools button.on { background: color-mix(in srgb, var(--accent) 26%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  .ie-stage { display: flex; align-items: center; justify-content: center; padding: 4px; background: #000; border-radius: 14px; margin: 0 12px 8px; min-height: 160px; }
+  .ie-wrap { position: relative; display: inline-block; line-height: 0; touch-action: none; max-width: 100%; }
+  #ie-canvas { max-width: 100%; max-height: 44vh; display: block; border-radius: 8px; }
+  #ie-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border-radius: 8px; }
+  .ie-hint { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); background: rgba(0,0,0,.55); color: #fff; font-size: 11.5px; padding: 4px 10px; border-radius: 10px; display: none; line-height: 1.4; white-space: nowrap; }
+  .ie-tabs { display: flex; gap: 8px; padding: 0 12px 8px; }
+  .ie-tab { flex: 1; padding: 9px 4px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 13px; }
+  .ie-tab.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  .ie-panel { padding: 0 12px 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .ie-mini { padding: 8px 12px; border-radius: 11px; font-size: 12.5px; background: var(--surface2); color: var(--ink); }
+  .ie-mini.primary { background: var(--accent); color: #fff; }
+  .ie-colors { display: flex; gap: 8px; }
+  .ie-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+  .ie-sw.on { border-color: var(--ink); }
+  .ie-sizes { display: flex; gap: 8px; }
+  .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
+  .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  .ie-tip { font-size: 11.5px; color: var(--muted); }
   .mo-end { text-align: center; color: var(--muted); font-size: 11.5px; padding: 16px 0 20px; letter-spacing: .3px; opacity: .75; }
   .empty svg { animation: floaty 5.5s ease-in-out infinite; }
   @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
@@ -237,6 +250,8 @@
   .preview { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .badge { background: linear-gradient(135deg, #ff7a5c, #ff3d77); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 10px; min-width: 19px; text-align: center; box-shadow: 0 3px 8px rgba(255,61,119,.35); animation: badgePop .26s cubic-bezier(.3,1.6,.5,1); }
   @keyframes badgePop { from { transform: scale(.5); opacity: 0; } to { transform: none; opacity: 1; } }
+  .badge.at { background: linear-gradient(135deg, #ff9f0a, #ff3b30); font-size: 11px; }
+  .at-tag { color: var(--accent2); font-weight: 600; }
 
   .search-bar { display: flex; gap: 8px; padding: 4px 0 12px; }
   .search-bar input { flex: 1; min-width: 0; border-radius: 16px; }
@@ -1062,21 +1077,32 @@
 <div id="imgedit-backdrop" class="sheet-bd"></div>
 <div id="imgedit-sheet" class="sheet">
   <div class="menu-title">编辑图片</div>
-  <div class="ie-stage"><canvas id="ie-canvas"></canvas></div>
-  <div class="ie-tools">
-    <button id="ie-rot" type="button">↻ 旋转</button>
-    <button class="ie-f on" data-f="none" type="button">原图</button>
-    <button class="ie-f" data-f="warm" type="button">暖色</button>
-    <button class="ie-f" data-f="mono" type="button">黑白</button>
-    <button class="ie-f" data-f="fresh" type="button">清新</button>
+  <div class="ie-stage">
+    <div class="ie-wrap" id="ie-wrap">
+      <canvas id="ie-canvas"></canvas>
+      <canvas id="ie-overlay"></canvas>
+      <div class="ie-hint" id="ie-hint">拖出区域后，拖四边/四角可以自己调</div>
+    </div>
   </div>
-  <div class="ie-tools">
-    <button class="ie-c on" data-a="none" type="button">不裁剪</button>
-    <button class="ie-c" data-a="1" type="button">1:1</button>
-    <button class="ie-c" data-a="1.3333" type="button">4:3</button>
-    <button class="ie-c" data-a="0.75" type="button">3:4</button>
+  <div class="ie-tabs">
+    <button class="ie-tab on" data-t="crop" type="button">裁剪</button>
+    <button class="ie-tab" data-t="draw" type="button">画笔</button>
+    <button class="ie-tab" data-t="text" type="button">文字</button>
+    <button class="ie-tab" data-t="rot" type="button">↻ 旋转</button>
   </div>
-  <div class="fs-btns"><button id="ie-cancel" type="button">取消</button><button id="ie-ok" class="btn-primary" type="button">发送</button></div>
+  <div class="ie-panel" id="ie-panel-crop">
+    <button id="ie-crop-apply" type="button" class="ie-mini primary">应用裁剪</button>
+    <button id="ie-crop-reset" type="button" class="ie-mini">重选</button>
+  </div>
+  <div class="ie-panel" id="ie-panel-draw" style="display:none">
+    <div class="ie-colors" id="ie-colors"></div>
+    <div class="ie-sizes" id="ie-sizes"><button type="button" data-s="4">细</button><button type="button" data-s="10" class="on">中</button><button type="button" data-s="22">粗</button></div>
+  </div>
+  <div class="ie-panel" id="ie-panel-text" style="display:none">
+    <div class="ie-colors" id="ie-colors2"></div>
+    <div class="ie-tip">点图片上要写字的位置</div>
+  </div>
+  <div class="fs-btns"><button id="ie-undo" type="button">撤销</button><button id="ie-cancel" type="button">取消</button><button id="ie-ok" class="btn-primary" type="button">发送</button></div>
 </div>
 <div id="msg-menu-backdrop"></div>
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
@@ -1581,9 +1607,10 @@ function renderList() {
   if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   el.innerHTML = gh + shown.map(c => {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
+    const at = c.convKey !== S.conv && atMeOf(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(String(convPreview(c)).slice(0, 120))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
 function renderContacts() {
@@ -1715,6 +1742,7 @@ function upsertConvRow(r) {
   const c = convOf(key);
   const n = { convKey: key, peer_acc: r.peer_acc || peerOf(key, ME()), last_body: r.last_body || (c && c.last_body) || r.last_body, last_ts: r.last_ts, last_read_ts: r.last_read_ts, unread: r.unread || 0 };
   if (key === S.conv) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
+  if (isGroupKey(key) && (n.unread || 0) > 0 && now() - (AT_CHK[key] || 0) > 4000) { AT_CHK[key] = now(); checkConvMention(key); }
   if (c) Object.assign(c, n); else S.convs.push(n);
   S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
   if (isGroupKey(n.peer_acc)) { if (!grpOf(n.peer_acc)) grpLoad(); }
@@ -1731,6 +1759,7 @@ function applyBoot(b) {
   const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
+  setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -1849,11 +1878,28 @@ function upsertMsg(m) {
 }
 
 /* ---- 收到消息 ---- */
+const AT_KEY = () => 'ch2at:' + (S.uid || 'anon');
+function atMeMap() { if (!S.atMe) { try { S.atMe = LS.get(AT_KEY(), {}) || {}; } catch (e) { S.atMe = {}; } } return S.atMe; }
+function setAtMe(key, on) { const m = atMeMap(); if (on) m[key] = 1; else delete m[key]; try { LS.set(AT_KEY(), m); } catch (e) {} }
+function atMeOf(key) { return !!atMeMap()[key]; }
+const AT_CHK = {};
+async function checkConvMention(key) {
+  if (!sb || !isGroupKey(key)) return;
+  try {
+    const r = await sb.from('messages').select('mentions').eq('conv_key', key).order('created_at', { ascending: false }).limit(1);
+    const m = r && r.data && r.data[0];
+    if (m && Array.isArray(m.mentions) && m.mentions.some(function (x) { return x && x.acc === ME(); })) {
+      if (!atMeOf(key)) { setAtMe(key, true); sched('list'); }
+    }
+  } catch (e) {}
+}
 function onIncoming(m, noInc) {
   if (S.recalledEarly.has(m.id) && m.type !== 'recalled') { m = Object.assign({}, m, { type: 'recalled', body: '' }); }
   const first = !S.seen.has(m.id); S.seen.add(m.id);
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
   const open = S.conv === m.conv;
+  const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME(); });
+  if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
   if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
@@ -2104,72 +2150,238 @@ async function compressImage(file) {
   } catch (e) { logErr('img-compress', e); return file; }
 }
 const imgOrig = () => { try { return LS.get('ch2imgq', 'auto') === 'orig'; } catch (e) { return false; } };
-/* ---- 发送前编辑图片 ---- */
-const IE = { file: null, bmp: null, angle: 0, filter: 'none', crop: 'none', resolve: null };
-const IE_FILTERS = { none: 'none', warm: 'sepia(.35) saturate(1.3) brightness(1.05)', mono: 'grayscale(1) contrast(1.05)', fresh: 'saturate(1.2) brightness(1.08) hue-rotate(-8deg)' };
+/* ---- 发送前编辑图片：裁剪 / 画笔 / 文字 / 旋转（不依赖 ctx.filter，手机也能用） ---- */
+const IE = { file: null, img: null, tool: 'crop', color: '#ff3b30', size: 10, sel: null, origin: null, drag: null, last: null, hist: [], resolve: null };
+const IE_COLORS = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#0a84ff', '#af52de', '#ffffff', '#111111'];
 function imgEditOn() { try { return LS.get('ch2imgedit', true) !== false; } catch (e) { return true; } }
-function openImgEditor(file) {
-  return new Promise(function (resolve) {
-    IE.file = file; IE.angle = 0; IE.filter = 'none'; IE.crop = 'none'; IE.resolve = resolve;
-    createImageBitmap(file).then(function (bmp) {
-      IE.bmp = bmp; paintImgEditor();
-      raiseSheet('imgedit-sheet', 'imgedit-backdrop');
-      $('imgedit-backdrop').classList.add('active'); $('imgedit-sheet').classList.add('active');
-      document.querySelectorAll('#imgedit-sheet .ie-f').forEach(function (b) { b.classList.toggle('on', b.dataset.f === 'none'); });
-      document.querySelectorAll('#imgedit-sheet .ie-c').forEach(function (b) { b.classList.toggle('on', b.dataset.a === 'none'); });
-    }, function (e) {
-      logErr('img-edit', e); toast('这张图打不开，直接发原图');
-      IE.resolve = null; resolve(); sendImage(file, true);
-    });
+
+function ieCanvas() { return $('ie-canvas'); }
+function ieOverlay() { return $('ie-overlay'); }
+function ieWrap() { return $('ie-wrap'); }
+function ieScale() { const cv = ieCanvas(), w = ieWrap().clientWidth || 1; return cv.width / w; }
+
+function iePushHist() {
+  try {
+    const cv = ieCanvas();
+    IE.hist.push(cv.toDataURL('image/jpeg', 0.85));
+    if (IE.hist.length > 4) IE.hist.shift();
+  } catch (e) {}
+}
+function ieUndo() {
+  const u = IE.hist.pop(); if (!u) { toast('没有可撤销的步骤'); return; }
+  const im = new Image();
+  im.onload = function () {
+    const cv = ieCanvas(); cv.width = im.width; cv.height = im.height;
+    cv.getContext('2d').drawImage(im, 0, 0);
+    IE.sel = null; ieLayout();
+  };
+  im.src = u;
+}
+function ieLayout() {
+  const cv = ieCanvas(), ov = ieOverlay(), wrap = ieWrap(); if (!cv || !ov || !wrap) return;
+  const w = wrap.clientWidth || 0, h = wrap.clientHeight || 0;
+  if (!w || !h) return;
+  ov.width = w; ov.height = h;
+  ieDrawOverlay();
+  const hint = $('ie-hint'); if (hint) hint.style.display = (IE.tool === 'crop' && !IE.sel) ? 'block' : 'none';
+}
+function ieHandles(s) {
+  return [
+    { k: 'nw', x: s.x, y: s.y }, { k: 'n', x: s.x + s.w / 2, y: s.y }, { k: 'ne', x: s.x + s.w, y: s.y },
+    { k: 'w', x: s.x, y: s.y + s.h / 2 }, { k: 'e', x: s.x + s.w, y: s.y + s.h / 2 },
+    { k: 'sw', x: s.x, y: s.y + s.h }, { k: 's', x: s.x + s.w / 2, y: s.y + s.h }, { k: 'se', x: s.x + s.w, y: s.y + s.h }
+  ];
+}
+function ieHit(p) {
+  const s = IE.sel; if (!s) return null;
+  const T = 24;
+  let best = null, bd = 1e9;
+  ieHandles(s).forEach(function (h) {
+    const d = Math.hypot(p.x - h.x, p.y - h.y);
+    if (d <= T && d < bd) { bd = d; best = h.k; }
+  });
+  if (best) return best;
+  if (p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) return 'move';
+  return null;
+}
+function ieDrawOverlay() {
+  const ov = ieOverlay(); if (!ov) return;
+  const ctx = ov.getContext('2d'); if (!ctx) return;
+  ctx.clearRect(0, 0, ov.width, ov.height);
+  if (IE.tool !== 'crop') return;
+  if (!IE.sel) return;
+  const s = IE.sel;
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(0, 0, ov.width, ov.height);
+  ctx.clearRect(s.x, s.y, s.w, s.h);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.strokeRect(Math.round(s.x) + 1, Math.round(s.y) + 1, Math.max(0, Math.round(s.w) - 2), Math.max(0, Math.round(s.h) - 2));
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1;
+  ieHandles(s).forEach(function (h) {
+    ctx.beginPath(); ctx.rect(h.x - 7, h.y - 7, 14, 14); ctx.fill(); ctx.stroke();
   });
 }
-function paintImgEditor() {
-  const cv = $('ie-canvas'); if (!cv || !IE.bmp) return;
-  const b = IE.bmp, rot = IE.angle % 360;
-  const rw = (rot === 90 || rot === 270) ? b.height : b.width;
-  const rh = (rot === 90 || rot === 270) ? b.width : b.height;
-  const full = document.createElement('canvas');
-  full.width = rw; full.height = rh;
-  const fctx = full.getContext('2d');
-  fctx.save(); fctx.translate(rw / 2, rh / 2); fctx.rotate(rot * Math.PI / 180);
-  fctx.filter = IE_FILTERS[IE.filter] || 'none';
-  fctx.drawImage(b, -b.width / 2, -b.height / 2);
-  fctx.restore();
-  let sx = 0, sy = 0, sw = rw, sh = rh;
-  if (IE.crop && IE.crop !== 'none') {
-    const a = Number(IE.crop) || 1;
-    if (rw / rh > a) { sw = Math.round(rh * a); sx = Math.round((rw - sw) / 2); }
-    else { sh = Math.round(rw / a); sy = Math.round((rh - sh) / 2); }
+function ieSetTool(t) {
+  IE.tool = t; IE.sel = null; IE.drag = null; IE.origin = null;
+  document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); });
+  const pc = $('ie-panel-crop'), pd = $('ie-panel-draw'), pt = $('ie-panel-text');
+  if (pc) pc.style.display = t === 'crop' ? '' : 'none';
+  if (pd) pd.style.display = t === 'draw' ? '' : 'none';
+  if (pt) pt.style.display = t === 'text' ? '' : 'none';
+  ieLayout();
+}
+function iePoint(e) {
+  const r = ieWrap().getBoundingClientRect();
+  return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) };
+}
+function paintIeColors() {
+  ['ie-colors', 'ie-colors2'].forEach(function (id) {
+    const box = $(id); if (!box) return;
+    box.innerHTML = IE_COLORS.map(function (c) {
+      return '<button type="button" class="ie-sw' + (c === IE.color ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>';
+    }).join('');
+  });
+}
+function openImgEditor(file) {
+  return new Promise(function (resolve) {
+    IE.file = file; IE.resolve = resolve; IE.hist = []; IE.sel = null; IE.drag = null; IE.origin = null;
+    const done = function (src) {
+      const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+      if (!w || !h) { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); return; }
+      const cv = ieCanvas();
+      const max = 1600, sc = Math.min(1, max / Math.max(w, h));
+      cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(h * sc));
+      cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+      IE.img = src;
+      raiseSheet('imgedit-sheet', 'imgedit-backdrop');
+      $('imgedit-backdrop').classList.add('active'); $('imgedit-sheet').classList.add('active');
+      paintIeColors(); ieSetTool('crop');
+      setTimeout(ieLayout, 40);
+    };
+    if (window.createImageBitmap) {
+      createImageBitmap(file).then(done, function () {
+        const im = new Image();
+        im.onload = function () { done(im); };
+        im.onerror = function () { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); };
+        im.src = URL.createObjectURL(file);
+      });
+    } else {
+      const im = new Image();
+      im.onload = function () { done(im); };
+      im.onerror = function () { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); };
+      im.src = URL.createObjectURL(file);
+    }
+  });
+}
+function ieDown(e) {
+  if (!IE.img) return;
+  if (e.cancelable) e.preventDefault();
+  const p = iePoint(e);
+  if (IE.tool === 'crop') {
+    const hit = ieHit(p);
+    if (hit) { IE.drag = hit; IE.origin = p; IE.base = { x: IE.sel.x, y: IE.sel.y, w: IE.sel.w, h: IE.sel.h }; }
+    else { IE.drag = 'new'; IE.origin = p; IE.base = { x: p.x, y: p.y, w: 0, h: 0 }; IE.sel = { x: p.x, y: p.y, w: 0, h: 0 }; }
+    ieDrawOverlay();
+  } else if (IE.tool === 'draw') {
+    iePushHist();
+    IE.drag = 'draw'; IE.last = p;
+    const ctx = ieCanvas().getContext('2d'), k = ieScale();
+    ctx.beginPath(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = IE.color; ctx.lineWidth = Math.max(1, IE.size * k);
+    ctx.moveTo(p.x * k, p.y * k); ctx.lineTo(p.x * k + 0.1, p.y * k + 0.1); ctx.stroke();
+  } else if (IE.tool === 'text') {
+    ieAddText(p);
   }
-  const max = 1600, sc = Math.min(1, max / Math.max(sw, sh));
-  cv.width = Math.max(1, Math.round(sw * sc));
-  cv.height = Math.max(1, Math.round(sh * sc));
-  const ctx = cv.getContext('2d');
-  ctx.drawImage(full, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
 }
-function closeImgEditor() { $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active'); }
-function cancelImgEditor() {
-  closeImgEditor();
-  try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
-  IE.bmp = null;
-  const r = IE.resolve; IE.resolve = null; if (r) r();
+function ieMove(e) {
+  if (!IE.drag) return;
+  if (e.cancelable) e.preventDefault();
+  const p = iePoint(e);
+  if (IE.drag === 'crop') {
+    const o = IE.origin;
+    IE.sel = { x: Math.min(o.x, p.x), y: Math.min(o.y, p.y), w: Math.abs(p.x - o.x), h: Math.abs(p.y - o.y) };
+    ieDrawOverlay();
+  } else if (IE.drag === 'new' || IE.drag === 'move' || { n: 1, s: 1, e: 1, w: 1, nw: 1, ne: 1, sw: 1, se: 1 }[IE.drag]) {
+    const ov = ieOverlay(), W = ov.width, H = ov.height, o = IE.origin, b = IE.base, min = 28;
+    let nx = b.x, ny = b.y, nw = b.w, nh = b.h;
+    const dx = p.x - o.x, dy = p.y - o.y, d = IE.drag;
+    if (d === 'new') {
+      nx = Math.min(o.x, p.x); ny = Math.min(o.y, p.y);
+      nw = Math.max(min, Math.abs(p.x - o.x)); nh = Math.max(min, Math.abs(p.y - o.y));
+      nw = Math.min(nw, W - nx); nh = Math.min(nh, H - ny);
+    } else if (d === 'move') {
+      nx = Math.max(0, Math.min(W - b.w, b.x + dx));
+      ny = Math.max(0, Math.min(H - b.h, b.y + dy));
+    } else {
+      if (d.indexOf('w') >= 0) { nx = Math.max(0, Math.min(b.x + b.w - min, b.x + dx)); nw = b.x + b.w - nx; }
+      if (d.indexOf('e') >= 0) { nw = Math.max(min, Math.min(W - b.x, b.w + dx)); }
+      if (d.indexOf('n') >= 0) { ny = Math.max(0, Math.min(b.y + b.h - min, b.y + dy)); nh = b.y + b.h - ny; }
+      if (d.indexOf('s') >= 0) { nh = Math.max(min, Math.min(H - b.y, b.h + dy)); }
+    }
+    IE.sel = { x: nx, y: ny, w: nw, h: nh };
+    ieDrawOverlay();
+  } else if (IE.drag === 'draw') {
+    const ctx = ieCanvas().getContext('2d'), k = ieScale();
+    ctx.strokeStyle = IE.color; ctx.lineWidth = Math.max(1, IE.size * k);
+    ctx.beginPath(); ctx.moveTo(IE.last.x * k, IE.last.y * k); ctx.lineTo(p.x * k, p.y * k); ctx.stroke();
+    IE.last = p;
+  }
 }
-function finishImgEditor() {
-  const cv = $('ie-canvas'); if (!cv) return;
+function ieUp() {
+  if (IE.drag === 'new') { const s = IE.sel; if (s && (s.w < 12 || s.h < 12)) IE.sel = null; ieDrawOverlay(); }
+  IE.drag = null; IE.origin = null; IE.last = null;
+  const hint = $('ie-hint'); if (hint) hint.style.display = (IE.tool === 'crop' && !IE.sel) ? 'block' : 'none';
+}
+function ieCropApply() {
+  const s = IE.sel; if (!s || s.w < 10 || s.h < 10) { toast('先在图片上拖出要保留的区域'); return; }
+  iePushHist();
+  const k = ieScale(), cv = ieCanvas();
+  const sx = Math.round(s.x * k), sy = Math.round(s.y * k), sw = Math.max(1, Math.round(s.w * k)), sh = Math.max(1, Math.round(s.h * k));
+  const tmp = document.createElement('canvas'); tmp.width = sw; tmp.height = sh;
+  tmp.getContext('2d').drawImage(cv, sx, sy, sw, sh, 0, 0, sw, sh);
+  cv.width = sw; cv.height = sh;
+  cv.getContext('2d').drawImage(tmp, 0, 0);
+  IE.sel = null; ieLayout(); toast('已裁剪');
+}
+function ieRotate() {
+  iePushHist();
+  const cv = ieCanvas(), w = cv.width, h = cv.height;
+  const tmp = document.createElement('canvas'); tmp.width = h; tmp.height = w;
+  const c = tmp.getContext('2d');
+  c.translate(h / 2, w / 2); c.rotate(Math.PI / 2); c.drawImage(cv, -w / 2, -h / 2);
+  cv.width = h; cv.height = w;
+  cv.getContext('2d').drawImage(tmp, 0, 0);
+  IE.sel = null; ieLayout();
+}
+function ieAddText(p) {
+  openForm('添加文字', [{ ph: '输入文字（最多 30 字）', max: 30 }], function (vals) {
+    const t = String((vals && vals[0]) || '').trim();
+    if (!t) return null;
+    iePushHist();
+    const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+    const fs = Math.max(12, Math.round(30 * k));
+    ctx.fillStyle = IE.color;
+    ctx.font = 'bold ' + fs + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText(t, p.x * k, p.y * k);
+    return null;
+  }, '添加');
+}
+function ieFinish() {
+  const cv = ieCanvas(); if (!cv) return;
   const src = IE.file;
   cv.toBlob(function (blob) {
-    if (!blob) blob = src;
-    const name = String((src && src.name) || 'image').replace(/\.[^.]+$/, '') + '.jpg';
-    const f = new File([blob], name, { type: 'image/jpeg' });
-    f._edited = true;
-    closeImgEditor();
-    try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
-    IE.bmp = null;
-    const r = IE.resolve; IE.resolve = null;
-    sendImage(f);
-    if (r) r();
-  }, 'image/jpeg', 0.9);
+    const f = blob ? new File([blob], 'edit.jpg', { type: 'image/jpeg' }) : src;
+    if (f) f._edited = true;
+    ieClose();
+    if (f) sendImage(f);
+  }, 'image/jpeg', 0.92);
 }
+function ieClose() {
+  $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
+  const r = IE.resolve; IE.resolve = null; if (r) r();
+}
+
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
   if (!canSendHere()) return;
@@ -2257,6 +2469,7 @@ async function fetchMsgs(conv, before) {
 async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
+  setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
@@ -6165,24 +6378,30 @@ function bindUI() {
   $('vis-backdrop').onclick = closeVis;
   $('vis-all').onclick = function () { MO.vis = null; paintVisLabel(); closeVis(); };
   $('vis-ok').onclick = function () { MO.vis = visSel.length ? visSel.slice() : null; paintVisLabel(); closeVis(); };
-  $('ie-rot').onclick = function () { IE.angle = (IE.angle + 90) % 360; paintImgEditor(); };
-  document.querySelectorAll('#imgedit-sheet .ie-f').forEach(function (b) {
-    b.onclick = function () {
-      IE.filter = b.dataset.f;
-      document.querySelectorAll('#imgedit-sheet .ie-f').forEach(function (x) { x.classList.toggle('on', x === b); });
-      paintImgEditor();
+  document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) {
+    b.onclick = function () { if (b.dataset.t === 'rot') { ieRotate(); return; } ieSetTool(b.dataset.t); };
+  });
+  document.querySelectorAll('#imgedit-sheet .ie-colors').forEach(function (box) {
+    box.onclick = function (e) {
+      const b = e.target.closest('.ie-sw'); if (!b) return;
+      IE.color = b.dataset.c; paintIeColors();
     };
   });
-  document.querySelectorAll('#imgedit-sheet .ie-c').forEach(function (b) {
-    b.onclick = function () {
-      IE.crop = b.dataset.a;
-      document.querySelectorAll('#imgedit-sheet .ie-c').forEach(function (x) { x.classList.toggle('on', x === b); });
-      paintImgEditor();
-    };
-  });
-  $('ie-cancel').onclick = cancelImgEditor;
-  $('imgedit-backdrop').onclick = cancelImgEditor;
-  $('ie-ok').onclick = finishImgEditor;
+  $('ie-sizes').onclick = function (e) {
+    const b = e.target.closest('button[data-s]'); if (!b) return;
+    IE.size = +b.dataset.s;
+    document.querySelectorAll('#ie-sizes button').forEach(function (x) { x.classList.toggle('on', x === b); });
+  };
+  $('ie-wrap').addEventListener('pointerdown', ieDown);
+  $('ie-wrap').addEventListener('pointermove', ieMove);
+  window.addEventListener('pointerup', ieUp);
+  window.addEventListener('resize', function () { if ($('imgedit-sheet').classList.contains('active')) ieLayout(); });
+  $('ie-crop-apply').onclick = ieCropApply;
+  $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
+  $('ie-undo').onclick = ieUndo;
+  $('ie-cancel').onclick = ieClose;
+  $('imgedit-backdrop').onclick = ieClose;
+  $('ie-ok').onclick = ieFinish;
   $('moment-file').onchange = function (e) { const fs = Array.from(e.target.files || []); e.target.value = ''; addMomentFiles(fs); };
   $('moment-imgs').onclick = function (e) {
     const b = e.target.closest('button[data-i]'); if (!b) return;
@@ -6368,7 +6587,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE };
 boot();
 })();
 
