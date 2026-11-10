@@ -430,6 +430,15 @@
   #gi-av, #gi-name { cursor: pointer; }
   .gi-acts button { font-size: 13px; }
   .gi-pending { font-size: 12.5px; color: var(--muted); padding: 2px 0 10px; line-height: 1.55; }
+  .gi-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--surface2); border-radius: 12px; margin: 8px 0 6px; font-size: 13px; }
+  .gi-req { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .gi-req .avatar { width: 34px; height: 34px; font-size: 14px; border-radius: 12px; }
+  .gi-rn { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gi-req button { padding: 7px 12px; border-radius: 10px; font-size: 12.5px; flex-shrink: 0; }
+  .sw { width: 44px; height: 26px; border-radius: 13px; background: var(--surface); border: 1px solid var(--line); position: relative; padding: 0; flex-shrink: 0; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .2s cubic-bezier(.3,1.4,.5,1), background .2s; }
+  .sw.on { background: color-mix(in srgb, var(--accent) 26%, var(--surface)); border-color: transparent; }
+  .sw.on::after { transform: translateX(18px); background: var(--accent); }
   .gi-acts { display: flex; gap: 8px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
   .gi-acts button { flex: 1; padding: 11px 0; border-radius: 14px; font-size: 14px; background: var(--surface2); font-weight: 600; }
   .gi-acts .gi-danger { color: #fff; background: var(--danger); }
@@ -970,7 +979,7 @@
 <div id="gi-backdrop" class="sheet-bd"></div>
 <div id="gi-sheet" class="sheet">
   <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
-  <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div></div>
+  <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div><div id="gi-approve-row" class="gi-opt" style="display:none"><span>新成员需要群主/管理员同意</span><button id="gi-approve-toggle" type="button" class="sw" aria-label="新成员需要同意"></button></div><div id="gi-requests"></div></div>
   <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-settings" type="button">群设置</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
 </div>
 <div id="moment-backdrop" class="sheet-bd"></div>
@@ -1227,6 +1236,10 @@ const SFX = (function () {
     notify() { play(t => { [659, 831, 988].forEach((f, i) => note(f, t + i * 0.1, 0.22, { type: 'triangle', vol: 0.17 })); }); },
     cancel() { play(t => note(300, t, 0.14, { to: 170, vol: 0.14 })); },
     connect() { play(t => { note(660, t, 0.14, { vol: 0.16 }); note(990, t + 0.11, 0.24, { vol: 0.15 }); }); },
+    join() { play(t => { note(784, t, 0.1, { vol: 0.13 }); note(1175, t + 0.08, 0.16, { vol: 0.11 }); }); },
+    leave() { play(t => { note(660, t, 0.12, { vol: 0.12 }); note(440, t + 0.09, 0.18, { vol: 0.1 }); }); },
+    like() { play(t => note(1320, t, 0.07, { vol: 0.07 })); },
+    approve() { play(t => { [880, 1108, 1318].forEach((f, i) => note(f, t + i * 0.08, 0.18, { type: 'triangle', vol: 0.13 })); }); },
     hangup() { play(t => { note(540, t, 0.16, { to: 300, vol: 0.17 }); note(400, t + 0.15, 0.24, { to: 220, vol: 0.14 }); }); },
     ringStart() { this.ringStop(); if (!on) return; ringOnce(); ringT = setInterval(ringOnce, 2800); },
     ringStop() { clearInterval(ringT); ringT = 0; },
@@ -1507,9 +1520,12 @@ function renderRequests() {
   badge.style.display = n ? '' : 'none'; badge.textContent = n;
   let html = '';
   if (inv.length) {
-    html += '<div class="section-title">群邀请</div>' + inv.map(i => '<div class="req-item" data-gi="1" data-id="' + esc(i.id) + '">' + avatarHTML(i.name || '群聊', '', false, i.group_id) +
-      '<div class="name"><div class="name-main">' + esc(i.name || '群聊') + '</div><div class="name-sub">' + esc(i.from_name || i.from_acc) + ' 邀请你加入</div></div>' +
-      '<div class="row-actions"><button class="btn-ok act-gi-ok">加入</button><button class="btn-danger act-gi-no">拒绝</button></div></div>').join('');
+    html += '<div class="section-title">群邀请</div>' + inv.map(i => {
+      const waiting = i.status === 'waiting';
+      return '<div class="req-item" data-gi="1" data-id="' + esc(i.id) + '">' + avatarHTML(i.name || '群聊', '', false, i.group_id) +
+        '<div class="name"><div class="name-main">' + esc(i.name || '群聊') + '</div><div class="name-sub">' + esc(i.from_name || i.from_acc) + ' 邀请你加入' + (waiting ? ' · 等待群主同意' : '') + '</div></div>' +
+        (waiting ? '' : '<div class="row-actions"><button class="btn-ok act-gi-ok">加入</button><button class="btn-danger act-gi-no">拒绝</button></div>') + '</div>';
+    }).join('');
   }
   if (!S.requests.length) {
     el.innerHTML = inv.length ? html : emptyHTML('暂时没有新的好友请求');
@@ -2935,7 +2951,12 @@ async function gcTick() {
     if (!st || !Array.isArray(st.members) || !st.members.length) { gcEnd('群语音已结束'); return; }
     if (!st.members.some(function (m) { return m.acc === ME(); })) { gcEnd('你已不在这个语音里'); return; }
     if (st.id !== cid) { gcEnd('群语音已经换了房间'); return; }
+    const before = (GC.roster || []).map(function (m) { return m.acc; });
     GC.roster = st.members;
+    if (before.length) {
+      st.members.forEach(function (m) { if (m.acc !== ME() && before.indexOf(m.acc) < 0) SFX.join(); });
+      before.forEach(function (a) { if (a !== ME() && !st.members.some(function (m) { return m.acc === a; })) SFX.leave(); });
+    }
     gcRender();
     gcSyncPeers();
   } catch (e) { logErr('gcTick', e); }
@@ -2960,6 +2981,7 @@ async function gcStart() {
   GC.meters = {}; GC.speaking = {}; GC.meters['__me'] = spkMeter(stream);
   clearInterval(GC.speakT); GC.speakT = setInterval(gcSpeakTick, 180);
   gcShow(); gcRender();
+  SFX.join();
   clearInterval(GC.t); GC.t = setInterval(gcTick, 2500);
   gcTick(); setTimeout(gcTick, 600);
 }
@@ -3595,7 +3617,7 @@ function grpErr(e) {
   if (/invalid input syntax/i.test(m)) return '群 id 格式不对';
   return m || '请重试';
 }
-function grpCacheSave() { try { LS.set('ch2grp:' + (S.uid || ''), GRP.list.map(function (x) { return { id: x.id, name: x.name, owner_acc: x.owner_acc, avatar_url: x.avatar_url || '', mute_all: !!x.mute_all }; })); } catch (e) {} }
+function grpCacheSave() { try { LS.set('ch2grp:' + (S.uid || ''), GRP.list.map(function (x) { return { id: x.id, name: x.name, owner_acc: x.owner_acc, avatar_url: x.avatar_url || '', mute_all: !!x.mute_all, join_approval: !!x.join_approval }; })); } catch (e) {} }
 async function grpLoad(force) {
   if (!sb || !S.me) return;
   if (!force && now() - GRP.loadAt < 5000) return;
@@ -3607,7 +3629,7 @@ async function grpLoad(force) {
     (r.data || []).forEach(function (x) { if (x && x.group_id && ids.indexOf(x.group_id) < 0) ids.push(x.group_id); });
     let list = [];
     if (ids.length) {
-      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all').in('id', ids);
+      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all,join_approval').in('id', ids);
       if (g.error) throw g.error;
       list = g.data || [];
       try {   // 成员数一次查出来，通讯录里的群聊也显示人数
@@ -3693,10 +3715,12 @@ function noteGroupInvite(i) {
 async function grpInviteAccept(id) {
   if (!id) return;
   try {
-    const { data, error } = await sb.rpc('accept_group_invite', { p_id: id });
-    if (error) throw error;
-    const gid = String(data || '');
+    const { data, error } = await sb.rpc('group_invite_accept', { p_id: id });
+    if (error) { if (isMissingFn(error)) throw new Error('数据库还没更新：请执行 sql/group-join-approval-v1.sql'); throw error; }
+    const r = (data && typeof data === 'object') ? data : { status: 'joined', group_id: data };
     await grpInvitesLoad(true);
+    if (r.status === 'waiting') { toast('已申请，等群主或管理员同意'); return; }
+    const gid = String(r.group_id || '');
     await grpLoad(true);
     if (gid) openConv('g:' + gid, 'g:' + gid);
     toast('已加入群聊');
@@ -3783,9 +3807,25 @@ async function grpInfo(key) {
     const p = await sb.from('group_invites').select('to_acc').eq('group_id', gid).eq('status', 'pending');
     pend = (p && p.data ? p.data : []).map(function (x) { return peerName(x.to_acc); });
   } catch (e) {}
-  openGrpInfo(k, ms, pend);
+  let reqs = [];
+  try {
+    const r = await sb.rpc('group_join_requests', { p_gid: gid });
+    if (!r.error) reqs = Array.isArray(r.data) ? r.data : [];
+  } catch (e) {}
+  let ja = null;
+  try {
+    const r = await sb.from('chat_groups').select('join_approval').eq('id', gid).maybeSingle();
+    if (r && !r.error && r.data) ja = !!r.data.join_approval;
+    const g = grpOf(k); if (g && ja != null) g.join_approval = ja;
+  } catch (e) {}
+  if (reqs.length) {
+    GRP.reqSeen = GRP.reqSeen || {};
+    if (reqs.length > (GRP.reqSeen[gid] || 0)) SFX.notify();
+    GRP.reqSeen[gid] = reqs.length;
+  }
+  openGrpInfo(k, ms, pend, false, reqs, ja);
 }
-function openGrpInfo(k, ms, pend, loading) {
+function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   raiseSheet('gi-sheet', 'gi-backdrop');
   giKey = k;
   const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
@@ -3815,6 +3855,14 @@ function openGrpInfo(k, ms, pend, loading) {
   }).join('');
   $('gi-pending').textContent = pend.length ? '邀请中：' + pend.slice(0, 30).join('、') + (pend.length > 30 ? ' 等 ' + pend.length + ' 人' : '') : '';
   $('gi-leave').textContent = owner ? '解散群聊' : '退出群聊';
+  $('gi-approve-row').style.display = canManage ? '' : 'none';
+  $('gi-approve-toggle').classList.toggle('on', joinApproval == null ? !!g.join_approval : !!joinApproval);
+  const rq = canManage ? (reqs || []) : [];
+  $('gi-requests').innerHTML = rq.length ? '<div class="section-title">待审批（' + rq.length + '）</div>' + rq.map(function (r) {
+    return '<div class="gi-req" data-id="' + esc(r.id) + '">' + avatarHTML(r.name || r.acc, '', false, r.acc) +
+      '<div class="gi-rn">' + esc(r.name || r.acc) + '</div>' +
+      '<button class="btn-ok" type="button" data-ok="1">同意</button><button class="btn-danger" type="button" data-no="1">拒绝</button></div>';
+  }).join('') : '';
   $('gi-settings').style.display = (canManage || (mine && mine.title)) ? '' : 'none';
   $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
 }
@@ -4237,6 +4285,7 @@ async function postMoment() {
 async function toggleMomentLike(id) {
   const arr = MO.likes[id] || [], liked = arr.indexOf(ME()) >= 0;
   MO.likes[id] = liked ? arr.filter(function (a) { return a !== ME(); }) : arr.concat([ME()]);
+  if (!liked) SFX.like();
   refreshMomentReact(id);
   try {
     if (liked) await sb.from('moment_likes').delete().eq('moment_id', id).eq('account_id', ME());
@@ -5792,6 +5841,29 @@ $('gi-invite').onclick = function () { const k = giKey; closeGrpInfo(); if (k) g
 $('gi-clear').onclick = function () { const k = giKey; closeGrpInfo(); if (k) confirmClear(k, false); };
 $('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) setTimeout(function () { confirmGrpLeave(k); }, 50); };
 $('gi-settings').onclick = function () { if (giKey) openGroupSettings(gidOf(giKey)); };
+$('gi-approve-toggle').onclick = async function () {
+  const k = giKey; if (!k) return;
+  const gid = gidOf(k), on = !$('gi-approve-toggle').classList.contains('on');
+  try {
+    const r = await sb.rpc('set_group_join_approval', { p_gid: gid, p_on: on });
+    if (r.error) throw r.error;
+    const g = grpOf(k); if (g) g.join_approval = on;
+    $('gi-approve-toggle').classList.toggle('on', on);
+    toast(on ? '已打开：新成员需要群主或管理员同意' : '已关闭：被邀请的人可以直接进群');
+  } catch (e) { toast('设置失败：' + grpErr(e)); }
+};
+$('gi-requests').onclick = async function (e) {
+  const row = e.target.closest('.gi-req'); if (!row || !giKey) return;
+  const ok = !!e.target.closest('[data-ok]'), no = !!e.target.closest('[data-no]');
+  if (!ok && !no) return;
+  try {
+    const r = await sb.rpc('group_invite_approve', { p_id: row.dataset.id, p_ok: ok });
+    if (r.error) throw r.error;
+    toast(ok ? '已同意，对方已进群' : '已拒绝');
+    if (ok) SFX.approve();
+    await grpInfo(giKey);
+  } catch (err) { toast('处理失败：' + grpErr(err)); }
+};
 $('gi-av').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) { groupIconGid = gid; $('group-icon-input').click(); } };
 $('gi-name').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) editGroupName(gid); };
 $('group-icon-input').onchange = function (e) { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!groupIconGid || !f) return; uploadGroupIcon(groupIconGid, f).catch(function (x) { logErr('groupIcon', x); toast('群图标上传失败：' + ((x && x.message) || '请重试')); }); };
