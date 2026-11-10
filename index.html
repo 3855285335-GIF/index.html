@@ -523,6 +523,7 @@
   .st-bar i { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
   .st-bar.warn i { background: var(--danger); }
   #chat-title { cursor: pointer; }
+  #chat-title > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #msg-menu { max-height: 86vh; overflow-y: auto; }
   #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
@@ -623,14 +624,14 @@
     padding: calc(20px + env(safe-area-inset-top)) 18px calc(20px + env(safe-area-inset-bottom)); }
   #gc-ui.active { display: flex; }
   #gc-head { text-align: center; padding: 4px 0 14px; }
-  #gc-title { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
-  #gc-sub { margin-top: 5px; font-size: 12.5px; color: rgba(244,241,255,.62); }
-  #gc-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 12px; align-content: center; }
+  #gc-title { font-size: 17px; font-weight: 700; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #gc-sub { margin-top: 5px; font-size: 12.5px; color: rgba(244,241,255,.62); padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #gc-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(140px, 32vh); gap: 12px; align-content: center; }
   #gc-grid.n2 { grid-template-columns: 1fr; }
   #gc-grid .gcp { position: relative; border-radius: 22px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.075);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; min-height: 118px; padding: 14px 8px; overflow: hidden; }
   #gc-grid .gcp.me { background: rgba(108,92,231,.16); border-color: rgba(139,124,246,.4); }
-  #gc-grid .avatar { width: 64px; height: 64px; font-size: 23px; }
+  #gc-grid .avatar { width: 84px; height: 84px; font-size: 28px; }
   #gc-grid .gcn { font-size: 14px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #gc-grid .gcm { font-size: 11.5px; color: #ffb3bd; }
   #gc-grid .gcs { font-size: 11.5px; color: rgba(244,241,255,.55); }
@@ -2898,7 +2899,7 @@ function gcRender() {
     return '<div class="gcp' + (isMe ? ' me' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(name, avatarOf(m.acc), false, m.acc) +
       '<div class="gcn">' + esc(name) + '</div>' + (m.muted ? '<div class="gcm">🔇 已静音</div>' : '') + conn + '</div>';
   }).join('');
-  const sub = $('gc-sub'); if (sub) sub.textContent = GC.roster.length + ' 人 · ' + (GC.muted ? '你已静音' : '麦克风开着') + (GC.roster.length >= GC_MAX ? ' · 已满' : '');
+  const sub = $('gc-sub'); if (sub) { const nm = grpName('g:' + GC.gid); sub.textContent = (nm && nm !== '群聊' ? nm + ' · ' : '') + GC.roster.length + ' 人 · ' + (GC.muted ? '你已静音' : '麦克风开着') + (GC.roster.length >= GC_MAX ? ' · 已满' : ''); }
   const mb = $('gc-mute'); if (mb) { mb.textContent = GC.muted ? '取消静音' : '静音'; mb.classList.toggle('off', GC.muted); }
 }
 async function gcTipPoll() {
