@@ -139,7 +139,11 @@
   .app-nav .badge { position: absolute; top: 1px; left: calc(50% + 6px); }
 
   /* ---------- 朋友圈 ---------- */
-  .mo-top { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 10px; }
+  .mo-cover { height: 132px; margin: 4px 0 10px; border-radius: 18px; background: linear-gradient(135deg, #6c5ce7, #e8508c); background-size: cover; background-position: center; position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: 14px 16px; box-shadow: var(--shadow); }
+  .mo-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.42)); pointer-events: none; }
+  .mo-cover-t { position: relative; z-index: 1; color: #fff; font-size: 22px; font-weight: 800; letter-spacing: .4px; text-shadow: 0 2px 12px rgba(0,0,0,.35); }
+  #mo-cover-btn { position: absolute; right: 12px; top: 12px; z-index: 2; background: rgba(0,0,0,.32); color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 10px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .mo-top { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; }
   .mo-title { font-size: 20px; font-weight: 800; letter-spacing: .3px; }
   .mo-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .mo-new { background: var(--brand); color: #fff; border-radius: 14px; padding: 9px 14px; font-weight: 700; flex-shrink: 0; }
@@ -166,6 +170,8 @@
   .mo-more { width: 100%; margin: 10px 0; background: var(--surface); color: var(--muted); border-radius: 14px; padding: 10px; box-shadow: var(--shadow); }
   .mo-likers { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
   .mo-likers b { color: var(--accent2); font-weight: 600; }
+  .mo-liker { color: var(--accent2); cursor: pointer; }
+  .mo-cauthor { cursor: pointer; }
   .mo-notify { background: var(--surface); border-radius: 16px; padding: 9px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
   .mo-notify-title { font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
   .mo-notice { font-size: 12.5px; line-height: 1.55; color: var(--ink); padding: 3px 0; border-top: 1px solid var(--line); }
@@ -487,9 +493,10 @@
   .badge.mute { background: #b9b4cc; box-shadow: none; }
   #as-title { white-space: pre-line; }
   /* 好友资料页 */
-  #profile-card { padding-top: 18px; }
-  .pf-top { display: flex; align-items: center; gap: 14px; padding: 4px 20px 14px; }
-  #pf-av .avatar { width: 64px; height: 64px; font-size: 26px; }
+  #profile-card { padding-top: 0; }
+  #pf-cover { height: 112px; margin: 0; background: linear-gradient(135deg, #6c5ce7, #e8508c); background-size: cover; background-position: center; pointer-events: none; }
+  .pf-top { display: flex; align-items: center; gap: 14px; padding: 0 20px 14px; margin-top: -34px; position: relative; }
+  #pf-av .avatar { width: 64px; height: 64px; font-size: 26px; border: 3px solid var(--surface); }
   .pf-names { min-width: 0; }
   #pf-name { font-size: 20px; font-weight: 700; word-break: break-all; }
   #pf-sub { font-size: 13px; color: var(--muted); line-height: 1.55; margin-top: 2px; word-break: break-all; }
@@ -764,7 +771,8 @@
       </section>
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
       <section id="tab-moments" class="tab-panel">
-        <div class="mo-top"><div><div class="mo-title">朋友圈</div><div class="mo-sub">朋友们的近况</div></div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
+        <div id="mo-cover" class="mo-cover"><div class="mo-cover-t">朋友圈</div><button id="mo-cover-btn" type="button">换封面</button></div>
+        <div class="mo-top"><div class="mo-sub">朋友们的近况</div><button id="moment-new" type="button" class="mo-new">＋ 发一条</button></div>
         <div id="moment-notify" class="mo-notify" style="display:none"></div>
         <div id="moment-list"></div>
         <button id="moment-more" type="button" class="mo-more" style="display:none">加载更多</button>
@@ -864,6 +872,7 @@
       <button id="btn-send" type="button" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5.5M6 11.5l6-6 6 6"/></svg></button>
     </div>
     <input id="file-input" type="file" accept="image/*,video/*" multiple hidden>
+    <input id="friend-bg-input" type="file" accept="image/*" hidden>
     <input id="group-icon-input" type="file" accept="image/*" hidden>
   </div>
 </div>
@@ -873,6 +882,7 @@
 <div id="act-sheet" class="sheet"><div class="menu-title" id="as-title"></div><div id="as-items"></div></div>
 <div id="pf-backdrop" class="sheet-bd"></div>
 <div id="profile-card" class="sheet">
+  <div id="pf-cover"></div>
   <div class="pf-top"><div id="pf-av"></div><div class="pf-names"><div id="pf-name"></div><div id="pf-sub"></div><div id="pf-sign"></div></div></div>
   <div class="pf-acts"><button id="pf-chat" type="button">发消息</button><button id="pf-voice" type="button">语音通话</button><button id="pf-video" type="button">视频通话</button></div>
   <button id="pf-remark" type="button" class="menu-item plain">设置备注</button>
@@ -1356,6 +1366,7 @@ function renderMe() {
   if ($('me-avatar')) $('me-avatar').innerHTML = S.me ? avatarHTML(S.me.nickname, S.me.avatar_url, false, S.me.account_id) : '';
   const sg = S.me && typeof S.me.signature === 'string' ? S.me.signature.trim() : '';
   const sgEl = $('me-sign'); if (sgEl) { sgEl.textContent = sg; sgEl.style.display = sg ? '' : 'none'; }
+  try { applyMomentCover(); } catch (e) {}
   paintPush();
 }
 function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
@@ -1479,9 +1490,9 @@ function touchConv(key, preview, t, inc) {
 async function fetchProfile(acc, force) {
   if (!sb) return;
   if (!force && S.profiles[acc]) return;
-  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature').eq('account_id', acc).maybeSingle();
+  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature,bg_url').eq('account_id', acc).maybeSingle();
   if (data) {
-    S.profiles[acc] = Object.assign({}, S.profiles[acc] || {}, data);
+    S.profiles[acc] = Object.assign({}, S.profiles[acc] || {}, data, { _at: now() });
     if (acc === ME()) S.me = S.profiles[acc];
     sched('list'); sched('contacts'); sched('title'); saveCache();
   }
@@ -1927,6 +1938,7 @@ async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  applyChatFor(key, S.peer);
   const cachedMsgs = await msgCacheGet(key);
   if (S.conv !== key) return;
   S.msgs = cachedMsgs.slice();
@@ -1954,6 +1966,7 @@ async function openConv(key, peer) {
 function closeChat() {
   recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs();
   clearInterval(GRP.chatT); GRP.chatT = 0;
+  clearInterval(GRP.muteT); GRP.muteT = 0;
   S.conv = null; S.peer = null; S.msgs = []; S.hist = false; S.typingUntil = 0; clearReply();
   document.body.classList.remove('chat-open'); $('emoji-panel').classList.remove('active'); hideSuggest(); closeMenu();
   $('btn-voice-call').style.display = ''; $('btn-video-call').style.display = '';
@@ -2820,7 +2833,7 @@ function teardown() {
   document.body.classList.remove('chat-open');
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
   S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
-  clearInterval(GRP.chatT); GRP.chatT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
+  clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
   idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
@@ -2983,6 +2996,19 @@ function applyChatBg(url) {
   document.documentElement.style.setProperty('--chat-bg', v);
   document.body.classList.toggle('has-chat-bg', !!url);
 }
+let FBG = {}, fbgUid = null;
+function fbgLoad() { if (fbgUid !== S.uid) { FBG = LS.get('ch2fbg:' + (S.uid || ''), {}) || {}; fbgUid = S.uid; } }
+function friendBgOf(acc) { fbgLoad(); return FBG[acc] || ''; }
+function applyChatFor(conv, peer) {
+  if (conv && !isGroupKey(conv) && peer) { const u = friendBgOf(peer); if (u) { applyChatBg(u); return; } }
+  applyChatBg((S.me && S.me.bg_url) || '');
+}
+function applyMomentCover() {
+  const el = $('mo-cover'); if (!el) return;
+  const u = S.me && S.me.bg_url;
+  el.style.backgroundImage = u ? 'url("' + String(u).replace(/"/g, '%22') + '")' : '';
+  el.classList.toggle('has-cover', !!u);
+}
 function hideBgUI() {
   try { ['btn-bg', 'btn-bg-clear', 'bg-input'].forEach(function (id) { const el = $(id); if (el) el.style.display = 'none'; }); } catch (e) {}
 }
@@ -2995,7 +3021,7 @@ function ensureChatBg() {
     if (r && r.error) { hideBgUI(); return; }
     const v = (r && r.data && r.data.bg_url) || '';
     if (S.me) S.me.bg_url = v;
-    applyChatBg(v);
+    applyChatFor(S.conv, S.peer); applyMomentCover();
   }).catch(hideBgUI);
 }
 async function setChatBg(file) {
@@ -3011,14 +3037,46 @@ async function setChatBg(file) {
   if (error || !data || !data.length) throw error || new Error('保存失败');
   const old = S.me.bg_url;
   S.me = Object.assign({}, S.me, { bg_url: url }); S.profiles[ME()] = S.me;
-  applyChatBg(url); saveCache(); toast('聊天背景已更新');
+  applyChatFor(S.conv, S.peer); applyMomentCover(); saveCache(); toast('聊天背景已更新');
   try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/bg_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
+}
+async function setFriendBg(file) {
+  if (!file || !/^image\//.test(file.type) || !S.peer || isGroupKey(S.conv)) { toast('请选择图片'); return; }
+  toast('正在上传专属背景…');
+  let blob = null; try { blob = await fitJpeg(file, 1280, 0.82); } catch (e) { logErr('fbg', e); }
+  if (!blob) blob = file;
+  const peer = S.peer, path = ME() + '/fbg_' + peer + '_' + now() + '.jpg';
+  const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  const old = friendBgOf(peer);
+  fbgLoad(); FBG[peer] = url; LS.set('ch2fbg:' + S.uid, FBG);
+  applyChatFor(S.conv, peer); toast('已设置专属聊天背景');
+  try {
+    const m = old && /\/chat-media\/([^?]+)/.exec(old);
+    if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/fbg_') === 0) sb.storage.from('chat-media').remove([k]); }
+  } catch (e) {}
+}
+function clearFriendBg() {
+  if (!S.peer || isGroupKey(S.conv)) return;
+  const old = friendBgOf(S.peer);
+  delete FBG[S.peer]; LS.set('ch2fbg:' + S.uid, FBG);
+  applyChatFor(S.conv, S.peer); toast('已恢复默认聊天背景');
+  try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/fbg_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
+}
+function openFriendBgMenu() {
+  if (!S.peer || isGroupKey(S.conv)) return;
+  const has = !!friendBgOf(S.peer);
+  const items = [{ label: '设置专属背景', fn: function () { const i = $('friend-bg-input'); i.value = ''; i.click(); } }];
+  if (has) items.push({ label: '恢复默认背景', danger: true, fn: clearFriendBg });
+  items.push({ label: '取消', fn: null });
+  openActs('和“' + peerName(S.peer) + '”的聊天背景', items);
 }
 async function clearChatBg() {
   const { error } = await sb.from('profiles').update({ bg_url: null }).eq('id', S.uid);
   if (error) throw error;
   S.me = Object.assign({}, S.me, { bg_url: '' }); S.profiles[ME()] = S.me;
-  applyChatBg(''); saveCache(); toast('已恢复默认背景');
+  applyChatFor(S.conv, S.peer); applyMomentCover(); saveCache(); toast('已恢复默认背景');
 }
 (function wireChatBg() {
   const b = $('btn-bg'), cl = $('btn-bg-clear'), inp = $('bg-input');
@@ -3090,9 +3148,8 @@ function searchMsgs() {
 }
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
-const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, invAt: 0, invLoaded: false };
+const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
 const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], loadAt: 0 };
-let lastMuteAt = 0;
 function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
 function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
 function grpErr(e) {
@@ -3162,7 +3219,12 @@ function grpChatMode() {
   $('btn-voice-call').style.display = gp ? 'none' : '';
   $('btn-video-call').style.display = gp ? 'none' : '';
   clearInterval(GRP.chatT); GRP.chatT = 0;
-  if (gp) GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+  clearInterval(GRP.muteT); GRP.muteT = 0;
+  if (gp) {
+    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+    refreshMyMuteState(gidOf(S.conv));
+    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 2000);
+  }
   applyMuteState();
 }
 /* ---- 群邀请（要对方同意才进群） ---- */
@@ -3549,7 +3611,6 @@ async function grpLeave(key) {
 }
 async function grpPoll() {
   if (!sb || !S.me || document.hidden) return;
-  if (S.conv && isGroupKey(S.conv) && now() - lastMuteAt > 4000) { lastMuteAt = now(); refreshMyMuteState(gidOf(S.conv)); }
   const keys = S.convs.filter(function (c) { return isGroupKey(c.convKey); }).map(function (c) { return c.convKey; }).slice(0, 50);
   if (!keys.length) return;
   keys.forEach(function (k) {
@@ -3606,7 +3667,7 @@ async function momentsLoad(reset) {
       MO.likes = likes; MO.comments = cmts;
       MO.loadAt = now();
       renderMoments();   // 先把内容画出来，头像资料慢慢补
-      const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); });
+      const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); }); (lk.data || []).forEach(function (x) { accs.add(x.account_id); });
       Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (S.me) renderMoments(); }, function () {});
     } else {
       MO.likes = likes; MO.comments = cmts; MO.loadAt = now(); renderMoments();
@@ -3625,14 +3686,14 @@ function renderMoments() {
     const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
     const like = MO.likes[m.id] || [], liked = like.indexOf(ME()) >= 0;
     const cms = MO.comments[m.id] || [];
-    const likers = like.length ? '<div class="mo-likers">♥ ' + like.slice(0, 6).map(function (a) { return esc(peerName(a)); }).join('、') + (like.length > 6 ? ' 等 ' + like.length + ' 人' : '') + '</div>' : '';
+    const likers = like.length ? '<div class="mo-likers">♥ ' + like.map(function (a) { return '<span class="mo-liker" data-acc="' + esc(a) + '">' + esc(peerName(a)) + '</span>'; }).join('、') + '</div>' : '';
     return '<div class="moment" data-id="' + esc(m.id) + '">' +
       '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
         '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtTime(m.created_at) + '</div></div>' +
         (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
       (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid +
       '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' + likers +
-      (cms.length ? '<div class="mo-comments">' + cms.map(function (c) { return '<div class="mo-comment"><b>' + esc(peerName(c.author_acc)) + '：</b>' + esc(c.body) + '</div>'; }).join('') + '</div>' : '') +
+      (cms.length ? '<div class="mo-comments">' + cms.map(function (c) { return '<div class="mo-comment"><b class="mo-cauthor" data-acc="' + esc(c.author_acc) + '">' + esc(peerName(c.author_acc)) + '：</b>' + esc(c.body) + '</div>'; }).join('') + '</div>' : '') +
       '</div>';
   }).join('');
   $('moment-more').style.display = MO.has ? '' : 'none';
@@ -4453,7 +4514,8 @@ function openProfile(acc) {
   raiseSheet('profile-card', 'pf-backdrop');
   if (!acc) return; pfAcc = acc; renderProfile();
   $('pf-backdrop').classList.add('active'); $('profile-card').classList.add('active'); pfOpenAt = now();
-  fetchProfile(acc, true).then(function () { if (pfAcc === acc) renderProfile(); }, function () {});
+  const p = S.profiles[acc];
+  if (!p || !p._at || now() - p._at > 30000) fetchProfile(acc, true).then(function () { if (pfAcc === acc) renderProfile(); }, function () {});
 }
 let pfOpenAt = 0;
 function closeProfile() { pfAcc = null; $('pf-backdrop').classList.remove('active'); $('profile-card').classList.remove('active'); }
@@ -4461,6 +4523,12 @@ function renderProfile() {
   const a = pfAcc; if (!a) return;
   const friend = S.friends.indexOf(a) >= 0, rm = remarkOf(a);
   $('pf-av').innerHTML = avatarHTML(peerName(a), avatarOf(a), isOnline(a), a);
+  const coverEl = $('pf-cover');
+  if (coverEl) {
+    const cu = S.profiles[a] && S.profiles[a].bg_url;
+    if (cu) { coverEl.style.backgroundImage = 'url("' + String(cu).replace(/"/g, '%22') + '")'; coverEl.style.background = 'url("' + String(cu).replace(/"/g, '%22') + '") center/cover no-repeat'; }
+    else { coverEl.style.backgroundImage = ''; const h = hueOf(a); coverEl.style.background = 'linear-gradient(135deg,hsl(' + h + ',68%,62%),hsl(' + ((h + 55) % 360) + ',70%,52%))'; }
+  }
   $('pf-name').textContent = peerName(a);
   $('pf-sub').innerHTML = (rm ? '<div>昵称：' + esc(nickOf(a)) + '</div>' : '') + '<div>账号：@' + esc(a) + '</div><div class="pf-on' + (isOnline(a) ? ' on' : '') + '">' + (isOnline(a) ? '在线' : '离线') + '</div>';
   const sg = (S.profiles[a] && typeof S.profiles[a].signature === 'string') ? S.profiles[a].signature.trim() : '';
@@ -5055,6 +5123,7 @@ function bindUI() {
   $('btn-nick').onclick = editNick; $('btn-pass').onclick = editPass;
   $('btn-avatar').onclick = () => $('avatar-input').click();
   $('avatar-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; setAvatar(f).catch(x => { logErr('avatar', x); toast('头像上传失败：' + ((x && x.message) || '请重试')); }); };
+  $('friend-bg-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setFriendBg(f).catch(x => { logErr('fbg', x); toast('专属背景上传失败：' + ((x && x.message) || '请重试')); }); };
   $('fs-ok').onclick = () => { if (fsOk) fsOk(); }; $('fs-cancel').onclick = closeForm; $('form-backdrop').onclick = closeForm;
   $('form-sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && fsOk && !$('fs-ok').disabled) { e.preventDefault(); fsOk(); } });
   $('as-items').onclick = e => { const b = e.target.closest('button[data-i]'); if (!b) return; const it = actItems[+b.dataset.i]; closeActs(); if (it && it.fn) it.fn(); };
@@ -5076,7 +5145,7 @@ function bindUI() {
       ]);
       return;
     }
-    openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
+    openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
   };
   $('cs-close').onclick = closeSearch;
   $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
@@ -5176,6 +5245,7 @@ function bindUI() {
   $('btn-theme').onclick = cycleTheme;
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;
+  $('mo-cover-btn').onclick = function () { $('bg-input').click(); };
   $('moment-cancel').onclick = closeMomentCompose;
   $('moment-backdrop').onclick = closeMomentCompose;
   $('moment-post').onclick = postMoment;
@@ -5191,6 +5261,7 @@ function bindUI() {
   $('moment-list').onclick = function (e) {
     const card = e.target.closest('.moment'); if (!card) return;
     const id = card.dataset.id;
+    const lk = e.target.closest('.mo-liker, .mo-cauthor'); if (lk && lk.dataset.acc) { openProfile(lk.dataset.acc); return; }
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
