@@ -239,6 +239,13 @@
   .btn-ok { background: var(--ok); color: #fff; }
   .btn-soft { background: var(--surface2); color: var(--ink); }
   .section-title { font-size: 12px; color: var(--muted); letter-spacing: 1px; padding: 6px 6px 8px; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px 4px; }
+  .sec-head .section-title { padding: 0 4px 0 6px; }
+  .sec-act { background: none; color: var(--accent); font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 10px; }
+  .sec-act:active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .sec-count { font-size: 12px; color: var(--muted); padding-right: 8px; }
+  .friend-item .row-actions button, .req-item .row-actions button { padding: 7px 13px; border-radius: 11px; font-size: 12.5px; }
+  .friend-item .row-actions .btn-primary { box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 32%, transparent); }
   .empty { padding: 46px 20px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.7; }
   .empty svg { width: 84px; height: 84px; margin: 0 auto 10px; display: block; opacity: .9; }
   .me-box { padding: 6px 2px 20px; }
@@ -313,6 +320,34 @@
   .bubble.call { display: flex; align-items: center; gap: 8px; font-size: 14px; }
   .bubble.recalled, .msg.mine .bubble.recalled { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--muted); font-size: 13px; padding: 5px 12px; box-shadow: none; border-radius: 14px; }
   .msg-time { font-size: 11px; color: var(--muted); padding: 0 4px; }
+  .day-sep { display: flex; justify-content: center; margin: 4px 0 2px; }
+  .day-sep span { font-size: 11.5px; color: var(--muted); background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 3px 10px; border-radius: 10px; }
+  .mm-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 2px 12px 12px; }
+  .mm-q { background: var(--surface2); color: var(--ink); border-radius: 14px; padding: 11px 4px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .mm-q:active { background: color-mix(in srgb, var(--accent) 14%, var(--surface2)); }
+  .mm-q .mm-ic { font-size: 18px; line-height: 1; }
+  .mm-list { border-top: 1px solid var(--line); }
+  .mm-cancel { margin: 6px 10px 4px; background: var(--surface2); border-radius: 13px; color: var(--muted); }
+  #grp-notice { display: none; padding: 7px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink); cursor: pointer;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border-top: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #grp-notice.show { display: block; }
+  #grp-notice b { color: var(--accent); margin-right: 4px; }
+  .gi-notice { margin: 2px 0 10px; padding: 10px 12px; background: var(--surface2); border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .gi-notice .gi-note-t { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+  .gi-notice .gi-note-t button { background: none; color: var(--accent); font-size: 12px; padding: 2px 6px; }
+  .gi-notice .gi-note-x { color: var(--ink); }
+  .at { color: var(--accent); font-weight: 600; }
+  .msg.mine .at { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
+  .bubble.at-me { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent2) 55%, transparent), var(--shadow); }
+  #mention-pop { position: fixed; left: 50%; transform: translateX(-50%); width: min(520px, calc(100vw - 20px)); bottom: calc(84px + env(safe-area-inset-bottom));
+    max-height: 40vh; overflow-y: auto; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); display: none; z-index: 45; padding: 6px; }
+  #mention-pop.show { display: block; }
+  #mention-pop .mp-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 12px; font-size: 14px; width: 100%; background: none; color: var(--ink); text-align: left; }
+  #mention-pop .mp-item:active { background: var(--surface2); }
+  #mention-pop .avatar { width: 30px; height: 30px; font-size: 13px; border-radius: 10px; flex-shrink: 0; }
+  #mention-pop .mp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #mention-pop .mp-empty { padding: 12px 10px; font-size: 13px; color: var(--muted); }
   .st { flex-shrink: 0; }
   .st.sending { width: 13px; height: 13px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
   .st.failed { width: 20px; height: 20px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -431,6 +466,10 @@
   .gi-acts button { font-size: 13px; }
   .gi-pending { font-size: 12.5px; color: var(--muted); padding: 2px 0 10px; line-height: 1.55; }
   .gi-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--surface2); border-radius: 12px; margin: 8px 0 6px; font-size: 13px; }
+  .gi-search { padding: 0 0 8px; }
+  .gi-search input { width: 100%; height: 36px; padding: 6px 12px; border-radius: 12px; background: var(--surface2); border: 1px solid transparent; font-size: 14px; }
+  .gi-search input:focus { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .gi-empty { padding: 14px 4px; font-size: 13px; color: var(--muted); }
   .gi-req { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); }
   .gi-req .avatar { width: 34px; height: 34px; font-size: 14px; border-radius: 12px; }
   .gi-rn { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -843,10 +882,9 @@
           <button id="search-btn" type="button">搜索</button>
         </div>
         <div id="search-results" class="list-card" style="margin-bottom:12px"></div>
-        <div class="btns" style="margin:12px 16px 4px"><button id="btn-groups" type="button">👥 新建群聊</button></div>
-<div class="section-title">我的群聊</div>
+        <div class="sec-head"><span class="section-title">我的群聊</span><button id="btn-groups" class="sec-act" type="button">＋ 新建</button></div>
         <div id="grp-contacts" class="list-card"></div>
-<div class="section-title">我的好友</div>
+        <div class="sec-head"><span class="section-title">我的好友</span><span class="sec-count" id="friend-count"></span></div>
         <div id="friend-list" class="list-card"></div>
       </section>
       <section id="tab-requests" class="tab-panel"><div id="request-list" class="list-card"></div></section>
@@ -943,8 +981,10 @@
     <input id="doc-input" type="file" multiple hidden>
     <div id="reply-bar"><div id="reply-text"></div><button id="reply-x" type="button" aria-label="取消回复">×</button></div>
     <div id="chat-mute-tip"></div>
+    <div id="grp-notice"></div>
     <div id="gc-tip"></div>
-    <div id="chat-input-bar">
+    <div id="mention-pop"></div>
+<div id="chat-input-bar">
       <button id="btn-emoji" type="button" class="icon-btn" title="表情"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2c.9 1.3 2.1 2 3.5 2s2.6-.7 3.5-2"/><path d="M9 9.8h.01M15 9.8h.01" stroke-width="2.6"/></svg></button>
       <button id="btn-img" type="button" class="icon-btn" title="发送图片"><svg class="ic" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/></svg></button>
       <button id="btn-audio-toggle" type="button" class="icon-btn" title="切换语音"><svg class="ic i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg><svg class="ic i-kbd" viewBox="0 0 24 24"><rect x="3" y="6.5" width="18" height="11" rx="3"/><path d="M7 10.5h.01M10.5 10.5h.01M14 10.5h.01M17 10.5h.01M8 14h8"/></svg></button>
@@ -979,7 +1019,7 @@
 <div id="gi-backdrop" class="sheet-bd"></div>
 <div id="gi-sheet" class="sheet">
   <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
-  <div class="gi-body"><div class="section-title">群成员</div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div><div id="gi-approve-row" class="gi-opt" style="display:none"><span>新成员需要群主/管理员同意</span><button id="gi-approve-toggle" type="button" class="sw" aria-label="新成员需要同意"></button></div><div id="gi-requests"></div></div>
+  <div class="gi-body"><div id="gi-notice"></div><div class="section-title">群成员</div><div class="gi-search"><input id="gi-search" type="search" placeholder="搜索成员（名字 / 账号）" autocomplete="off"></div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div><div id="gi-approve-row" class="gi-opt" style="display:none"><span>新成员需要群主/管理员同意</span><button id="gi-approve-toggle" type="button" class="sw" aria-label="新成员需要同意"></button></div><div id="gi-requests"></div></div>
   <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-settings" type="button">群设置</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
 </div>
 <div id="moment-backdrop" class="sheet-bd"></div>
@@ -997,14 +1037,19 @@
 <div id="multi-bar"><span id="multi-count">已选 0 条</span><button id="multi-fwd" type="button">转发</button><button id="multi-del" type="button">删除</button><button id="multi-cancel" type="button">取消</button></div>
 <div id="msg-menu">
   <div class="menu-title" id="msg-menu-title">消息</div>
-  <button id="msg-menu-reply" type="button" class="menu-item plain">回复</button>
-  <button id="msg-menu-copy" type="button" class="menu-item plain">复制</button>
-  <button id="msg-menu-fwd" type="button" class="menu-item plain">转发</button>
-<button id="msg-menu-multi" type="button" class="menu-item plain">多选</button>
-  <button id="msg-menu-stk" type="button" class="menu-item plain">添加到表情</button>
-  <button id="msg-menu-save" type="button" class="menu-item plain">保存到手机</button>
-  <button id="msg-menu-recall" type="button" class="menu-item">撤回</button>
-  <button id="msg-menu-del" type="button" class="menu-item">删除（仅自己）</button>
+  <div class="mm-quick">
+    <button id="msg-menu-reply" type="button" class="mm-q"><span class="mm-ic">↩️</span>回复</button>
+    <button id="msg-menu-copy" type="button" class="mm-q"><span class="mm-ic">📋</span>复制</button>
+    <button id="msg-menu-fwd" type="button" class="mm-q"><span class="mm-ic">➡️</span>转发</button>
+    <button id="msg-menu-multi" type="button" class="mm-q"><span class="mm-ic">☑️</span>多选</button>
+  </div>
+  <div class="mm-list">
+    <button id="msg-menu-stk" type="button" class="menu-item plain">⭐ 添加到表情</button>
+    <button id="msg-menu-save" type="button" class="menu-item plain">💾 保存到手机</button>
+    <button id="msg-menu-recall" type="button" class="menu-item">↩️ 撤回</button>
+    <button id="msg-menu-del" type="button" class="menu-item">🗑 删除（仅自己）</button>
+  </div>
+  <button id="msg-menu-cancel" type="button" class="menu-item plain mm-cancel">取消</button>
 </div>
 <div id="record-overlay"><div class="rec-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div id="record-text">手指上滑，取消发送</div></div>
 <div id="lightbox"><img id="lightbox-img" alt=""><button id="lb-prev" type="button" aria-label="上一张">‹</button><button id="lb-next" type="button" aria-label="下一张">›</button><button id="lb-save" type="button">保存</button><div id="lb-count"></div></div>
@@ -1118,7 +1163,7 @@ const convKeyOf = (a, b) => [a, b].sort().join('::');
 const isGroupKey = k => typeof k === 'string' && k.indexOf('g:') === 0;   // 群会话：g:<群id>
 const gidOf = k => isGroupKey(k) ? k.slice(2) : '';
 const peerOf = (k, me) => { if (isGroupKey(k)) return k; const p = k.split('::'); return p[0] === me ? p[1] : p[0]; };   // 群不按冒号拆
-const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at });
+const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null });
 const SEP = '\u2063';
 function encQ(q, text) { return SEP + 'Q' + q.id + SEP + String(q.snip || '').replace(/[\u2063\r\n]+/g, ' ').slice(0, 40) + SEP + text; }
 function parseQ(body) {
@@ -1498,6 +1543,7 @@ function renderList() {
 }
 function renderContacts() {
   const el = $('friend-list');
+  const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
   else el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(peerName(a), avatarOf(a), isOnline(a), a) +
     '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
@@ -1679,7 +1725,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + '">' + qh + linkify(pq.text) + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + '</div>'; }
   }
   const st = m._st === 'sending' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
@@ -1696,9 +1742,25 @@ function msgHTML(m) {
     (mine ? '' : avatarHTML(peerName(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
     '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
 }
+function dayLabel(t) {
+  const d = new Date(t), n = new Date();
+  if (isNaN(d.getTime())) return '';
+  if (d.toDateString() === n.toDateString()) return '今天';
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天';
+  if (d.getFullYear() === n.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
 function chatRender(stick) {
   const b = $('chat-messages');
-  const vis = S.msgs.filter(m => !isHidden(m)); b.innerHTML = vis.length ? vis.map(msgHTML).join('') : '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>';
+  const vis = S.msgs.filter(m => !isHidden(m));
+  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; return; }
+  let prevDay = '';
+  b.innerHTML = vis.map(function (m) {
+    const day = new Date(m.created_at).toDateString();
+    let sep = '';
+    if (day !== prevDay) { prevDay = day; sep = '<div class="day-sep"><span>' + dayLabel(m.created_at) + '</span></div>'; }
+    return sep + msgHTML(m);
+  }).join('');
   if (stick) b.scrollTop = b.scrollHeight;
 }
 function chatAppend(m, force) {
@@ -1836,7 +1898,7 @@ async function deliver(m, silent) {
     const fastFirst = !gp && S.token && m.type !== 'call' && (S.v6 === true || !/^(sticker|video|file)$/.test(m.type));
     const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
     if (fastFirst) fast();
-    const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur };
+    const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null };
     const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
@@ -1856,6 +1918,53 @@ async function deliver(m, silent) {
     if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
   }
 }
+/* ---- @某人 ---- */
+let pendingMentions = [];
+let MENT = { open: false, start: -1 };
+function takeMentions(body) {
+  const t = String(body || '');
+  const list = pendingMentions.filter(function (x) { return t.indexOf('@' + x.name) >= 0; });
+  pendingMentions = [];
+  const seen = {};
+  return list.filter(function (x) { if (seen[x.acc]) return false; seen[x.acc] = 1; return true; });
+}
+function closeMention() { MENT.open = false; MENT.start = -1; const el = $('mention-pop'); if (el) el.classList.remove('show'); }
+function mentionMembers() {
+  const gid = S.conv && isGroupKey(S.conv) ? gidOf(S.conv) : '';
+  if (!gid) return [];
+  return (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); })
+    .map(function (m) { return { acc: m.account_id, name: peerName(m.account_id) }; });
+}
+function openMention(q) {
+  const el = $('mention-pop'); if (!el) return;
+  const items = mentionMembers().filter(function (x) { return !q || String(x.name).toLowerCase().indexOf(String(q).toLowerCase()) >= 0; });
+  el.innerHTML = items.length ? items.slice(0, 30).map(function (x) {
+    return '<button type="button" class="mp-item" data-acc="' + esc(x.acc) + '" data-name="' + esc(x.name) + '">' + avatarHTML(x.name, avatarOf(x.acc), false, x.acc) + '<span class="mp-name">' + esc(x.name) + '</span></button>';
+  }).join('') : '<div class="mp-empty">没有匹配的成员</div>';
+  el.classList.add('show');
+  MENT.open = true;
+}
+function mentionInput() {
+  const inp = $('chat-input'); if (!inp) return;
+  if (!isGroupKey(S.conv)) { closeMention(); return; }
+  const v = inp.value, pos = inp.selectionStart == null ? v.length : inp.selectionStart;
+  const m = /@([^\s@]{0,12})$/.exec(v.slice(0, pos));
+  if (!m) { closeMention(); return; }
+  MENT.start = pos - m[0].length;
+  const gid = gidOf(S.conv);
+  if (!(GRP.members[gid] || []).length) { grpMembers(gid).catch(function () {}); }
+  openMention(m[1]);
+}
+function pickMention(acc, name) {
+  const inp = $('chat-input'); if (!inp) return;
+  const v = inp.value, pos = inp.selectionStart == null ? v.length : inp.selectionStart;
+  const start = MENT.start >= 0 ? MENT.start : pos;
+  inp.value = v.slice(0, start) + '@' + name + ' ' + v.slice(pos);
+  const np = start + name.length + 2;
+  try { inp.setSelectionRange(np, np); } catch (e) {}
+  pendingMentions.push({ acc: acc, name: name });
+  closeMention(); try { inp.focus(); } catch (e) {}
+}
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
@@ -1865,7 +1974,9 @@ function sendText() {
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
-  addLocal(newMsg('text', body));
+  const men = takeMentions(body);
+  addLocal(newMsg('text', body, null, men.length ? { mentions: men } : null));
+  closeMention();
 }
 function setReply(m) {
   S.reply = { id: m.id, snip: previewOf(m).slice(0, 40) };
@@ -2034,7 +2145,7 @@ async function fetchMsgs(conv, before) {
 async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
-  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
@@ -2042,6 +2153,7 @@ async function openConv(key, peer) {
   $('emoji-panel').classList.remove('active'); hideSuggest();
   grpChatMode();
   renderChatTitle();
+  renderGrpNotice();
   const mem = MSG.mem.get(msgKey(key));
   if (mem && mem.length) { S.msgs = mem.slice(); S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); }); chatRender(true); }
   else $('chat-messages').innerHTML = '<div class="empty">正在打开…</div>';
@@ -3629,7 +3741,7 @@ async function grpLoad(force) {
     (r.data || []).forEach(function (x) { if (x && x.group_id && ids.indexOf(x.group_id) < 0) ids.push(x.group_id); });
     let list = [];
     if (ids.length) {
-      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all,join_approval').in('id', ids);
+      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all,join_approval,notice,notice_at').in('id', ids);
       if (g.error) throw g.error;
       list = g.data || [];
       try {   // 成员数一次查出来，通讯录里的群聊也显示人数
@@ -3648,7 +3760,7 @@ async function grpLoad(force) {
     });
     sched('list');
     sched('contacts');
-    if (S.conv && isGroupKey(S.conv)) { renderChatTitle(); grpOpenMeta(S.conv); }
+    if (S.conv && isGroupKey(S.conv)) { renderChatTitle(); renderGrpNotice(); grpOpenMeta(S.conv); }
   } catch (e) { logErr('grpLoad', e); }
 }
 async function grpMembers(gid, force) {
@@ -3671,6 +3783,28 @@ async function grpMembers(gid, force) {
 function grpOpenMeta(key) {
   const gid = gidOf(key); if (!gid) return;
   grpMembers(gid).then(function () { if (S.conv === key) renderChatTitle(); }, function (e) { logErr('grpMeta', e); });
+}
+function renderGrpNotice() {
+  const el = $('grp-notice'); if (!el) return;
+  const g = (S.conv && isGroupKey(S.conv)) ? grpOf(S.conv) : null;
+  const t = g && g.notice ? String(g.notice).trim() : '';
+  el.classList.toggle('show', !!t);
+  if (!t) { el.innerHTML = ''; el.onclick = null; return; }
+  el.innerHTML = '<b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 90));
+  el.onclick = function () { openActs('群公告', [{ label: t, fn: null }, { label: '关闭', fn: null }]); };
+}
+function editGroupNotice(gid) {
+  const g = GRP.list.find(function (x) { return x.id === gid; }) || {};
+  openForm('群公告', [{ ph: '最多 300 字，留空就是删除', max: 300, val: g.notice || '' }], async function (vals) {
+    const v = String((vals && vals[0]) || '').trim();
+    const r = await sb.rpc('set_group_notice', { p_gid: gid, p_text: v });
+    if (r.error) return '保存失败：' + grpErr(r.error);
+    g.notice = v || null; g.notice_at = v ? new Date().toISOString() : null;
+    grpCacheSave(); renderGrpNotice();
+    try { await grpInfo('g:' + gid); } catch (e) {}
+    toast(v ? '群公告已更新' : '群公告已删除');
+    return null;
+  }, '保存');
 }
 function grpChatMode() {
   const gp = isGroupKey(S.conv);
@@ -3843,20 +3977,16 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
     const d = rank(a) - rank(b); if (d) return d;
     return String(peerName(a.account_id)).localeCompare(String(peerName(b.account_id)), 'zh');
   });
-  $('gi-members').innerHTML = list.map(function (m) {
-    const acc = m.account_id, me = acc === ME();
-    const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
-    const badge = me ? (role ? role + ' · 我' : '我') : role;
-    const title = (m.title && m.title_on) ? '<div class="gi-title">' + esc(m.title) + '</div>' : '';
-    const muted = (m.muted_until && Date.parse(m.muted_until) > now()) ? '<div class="gi-muted">禁言中</div>' : '';
-    return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
-      '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' + title + muted +
-      (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
-  }).join('');
+  giMembers = list;
+  const gs = $('gi-search'); if (gs) gs.value = '';
+  renderGiMembers('');
   $('gi-pending').textContent = pend.length ? '邀请中：' + pend.slice(0, 30).join('、') + (pend.length > 30 ? ' 等 ' + pend.length + ' 人' : '') : '';
   $('gi-leave').textContent = owner ? '解散群聊' : '退出群聊';
   $('gi-approve-row').style.display = canManage ? '' : 'none';
   $('gi-approve-toggle').classList.toggle('on', joinApproval == null ? !!g.join_approval : !!joinApproval);
+  const nt = (g.notice || '').trim();
+  $('gi-notice').innerHTML = '<div class="gi-note-t"><span>群公告</span>' + (canManage ? '<button type="button" id="gi-note-edit">' + (nt ? '修改' : '发布') + '</button>' : '') + '</div>' +
+    '<div class="gi-note-x"' + (nt ? '' : ' style="color:var(--muted)"') + '>' + (nt ? esc(nt) : '还没有群公告') + '</div>';
   const rq = canManage ? (reqs || []) : [];
   $('gi-requests').innerHTML = rq.length ? '<div class="section-title">待审批（' + rq.length + '）</div>' + rq.map(function (r) {
     return '<div class="gi-req" data-id="' + esc(r.id) + '">' + avatarHTML(r.name || r.acc, '', false, r.acc) +
@@ -3865,6 +3995,25 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   }).join('') : '';
   $('gi-settings').style.display = (canManage || (mine && mine.title)) ? '' : 'none';
   $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
+}
+let giMembers = [];
+function giMemberHTML(m) {
+  const acc = m.account_id, isMe = acc === ME();
+  const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
+  const badge = isMe ? (role ? role + ' · 我' : '我') : role;
+  const title = (m.title && m.title_on) ? '<div class="gi-title">' + esc(m.title) + '</div>' : '';
+  const muted = (m.muted_until && Date.parse(m.muted_until) > now()) ? '<div class="gi-muted">禁言中</div>' : '';
+  return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
+    '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' + title + muted +
+    (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
+}
+function renderGiMembers(q) {
+  const el = $('gi-members'); if (!el) return;
+  const s = String(q || '').trim().toLowerCase();
+  const list = !s ? giMembers : giMembers.filter(function (m) {
+    return String(peerName(m.account_id)).toLowerCase().indexOf(s) >= 0 || String(m.account_id).toLowerCase().indexOf(s) >= 0;
+  });
+  el.innerHTML = list.length ? list.map(giMemberHTML).join('') : '<div class="gi-empty">没有匹配的成员</div>';
 }
 async function grpKick(gid, acc) {
   try {
@@ -4998,6 +5147,21 @@ function linkify(t) {
   });
   return out + esc(t.slice(last));
 }
+function mentionsOf(m) {
+  let a = m && m.mentions;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
+  return Array.isArray(a) ? a.filter(function (x) { return x && x.acc && x.name; }) : [];
+}
+function isAtMe(m) { return mentionsOf(m).some(function (x) { return x.acc === ME(); }); }
+function mentionify(text, mentions) {
+  let h = linkify(text);
+  (Array.isArray(mentions) ? mentions : []).forEach(function (x) {
+    if (!x || !x.name) return;
+    const tok = esc('@' + x.name);
+    h = h.split(tok).join('<span class="at">' + tok + '</span>');
+  });
+  return h;
+}
 
 /* ================= 好友备注 / 好友资料 / 上传进度 / 存储提醒 / 导出聊天记录 ================= */
 /* ---- 好友备注：存在数据库（换手机也在）；还没运行 setup-v7.sql 时先存在这台手机上，运行后自动同步上去 ---- */
@@ -5695,6 +5859,7 @@ function bindUI() {
   $('msg-menu-backdrop').onclick = () => { if (now() - menuOpenAt > 350) closeMenu(); };
   $('msg-menu-recall').onclick = doRecall;
   $('msg-menu-reply').onclick = () => menuAction('reply'); $('msg-menu-copy').onclick = () => menuAction('copy'); $('msg-menu-del').onclick = () => menuAction('del');
+  $('msg-menu-cancel').onclick = closeMenu;
   $('msg-menu-fwd').onclick = () => menuAction('fwd'); $('msg-menu-stk').onclick = () => menuAction('stk'); $('msg-menu-save').onclick = () => menuAction('save');
   $('reply-x').onclick = clearReply;
 
@@ -5706,7 +5871,9 @@ function bindUI() {
   sendBtn.addEventListener('click', e => { e.preventDefault(); sendText(); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } });
   input.addEventListener('focus', () => $('emoji-panel').classList.remove('active'));
-  input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); });
+  input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); mentionInput(); });
+  $('mention-pop').onclick = function (e) { const b = e.target.closest('.mp-item'); if (!b) return; pickMention(b.dataset.acc, b.dataset.name); };
+  input.addEventListener('blur', function () { setTimeout(closeMention, 150); });
   let audioMode = false;
   $('btn-audio-toggle').onclick = () => {
     audioMode = !audioMode; input.style.display = audioMode ? 'none' : 'block'; $('btn-audio').style.display = audioMode ? 'block' : 'none';
@@ -5852,6 +6019,8 @@ $('gi-approve-toggle').onclick = async function () {
     toast(on ? '已打开：新成员需要群主或管理员同意' : '已关闭：被邀请的人可以直接进群');
   } catch (e) { toast('设置失败：' + grpErr(e)); }
 };
+$('gi-notice').onclick = function (e) { const b = e.target.closest('#gi-note-edit'); if (!b || !giKey) return; editGroupNotice(gidOf(giKey)); };
+$('gi-search').addEventListener('input', function () { renderGiMembers(this.value); });
 $('gi-requests').onclick = async function (e) {
   const row = e.target.closest('.gi-req'); if (!row || !giKey) return;
   const ok = !!e.target.closest('[data-ok]'), no = !!e.target.closest('[data-no]');
