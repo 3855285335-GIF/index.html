@@ -241,6 +241,10 @@
 
   /* ---------- 聊天页 ---------- */
   .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); background: var(--bg); background-image: var(--chat-bg, none); background-size: cover; background-position: center; background-repeat: no-repeat; display: none; flex-direction: column; z-index: 50; }
+  /* 键盘弹出动画的一瞬间，聊天页会先缩、键盘还没盖上来；用一块纯背景垫住，避免露出下面的会话列表 */
+  #chat-underlay { display: none; position: fixed; inset: 0; z-index: 49; background: var(--bg); background-image: var(--doodle); background-size: 180px 180px; pointer-events: none; }
+  body.chat-open #chat-underlay { display: block; }
+  @media (min-width: 768px) and (hover: hover) and (pointer: fine) { #chat-underlay { display: none !important; } }
   body.chat-open .chat-view { display: flex; animation: fadein .18s ease; }
   .chat-view > header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; padding-top: calc(8px + env(safe-area-inset-top)); background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid var(--line); flex-shrink: 0; z-index: 2; }
   body.kb .chat-view > header { padding-top: 8px; }
@@ -837,6 +841,7 @@
     </nav>
   </div>
 
+  <div id="chat-underlay"></div>
   <div id="chat-view" class="chat-view">
     <header>
       <button id="chat-back" type="button" class="icon-btn"><svg class="ic" viewBox="0 0 24 24" style="width:26px;height:26px"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></button>
