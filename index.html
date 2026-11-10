@@ -823,6 +823,7 @@
             <button id="btn-pass" type="button">修改密码</button>
             <input id="avatar-input" type="file" accept="image/*" hidden>
             <input id="bg-input" type="file" accept="image/*" hidden>
+            <input id="cover-input" type="file" accept="image/*" hidden>
           </div>
         </div>
       </section>
@@ -1490,7 +1491,7 @@ function touchConv(key, preview, t, inc) {
 async function fetchProfile(acc, force) {
   if (!sb) return;
   if (!force && S.profiles[acc]) return;
-  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature,bg_url').eq('account_id', acc).maybeSingle();
+  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature,bg_url,cover_url').eq('account_id', acc).maybeSingle();
   if (data) {
     S.profiles[acc] = Object.assign({}, S.profiles[acc] || {}, data, { _at: now() });
     if (acc === ME()) S.me = S.profiles[acc];
@@ -1939,19 +1940,24 @@ async function openConv(key, peer) {
   recAbort();
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   applyChatFor(key, S.peer);
-  const cachedMsgs = await msgCacheGet(key);
-  if (S.conv !== key) return;
-  S.msgs = cachedMsgs.slice();
-  S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
+  S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
   if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
   $('emoji-panel').classList.remove('active'); hideSuggest();
   grpChatMode();
-  renderChatTitle(); chatRender(true);          // 先用缓存秒开
+  renderChatTitle();
+  const mem = MSG.mem.get(msgKey(key));
+  if (mem && mem.length) { S.msgs = mem.slice(); S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); }); chatRender(true); }
+  else $('chat-messages').innerHTML = '<div class="empty">正在打开…</div>';
   markReadSoon(key); sendReadAck(key, true);
   if (S.token && !isGroupKey(key)) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
   { const pa = S.peer; closeNotes(t => t === 'm:' + pa || t === 'c:' + pa || t === pa); if (nbCur && nbCur.acc === pa) hideNBar(); }
   if (isGroupKey(key)) { grpOpenMeta(key); refreshMyMuteState(gidOf(key)); }
+  const cachedMsgs = await msgCacheGet(key);
+  if (S.conv !== key) return;
+  S.msgs = cachedMsgs.slice();
+  S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
+  chatRender(true);                                // 缓存先显示，网络结果再补
   try {
     const rows = await fetchMsgs(key);
     if (S.conv !== key) return;
@@ -2862,6 +2868,7 @@ async function start(user) {
   startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
   setTimeout(setupPresence, 1200);
   setTimeout(momentNotifyCheck, 3000);
+  setTimeout(loadFriendBgs, 1200);
 }
 async function onAuth(ev, session) {
   if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
@@ -3005,9 +3012,20 @@ function applyChatFor(conv, peer) {
 }
 function applyMomentCover() {
   const el = $('mo-cover'); if (!el) return;
-  const u = S.me && S.me.bg_url;
+  const u = S.me && (S.me.cover_url || S.me.bg_url);
   el.style.backgroundImage = u ? 'url("' + String(u).replace(/"/g, '%22') + '")' : '';
   el.classList.toggle('has-cover', !!u);
+}
+async function loadFriendBgs() {
+  if (!sb || !S.me) return;
+  try {
+    const { data, error } = await sb.from('chat_backgrounds').select('peer_acc,url').eq('owner_acc', ME());
+    if (error) return;
+    fbgLoad();
+    (data || []).forEach(function (x) { if (x && x.peer_acc && x.url) FBG[x.peer_acc] = x.url; });
+    LS.set('ch2fbg:' + S.uid, FBG);
+    if (S.conv && !isGroupKey(S.conv)) applyChatFor(S.conv, S.peer);
+  } catch (e) { logErr('loadFbg', e); }
 }
 function hideBgUI() {
   try { ['btn-bg', 'btn-bg-clear', 'bg-input'].forEach(function (id) { const el = $(id); if (el) el.style.display = 'none'; }); } catch (e) {}
@@ -3040,6 +3058,22 @@ async function setChatBg(file) {
   applyChatFor(S.conv, S.peer); applyMomentCover(); saveCache(); toast('聊天背景已更新');
   try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/bg_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
 }
+async function setPersonalCover(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('请选择图片'); return; }
+  toast('正在上传封面…');
+  let blob = null; try { blob = await fitJpeg(file, 1600, 0.85); } catch (e) { logErr('cover', e); }
+  if (!blob) blob = file;
+  const path = ME() + '/cover_' + now() + '.jpg';
+  const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  const { data, error } = await sb.from('profiles').update({ cover_url: url }).eq('id', S.uid).select('id');
+  if (error || !data || !data.length) throw error || new Error('保存失败');
+  const old = S.me.cover_url;
+  S.me = Object.assign({}, S.me, { cover_url: url }); S.profiles[ME()] = S.me;
+  applyMomentCover(); saveCache(); toast('封面已更新');
+  try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/cover_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
+}
 async function setFriendBg(file) {
   if (!file || !/^image\//.test(file.type) || !S.peer || isGroupKey(S.conv)) { toast('请选择图片'); return; }
   toast('正在上传专属背景…');
@@ -3052,6 +3086,7 @@ async function setFriendBg(file) {
   const old = friendBgOf(peer);
   fbgLoad(); FBG[peer] = url; LS.set('ch2fbg:' + S.uid, FBG);
   applyChatFor(S.conv, peer); toast('已设置专属聊天背景');
+  sb.from('chat_backgrounds').upsert({ owner_acc: ME(), peer_acc: peer, url: url, updated_at: new Date().toISOString() }, { onConflict: 'owner_acc,peer_acc' }).then(function (r) { if (r && r.error) logErr('fbgSync', r.error); }, function (e) { logErr('fbgSync', e); });
   try {
     const m = old && /\/chat-media\/([^?]+)/.exec(old);
     if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/fbg_') === 0) sb.storage.from('chat-media').remove([k]); }
@@ -3059,9 +3094,10 @@ async function setFriendBg(file) {
 }
 function clearFriendBg() {
   if (!S.peer || isGroupKey(S.conv)) return;
-  const old = friendBgOf(S.peer);
-  delete FBG[S.peer]; LS.set('ch2fbg:' + S.uid, FBG);
-  applyChatFor(S.conv, S.peer); toast('已恢复默认聊天背景');
+  const old = friendBgOf(S.peer), peer = S.peer;
+  delete FBG[peer]; LS.set('ch2fbg:' + S.uid, FBG);
+  applyChatFor(S.conv, peer); toast('已恢复默认聊天背景');
+  sb.from('chat_backgrounds').delete().eq('owner_acc', ME()).eq('peer_acc', peer).then(function (r) { if (r && r.error) logErr('fbgSync', r.error); }, function (e) { logErr('fbgSync', e); });
   try { const m = old && /\/chat-media\/([^?]+)/.exec(old); if (m) { const k = decodeURIComponent(m[1]); if (k.indexOf(ME() + '/fbg_') === 0) sb.storage.from('chat-media').remove([k]); } } catch (e) {}
 }
 function openFriendBgMenu() {
@@ -4525,7 +4561,7 @@ function renderProfile() {
   $('pf-av').innerHTML = avatarHTML(peerName(a), avatarOf(a), isOnline(a), a);
   const coverEl = $('pf-cover');
   if (coverEl) {
-    const cu = S.profiles[a] && S.profiles[a].bg_url;
+    const cu = (S.profiles[a] && (S.profiles[a].cover_url || S.profiles[a].bg_url)) || '';
     if (cu) { coverEl.style.backgroundImage = 'url("' + String(cu).replace(/"/g, '%22') + '")'; coverEl.style.background = 'url("' + String(cu).replace(/"/g, '%22') + '") center/cover no-repeat'; }
     else { coverEl.style.backgroundImage = ''; const h = hueOf(a); coverEl.style.background = 'linear-gradient(135deg,hsl(' + h + ',68%,62%),hsl(' + ((h + 55) % 360) + ',70%,52%))'; }
   }
@@ -5124,6 +5160,7 @@ function bindUI() {
   $('btn-avatar').onclick = () => $('avatar-input').click();
   $('avatar-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; setAvatar(f).catch(x => { logErr('avatar', x); toast('头像上传失败：' + ((x && x.message) || '请重试')); }); };
   $('friend-bg-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setFriendBg(f).catch(x => { logErr('fbg', x); toast('专属背景上传失败：' + ((x && x.message) || '请重试')); }); };
+  $('cover-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setPersonalCover(f).catch(x => { logErr('cover', x); toast('封面上传失败：' + ((x && x.message) || '请重试')); }); };
   $('fs-ok').onclick = () => { if (fsOk) fsOk(); }; $('fs-cancel').onclick = closeForm; $('form-backdrop').onclick = closeForm;
   $('form-sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && fsOk && !$('fs-ok').disabled) { e.preventDefault(); fsOk(); } });
   $('as-items').onclick = e => { const b = e.target.closest('button[data-i]'); if (!b) return; const it = actItems[+b.dataset.i]; closeActs(); if (it && it.fn) it.fn(); };
@@ -5245,7 +5282,7 @@ function bindUI() {
   $('btn-theme').onclick = cycleTheme;
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;
-  $('mo-cover-btn').onclick = function () { $('bg-input').click(); };
+  $('mo-cover-btn').onclick = function () { const i = $('cover-input'); i.value = ''; i.click(); };
   $('moment-cancel').onclick = closeMomentCompose;
   $('moment-backdrop').onclick = closeMomentCompose;
   $('moment-post').onclick = postMoment;
@@ -5321,6 +5358,7 @@ $('gi-members').onclick = function (e) {
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
+    { label: '修改个人页封面', fn: function () { const i = $('cover-input'); i.value = ''; i.click(); } },
     { label: '修改昵称', fn: function () { editNick(); } },
     { label: '修改个性签名', fn: function () { editSign(); } },
     { label: '修改密码', fn: function () { editPass(); } },
