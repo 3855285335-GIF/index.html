@@ -221,7 +221,8 @@
   .conv-time { font-size: 11px; color: var(--muted); flex-shrink: 0; }
   .conv-sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
   .preview { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .badge { background: linear-gradient(135deg, #ff7a5c, #ff3d77); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 10px; min-width: 19px; text-align: center; box-shadow: 0 3px 8px rgba(255,61,119,.35); }
+  .badge { background: linear-gradient(135deg, #ff7a5c, #ff3d77); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 10px; min-width: 19px; text-align: center; box-shadow: 0 3px 8px rgba(255,61,119,.35); animation: badgePop .26s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes badgePop { from { transform: scale(.5); opacity: 0; } to { transform: none; opacity: 1; } }
 
   .search-bar { display: flex; gap: 8px; padding: 4px 0 12px; }
   .search-bar input { flex: 1; min-width: 0; border-radius: 16px; }
@@ -241,7 +242,9 @@
   .empty { padding: 46px 20px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.7; }
   .empty svg { width: 84px; height: 84px; margin: 0 auto 10px; display: block; opacity: .9; }
   .me-box { padding: 6px 2px 20px; }
-  .me-card { display: flex; align-items: center; gap: 14px; padding: 16px; margin-bottom: 14px; }
+  .me-card { display: flex; align-items: center; gap: 14px; padding: 16px; margin-bottom: 14px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 17%, var(--surface)), color-mix(in srgb, var(--accent2) 12%, var(--surface)) 70%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent); }
   .me-card .avatar { width: 58px; height: 58px; border-radius: 20px; font-size: 22px; }
   .me-box pre { background: var(--surface); border-radius: 16px; padding: 12px 14px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; color: var(--ink); box-shadow: var(--shadow); margin: 0 0 12px; font-family: ui-monospace, Menlo, monospace; }
   .me-box .btns { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -251,8 +254,10 @@
   .copy-id { margin-left: 6px; padding: 1px 7px; border-radius: 8px; background: var(--surface2); color: var(--muted); font-size: 11px; font-weight: 500; vertical-align: 1px; }
   .exact-tag { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); font-size: 10px; font-weight: 600; vertical-align: 2px; }
   .me-sec { margin-bottom: 4px; }
-  .me-box .btns.me-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 14px 10px; }
-  .me-box .btns.me-grid button { width: 100%; padding: 12px 8px; font-size: 13.5px; background: var(--surface); box-shadow: var(--shadow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .me-box .btns.me-grid { display: flex; flex-direction: column; gap: 0; margin: 0 14px 12px; background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
+  .me-box .btns.me-grid button { width: 100%; padding: 14px 16px; font-size: 14.5px; font-weight: 600; text-align: left; background: transparent; box-shadow: none; border-radius: 0; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .me-box .btns.me-grid button:last-child { border-bottom: 0; }
+  .me-box .btns.me-grid button:active { background: var(--surface2); }
   .me-diag { margin: 4px 14px 12px; background: var(--surface); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); }
   .me-diag summary { font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.5; }
   .me-diag pre { background: var(--surface2); box-shadow: none; margin: 10px 0 4px; }
@@ -585,6 +590,8 @@
   #call-ui.video.connected .call-avatar { display: none; }
   #call-name { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
   #call-status { font-size: 16px; opacity: .92; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+  #call-speak { height: 18px; margin-top: 6px; font-size: 12.5px; color: var(--ok); opacity: 0; transition: opacity .18s ease; }
+  #call-speak.on { opacity: 1; }
   #call-tip { display: none; position: absolute; bottom: 170px; left: 20px; right: 20px; text-align: center; z-index: 3; font-size: 13px; background: rgba(0,0,0,.5); padding: 9px; border-radius: 14px; }
   .call-tools { position: absolute; bottom: calc(130px + env(safe-area-inset-bottom)); left: 0; right: 0; display: none; justify-content: center; gap: 12px; z-index: 3; }
   #call-ui.video .call-tools { display: flex; }
@@ -652,6 +659,11 @@
   #gc-grid .avatar { width: 84px; height: 84px; font-size: 28px; }
   #gc-grid .gcn { font-size: 14px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #gc-grid .gcm { font-size: 11.5px; color: #ffb3bd; }
+  #gc-grid .gcv { font-size: 11.5px; color: #6ee7b7; font-weight: 600; }
+  #gc-grid .gcp.speaking { border-color: rgba(110,231,183,.85); animation: spkPulse 1.3s ease-in-out infinite; }
+  #gc-grid .gcp.speaking .avatar { transform: scale(1.05); box-shadow: 0 0 0 3px rgba(110,231,183,.32); }
+  #gc-grid .gcp .avatar { transition: transform .18s ease, box-shadow .18s ease; }
+  @keyframes spkPulse { 0%, 100% { box-shadow: 0 0 0 2px rgba(110,231,183,.28); } 50% { box-shadow: 0 0 0 6px rgba(110,231,183,.1); } }
   #gc-grid .gcs { font-size: 11.5px; color: rgba(244,241,255,.55); }
   #gc-actions { display: flex; gap: 14px; justify-content: center; padding-top: 16px; }
   #gc-actions button { flex: 0 0 auto; min-width: 116px; height: 50px; border-radius: 25px; border: 0; font-size: 15px; font-weight: 600; color: #fff; }
@@ -992,7 +1004,7 @@
   <video id="remote-video" autoplay playsinline muted></video>
   <video id="local-video" autoplay playsinline muted></video>
   <audio id="remote-audio" autoplay playsinline></audio>
-  <div class="call-info"><div id="call-avatar" class="call-avatar"></div><div id="call-name"></div><div id="call-status"></div></div>
+  <div class="call-info"><div id="call-avatar" class="call-avatar"></div><div id="call-name"></div><div id="call-status"></div><div id="call-speak"></div></div>
   <div id="call-stats"></div><div id="call-sig"><i></i><i></i><i></i><i></i></div>
   <div id="call-tip">点一下屏幕以开启声音</div>
   <div class="call-tools"><button id="btn-flip" type="button">翻转摄像头</button><button id="btn-q" type="button">画质：清晰</button><button id="btn-info" type="button">通话信息</button></div>
@@ -1467,7 +1479,7 @@ function renderList() {
   el.innerHTML = gh + shown.map(c => {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
-      '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtTime(c.last_ts) + '</span></div>' +
+      '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
       '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : esc(String(convPreview(c)).slice(0, 120))) + '</span>' + (un ? '<span class="badge' + (mu ? ' mute' : '') + '">' + (un > 99 ? '99+' : un) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
@@ -2520,6 +2532,45 @@ function renderStats(call) {
   else if (call.relay) t += '\n走中转：保持你选的画质（会用中转额度；想省流量可在“我 → 中转省流量”打开）';
   const el = $('call-stats'); el.textContent = t; el.style.whiteSpace = 'pre-line';
 }
+/* ---- 谁在讲话：Web Audio 分析音量，超过阈值就亮起来 ---- */
+const SPK = { ctx: null };
+function spkCtx() {
+  try {
+    if (!SPK.ctx) SPK.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (SPK.ctx.state === 'suspended') SPK.ctx.resume();
+    return SPK.ctx;
+  } catch (e) { return null; }
+}
+function spkMeter(stream) {
+  try {
+    if (!stream || !stream.getAudioTracks().length) return null;
+    const a = spkCtx(); if (!a) return null;
+    const src = a.createMediaStreamSource(stream);
+    const an = a.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .65;
+    src.connect(an);
+    return { an: an, buf: new Uint8Array(an.frequencyBinCount), src: src };
+  } catch (e) { return null; }
+}
+function spkLevel(m) {
+  if (!m) return 0;
+  m.an.getByteFrequencyData(m.buf);
+  let s = 0; for (let i = 0; i < m.buf.length; i++) s += m.buf[i];
+  return s / m.buf.length;
+}
+function spkStop(m) { try { if (m && m.src) m.src.disconnect(); } catch (e) {} }
+function startCallSpeak(call) {
+  if (!call || call.spkT) return;
+  call.spkT = setInterval(function () {
+    if (S.call !== call || call.ended) { clearInterval(call.spkT); call.spkT = 0; return; }
+    if (!call.spkR && call.remote && call.remote.getAudioTracks().length) call.spkR = spkMeter(call.remote);
+    if (!call.spkL && call.local) call.spkL = spkMeter(call.local);
+    const el = $('call-speak'); if (!el) return;
+    const r = spkLevel(call.spkR), l = spkLevel(call.spkL);
+    const t = r > 14 ? '对方正在讲话' : (l > 16 ? '你在讲话' : '');
+    if (el.textContent !== t) el.textContent = t;
+    el.classList.toggle('on', !!t);
+  }, 180);
+}
 function makePC(call) {
   const pc = new RTCPeerConnection({ iceServers: iceServers(), bundlePolicy: 'max-bundle' });
   call.pc = pc;
@@ -2556,6 +2607,7 @@ function onPcState(call) {
     if (!call.connected) {
       call.connected = true; call.startedAt = now(); clearTimers(call);
       SFX.backStop(); SFX.connect(); SFX.hold(true); $('call-ui').classList.add('connected'); attachRemote(call);
+      startCallSpeak(call);   // “对方正在讲话”
       const tick = () => setCallStatus(fmtDur(Math.floor((now() - call.startedAt) / 1000)));
       tick(); call.clock = setInterval(tick, 500);
       applyCallParams(call); clearInterval(call.statsT); call.statsT = setInterval(() => pollStats(call), 2000); setTimeout(() => pollStats(call), 600);
@@ -2721,7 +2773,7 @@ function endCall(reason, notify) {
   const call = S.call;
   if (!call) { hideCallUI(); return; }
   S.call = null; call.ended = true; wakeOff(); SFX.backStop(); SFX.ringStop(); SFX.hold(false); SFX.hangup();
-  clearTimers(call); clearTimeout(call.dcT); clearTimeout(call.candT); clearInterval(call.clock); clearInterval(call.statsT);
+  clearTimers(call); clearTimeout(call.dcT); clearTimeout(call.candT); clearInterval(call.clock); clearInterval(call.statsT); clearInterval(call.spkT); spkStop(call.spkR); spkStop(call.spkL);
   const dur = call.connected && call.startedAt ? Math.floor((now() - call.startedAt) / 1000) : 0;
   if (notify) sig(call.peer, 'end', { id: call.id });
   try { if (call.pc) { call.pc.onicecandidate = null; call.pc.ontrack = null; call.pc.onconnectionstatechange = null; call.pc.oniceconnectionstatechange = null; call.pc.close(); } } catch (e) {}
@@ -2736,7 +2788,7 @@ function endCall(reason, notify) {
 /* ================= 群语音（4 人以内，前台） ================= */
 // 声音走 WebRTC mesh：每个人和其余人各连一条，服务器只记“谁在房间里”，不碰声音。
 // 限制：手机锁屏/切后台会断；一个房间最多 4 人。
-const GC = { on: false, gid: '', cid: '', local: null, peers: {}, roster: [], muted: false, t: 0, tipT: 0 };
+const GC = { on: false, gid: '', cid: '', local: null, peers: {}, roster: [], muted: false, t: 0, tipT: 0, meters: {}, speaking: {}, speakT: 0 };
 const GC_MAX = 4;
 function gcErr(e) {
   const m = String((e && (e.message || e)) || '');
@@ -2766,6 +2818,8 @@ function gcAudio(acc) {
 function gcClosePeer(acc) {
   const st = GC.peers[acc]; if (!st) return;
   st.closed = true; delete GC.peers[acc];
+  if (GC.meters[acc]) { spkStop(GC.meters[acc]); delete GC.meters[acc]; }
+  delete GC.speaking[acc];
   try { st.pc.onicecandidate = null; st.pc.ontrack = null; st.pc.onconnectionstatechange = null; st.pc.close(); } catch (e) {}
   const a = document.getElementById('gc-a-' + acc); if (a) { try { a.srcObject = null; a.parentNode.removeChild(a); } catch (e) {} }
   if (GC.on) gcRender();
@@ -2786,6 +2840,7 @@ function gcNewPeer(acc) {
     if (a.srcObject !== s) a.srcObject = s;
     try { a.play(); } catch (err) {}
     if (e.track) e.track.onunmute = function () { try { a.play(); } catch (err) {} };
+    if (!GC.meters[acc]) GC.meters[acc] = spkMeter(s);   // 分析对方的音量：谁在讲话
   };
   pc.onconnectionstatechange = function () {
     if (st.closed) return;
@@ -2838,6 +2893,25 @@ async function gcOnSig(p) {
     }
   } catch (e) { logErr('gcSig', e); }
 }
+function gcSpeakTick() {
+  if (!GC.on) return;
+  const mine = ME();
+  Object.keys(GC.meters).forEach(function (k) {
+    const on = spkLevel(GC.meters[k]) > 14;
+    const acc = k === '__me' ? mine : k;
+    if (!!GC.speaking[acc] !== on) gcMarkSpeaking(acc, on);
+  });
+}
+function gcMarkSpeaking(acc, on) {
+  if (!acc) return;
+  if (on) GC.speaking[acc] = true; else delete GC.speaking[acc];
+  const tile = document.querySelector('#gc-grid .gcp[data-acc="' + acc + '"]');
+  if (!tile) return;
+  tile.classList.toggle('speaking', on);
+  let lab = tile.querySelector('.gcv');
+  if (on) { if (!lab) { lab = document.createElement('div'); lab.className = 'gcv'; lab.textContent = '正在讲话'; tile.appendChild(lab); } }
+  else if (lab) lab.remove();
+}
 function gcSyncPeers() {
   if (!GC.on) return;
   const mine = ME() || '';
@@ -2883,6 +2957,8 @@ async function gcStart() {
   } catch (e) { stopStream(stream); toast('进不去群语音：' + gcErr(e)); return; }
   refreshPerm();
   GC.on = true; GC.gid = gid; GC.cid = cid; GC.local = stream; GC.peers = {}; GC.roster = []; GC.muted = false;
+  GC.meters = {}; GC.speaking = {}; GC.meters['__me'] = spkMeter(stream);
+  clearInterval(GC.speakT); GC.speakT = setInterval(gcSpeakTick, 180);
   gcShow(); gcRender();
   clearInterval(GC.t); GC.t = setInterval(gcTick, 2500);
   gcTick(); setTimeout(gcTick, 600);
@@ -2890,6 +2966,9 @@ async function gcStart() {
 function gcEnd(reason) {
   if (!GC.on) { gcHide(); return; }
   const cid = GC.cid;
+  clearInterval(GC.speakT); GC.speakT = 0;
+  Object.keys(GC.meters).forEach(function (k) { spkStop(GC.meters[k]); });
+  GC.meters = {}; GC.speaking = {};
   Object.keys(GC.peers).forEach(function (acc) { try { gcSig(acc, 'gbye', {}); } catch (e) {} gcClosePeer(acc); });
   stopStream(GC.local);
   clearInterval(GC.t); GC.t = 0;
@@ -2919,8 +2998,8 @@ function gcRender() {
     const isMe = m.acc === mine, name = isMe ? '我' : peerName(m.acc);
     const st = GC.peers[m.acc];
     const conn = isMe ? '' : (st && st.pc.connectionState === 'connected' ? '' : '<div class="gcs">连接中…</div>');
-    return '<div class="gcp' + (isMe ? ' me' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(name, avatarOf(m.acc), false, m.acc) +
-      '<div class="gcn">' + esc(name) + '</div>' + (m.muted ? '<div class="gcm">🔇 已静音</div>' : '') + conn + '</div>';
+    return '<div class="gcp' + (isMe ? ' me' : '') + (GC.speaking[m.acc] ? ' speaking' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(name, avatarOf(m.acc), false, m.acc) +
+      '<div class="gcn">' + esc(name) + '</div>' + (GC.speaking[m.acc] ? '<div class="gcv">正在讲话</div>' : '') + (m.muted ? '<div class="gcm">🔇 已静音</div>' : '') + conn + '</div>';
   }).join('');
   const sub = $('gc-sub'); if (sub) { const nm = grpName('g:' + GC.gid); sub.textContent = (nm && nm !== '群聊' ? nm + ' · ' : '') + GC.roster.length + ' 人 · ' + (GC.muted ? '你已静音' : '麦克风开着') + (GC.roster.length >= GC_MAX ? ' · 已满' : ''); }
   const mb = $('gc-mute'); if (mb) { mb.textContent = GC.muted ? '取消静音' : '静音'; mb.classList.toggle('off', GC.muted); }
@@ -4078,6 +4157,14 @@ function paintMomentsHead() {
     const g = h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : h < 23 ? '晚上好' : '夜深了';
     sub.textContent = n ? g + '，' + n : '朋友们的近况';
   }
+}
+function fmtListTime(t) {
+  const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
+  const diff = (n - d) / 1000;
+  if (diff < 60) return '刚刚';
+  if (d.toDateString() === n.toDateString()) return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天';
+  return fmtTime(t);
 }
 function fmtMomentTime(t) {
   const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
@@ -5817,7 +5904,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking };
 boot();
 })();
 
