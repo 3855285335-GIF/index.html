@@ -213,6 +213,8 @@
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  #pull-tip { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%) translateY(-8px); background: var(--surface); color: var(--muted); font-size: 12px; padding: 6px 14px; border-radius: 14px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; z-index: 80; }
+  #pull-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .mo-end { text-align: center; color: var(--muted); font-size: 11.5px; padding: 16px 0 20px; letter-spacing: .3px; opacity: .75; }
   .empty svg { animation: floaty 5.5s ease-in-out infinite; }
   @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
@@ -940,6 +942,7 @@
               <button id="btn-sound" type="button">🔔 音效：开</button>
               <button id="btn-imgq" type="button">🖼 图片：压缩</button>
               <button id="btn-imgedit" type="button">✂️ 发送前编辑：开</button>
+              <button id="btn-sfx-demo" type="button">🔔 试听音效</button>
               <button id="btn-relaysave" type="button">📶 中转省流量：关</button>
             </div>
           </div>
@@ -1074,6 +1077,7 @@
   <div id="vis-list" class="vis-list"></div>
   <div class="fs-btns"><button id="vis-all" type="button">全部好友</button><button id="vis-ok" class="btn-primary" type="button">确定</button></div>
 </div>
+<div id="pull-tip"></div>
 <div id="imgedit-backdrop" class="sheet-bd"></div>
 <div id="imgedit-sheet" class="sheet">
   <div class="menu-title">编辑图片</div>
@@ -1081,7 +1085,7 @@
     <div class="ie-wrap" id="ie-wrap">
       <canvas id="ie-canvas"></canvas>
       <canvas id="ie-overlay"></canvas>
-      <div class="ie-hint" id="ie-hint">拖出区域后，拖四边/四角可以自己调</div>
+      <div class="ie-hint" id="ie-hint">拖边角调整</div>
     </div>
   </div>
   <div class="ie-tabs">
@@ -1319,7 +1323,7 @@ const SFX = (function () {
     try {
       if (!ctx) {
         const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
-        ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.6; master.connect(ctx.destination);
+        ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.85; master.connect(ctx.destination);
         const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0);  // iOS：用一个静音片段解锁
       }
       if (ctx.state === 'suspended' && !held) ctx.resume().catch(() => {});
@@ -1399,6 +1403,7 @@ const S = {
 };
 let sb = null;
 const ME = () => S.me && S.me.account_id;
+const SELF_KEY = () => 'self:' + (ME() || '');
 const nickOf = a => (S.profiles[a] && S.profiles[a].nickname) || a;
 const remarkOf = a => (S.remarks && S.remarks[a] && S.remarks[a].r) || '';
 const peerName = a => {
@@ -1604,11 +1609,18 @@ function renderList() {
   const el = $('conv-list');
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   const gh = '';
-  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
-  el.innerHTML = gh + shown.map(c => {
+  let selfRow = '';
+  if (S.me) {
+    const sk = SELF_KEY(), sp = LS.get('ch2self:' + S.uid, {}) || {};
+    selfRow = '<div class="conv-item self" data-key="' + esc(sk) + '" data-peer="' + esc(sk) + '">' + avatarHTML('备忘', '', false, 'self') +
+      '<div class="conv-main"><div class="conv-top"><span class="conv-name">我的备忘</span><span class="conv-time">' + (sp.ts ? fmtListTime(sp.ts) : '') + '</span></div>' +
+      '<div class="conv-sub"><span class="preview">' + esc(sp.body || '发给自己的消息，临时记点东西') + '</span></div></div></div>';
+  }
+  if (!shown.length && !gh) { el.innerHTML = selfRow || emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
+  el.innerHTML = selfRow + gh + shown.map(c => {
     const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
     const at = c.convKey !== S.conv && atMeOf(c.convKey);
-    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(name, gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
+    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(gp ? name : nickOf(c.peer_acc), gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
       '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div></div>';
   }).join('');
@@ -1617,7 +1629,7 @@ function renderContacts() {
   const el = $('friend-list');
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
-  else el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(peerName(a), avatarOf(a), isOnline(a), a) +
+  else el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
     '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
     '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>').join('');
   renderGroupContacts();
@@ -1656,6 +1668,11 @@ function renderRequests() {
 }
 function renderChatTitle() {
   if (!S.peer) return;
+  if (S.conv === SELF_KEY()) {
+    $('chat-title').innerHTML = '<span>我的备忘</span><span class="sub">只存在这台设备</span>';
+    $('btn-voice-call').style.display = 'none'; $('btn-video-call').style.display = 'none';
+    return;
+  }
   if (isGroupKey(S.peer)) {
     const gid = gidOf(S.peer), n = GRP.count[gid] || 0;
     $('chat-title').innerHTML = '<span>' + esc(grpName(S.peer)) + '</span><span class="sub">' + (n ? n + ' 人' : '群聊') + '</span>';
@@ -1775,6 +1792,51 @@ async function ensureProfile(user) {
   const acc = String(meta.account_id || ('user_' + user.id.slice(0, 6))).toLowerCase();
   await sb.from('profiles').upsert({ id: user.id, account_id: acc, nickname: meta.nickname || '新用户' }, { onConflict: 'id', ignoreDuplicates: true });
 }
+/* ---- 下拉刷新 ---- */
+let pullDist = 0;
+function paintPull(text, show) {
+  const el = $('pull-tip'); if (!el) return;
+  if (text) el.textContent = text;
+  el.classList.toggle('show', !!show);
+}
+async function pullRefresh() {
+  paintPull('正在刷新…', true);
+  try {
+    if ($('tab-moments').classList.contains('active')) {
+      applyMomentCover(); loadMyCover(); await momentsLoad(true);
+    } else if ($('tab-me').classList.contains('active')) {
+      renderMe(); renderEnv();
+    } else {
+      if (S.me) await resync();
+      await grpLoad(true);
+      await grpInvitesLoad(true);
+    }
+  } catch (e) { logErr('pull', e); }
+  setTimeout(function () { paintPull('', false); }, 500);
+}
+function bindPull(el, fn) {
+  if (!el) return;
+  let sy = 0, pulling = false;
+  el.addEventListener('touchstart', function (e) {
+    if (el.scrollTop > 0 || e.touches.length !== 1) { pulling = false; return; }
+    sy = e.touches[0].clientY; pulling = true; pullDist = 0;
+  }, { passive: true });
+  el.addEventListener('touchmove', function (e) {
+    if (!pulling) return;
+    pullDist = e.touches[0].clientY - sy;
+    if (pullDist > 8) {
+      if (el.scrollTop > 0) { pulling = false; paintPull('', false); return; }
+      if (e.cancelable) e.preventDefault();
+      paintPull(pullDist > 70 ? '松开刷新' : '下拉刷新', true);
+    }
+  }, { passive: false });
+  el.addEventListener('touchend', function () {
+    if (!pulling) return;
+    pulling = false;
+    if (pullDist > 70) fn(); else paintPull('', false);
+  });
+  el.addEventListener('touchcancel', function () { pulling = false; paintPull('', false); });
+}
 async function resync() {
   if (S.syncing || !sb || !S.me) return;
   S.syncing = true;
@@ -1813,7 +1875,7 @@ function msgHTML(m) {
     }
   }
   return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
-    (mine ? '' : avatarHTML(peerName(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
+    (mine ? '' : avatarHTML(nickOf(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
     '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
 }
 function dayLabel(t) {
@@ -2064,6 +2126,14 @@ function sendText() {
   let body = v.replace(/\u2063/g, '');
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
+  if (S.conv === SELF_KEY()) {
+    const m = { id: uuid(), conv: S.conv, from_acc: ME(), to_acc: ME(), type: 'text', body: body, created_at: new Date().toISOString() };
+    S.msgs.push(m); chatAppend(m, true);
+    msgCacheSave(S.conv, S.msgs);
+    try { LS.set('ch2self:' + S.uid, { body: previewOf(m), ts: m.created_at }); } catch (e) {}
+    sched('list'); SFX.send();
+    return;
+  }
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
   const men = takeMentions(body);
   addLocal(newMsg('text', body, null, men.length ? { mentions: men } : null));
@@ -2177,13 +2247,21 @@ function ieUndo() {
   };
   im.src = u;
 }
+let ieHintT = 0;
+function ieShowHint() {
+  const h = $('ie-hint'); if (!h) return;
+  if (!(IE.tool === 'crop' && !IE.sel)) { h.style.display = 'none'; return; }
+  h.style.display = 'block';
+  clearTimeout(ieHintT);
+  ieHintT = setTimeout(function () { const x = $('ie-hint'); if (x) x.style.display = 'none'; }, 2600);
+}
 function ieLayout() {
   const cv = ieCanvas(), ov = ieOverlay(), wrap = ieWrap(); if (!cv || !ov || !wrap) return;
   const w = wrap.clientWidth || 0, h = wrap.clientHeight || 0;
   if (!w || !h) return;
   ov.width = w; ov.height = h;
   ieDrawOverlay();
-  const hint = $('ie-hint'); if (hint) hint.style.display = (IE.tool === 'crop' && !IE.sel) ? 'block' : 'none';
+  ieShowHint();
 }
 function ieHandles(s) {
   return [
@@ -2330,7 +2408,7 @@ function ieMove(e) {
 function ieUp() {
   if (IE.drag === 'new') { const s = IE.sel; if (s && (s.w < 12 || s.h < 12)) IE.sel = null; ieDrawOverlay(); }
   IE.drag = null; IE.origin = null; IE.last = null;
-  const hint = $('ie-hint'); if (hint) hint.style.display = (IE.tool === 'crop' && !IE.sel) ? 'block' : 'none';
+  ieShowHint();
 }
 function ieCropApply() {
   const s = IE.sel; if (!s || s.w < 10 || s.h < 10) { toast('先在图片上拖出要保留的区域'); return; }
@@ -2466,8 +2544,26 @@ async function fetchMsgs(conv, before) {
   const { data, error } = await q; if (error) throw error;
   return (data || []).reverse().map(rowToMsg);
 }
+async function openSelfConv() {
+  const key = SELF_KEY();
+  recAbort(); closeSearch(); closeActs();
+  S.conv = key; S.peer = key; S.hasMore = false; S.stick = true; S.typingUntil = 0; clearReply();
+  document.body.classList.add('chat-open');
+  if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
+  $('emoji-panel').classList.remove('active'); hideSuggest();
+  grpChatMode();
+  renderChatTitle();
+  $('grp-notice').classList.remove('show'); $('chat-mute-tip').classList.remove('show'); gcTipHide();
+  applyChatFor(null, null);
+  const list = await msgCacheGet(key);
+  if (S.conv !== key) return;
+  S.msgs = Array.isArray(list) ? list : [];
+  chatRender(true);
+  $('chat-input').value = draftOf(key);
+}
 async function openConv(key, peer) {
   if (!S.me) return;
+  if (key === SELF_KEY()) return openSelfConv();
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
@@ -2843,7 +2939,7 @@ function showCallUI(call, status) {
   $('local-video').style.display = call.video ? 'block' : 'none';
   $('btn-cam').style.display = call.video ? '' : 'none';
   $('btn-mute').classList.remove('off'); $('btn-cam').classList.remove('off'); $('call-tip').style.display = 'none';
-  $('call-avatar').innerHTML = avatarHTML(peerName(call.peer), avatarOf(call.peer), false, call.peer);
+  $('call-avatar').innerHTML = avatarHTML(nickOf(call.peer), avatarOf(call.peer), false, call.peer);
   $('call-ui').classList.remove('connected', 'swap'); $('call-ui').classList.toggle('video', !!call.video); $('call-stats').classList.remove('show'); $('call-sig').className = 'l4';
   $('call-ui').classList.add('active');
 }
@@ -3125,7 +3221,7 @@ function onInvite(p) {
   if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
-  $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(peerName(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
+  $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
   closeNotes(t => t === 'c:' + p.from);
@@ -3479,7 +3575,7 @@ function gcRender() {
     const isMe = m.acc === mine, name = isMe ? '我' : peerName(m.acc);
     const st = GC.peers[m.acc];
     const conn = isMe ? '' : (st && st.pc.connectionState === 'connected' ? '' : '<div class="gcs">连接中…</div>');
-    return '<div class="gcp' + (isMe ? ' me' : '') + (GC.speaking[m.acc] ? ' speaking' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(name, avatarOf(m.acc), false, m.acc) +
+    return '<div class="gcp' + (isMe ? ' me' : '') + (GC.speaking[m.acc] ? ' speaking' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(isMe ? '我' : nickOf(m.acc), avatarOf(m.acc), false, m.acc) +
       '<div class="gcn">' + esc(name) + '</div>' + (GC.speaking[m.acc] ? '<div class="gcv">正在讲话</div>' : '') + (m.muted ? '<div class="gcm">🔇 已静音</div>' : '') + conn + '</div>';
   }).join('');
   const sub = $('gc-sub'); if (sub) { const nm = grpName('g:' + GC.gid); sub.textContent = (nm && nm !== '群聊' ? nm + ' · ' : '') + GC.roster.length + ' 人 · ' + (GC.muted ? '你已静音' : '麦克风开着') + (GC.roster.length >= GC_MAX ? ' · 已满' : ''); }
@@ -4350,7 +4446,7 @@ function giMemberHTML(m) {
   const badge = isMe ? (role ? role + ' · 我' : '我') : role;
   const title = (m.title && m.title_on) ? '<div class="gi-title">' + esc(m.title) + '</div>' : '';
   const muted = (m.muted_until && Date.parse(m.muted_until) > now()) ? '<div class="gi-muted">禁言中</div>' : '';
-  return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(peerName(acc), avatarOf(acc), false, acc) +
+  return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(nickOf(acc), avatarOf(acc), false, acc) +
     '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' + title + muted +
     (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
 }
@@ -4678,7 +4774,7 @@ function momentCardHTML(m, i) {
   const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
   const vid = (typeof m.video === 'string' && m.video) ? '<div class="mo-video"><video src="' + esc(disp(m.video)) + '" controls preload="metadata" playsinline webkit-playsinline></video></div>' : '';
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
-    '<div class="mo-head">' + avatarHTML(peerName(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
+    '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
       ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '') + '</div>' +
       (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
@@ -5624,7 +5720,7 @@ function closeProfile() { pfAcc = null; $('pf-backdrop').classList.remove('activ
 function renderProfile() {
   const a = pfAcc; if (!a) return;
   const friend = S.friends.indexOf(a) >= 0, rm = remarkOf(a);
-  $('pf-av').innerHTML = avatarHTML(peerName(a), avatarOf(a), isOnline(a), a);
+  $('pf-av').innerHTML = avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a);
   const coverEl = $('pf-cover');
   if (coverEl) {
     const cu = (S.profiles[a] && S.profiles[a].cover_url) || '';
@@ -6361,7 +6457,13 @@ function bindUI() {
   paintIe();
   $('btn-imgedit').onclick = () => {
     LS.set('ch2imgedit', !imgEditOn()); paintIe();
-    toast(imgEditOn() ? '发图片前会先让你编辑（旋转/滤镜）' : '发图片直接发送，不再弹出编辑');
+    toast(imgEditOn() ? '发图片前会先让你编辑（旋转/裁剪/画笔/文字）' : '发图片直接发送，不再弹出编辑');
+  };
+  const sfxDemo = $('btn-sfx-demo');
+  if (sfxDemo) sfxDemo.onclick = function () {
+    SFX.join(); setTimeout(function () { SFX.like(); }, 450);
+    setTimeout(function () { SFX.approve(); }, 950); setTimeout(function () { SFX.hangup(); }, 1800);
+    toast('这就是新加的进房 / 点赞 / 同意 / 结束音');
   };
   $('btn-theme').onclick = cycleTheme;
   /* 朋友圈 */
@@ -6427,6 +6529,8 @@ function bindUI() {
     else { momentsLoad(true); setTimeout(function () { const c = document.querySelector('.moment[data-id="' + id + '"]'); if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 800); }
   };
 
+  bindPull(document.querySelector('main'), pullRefresh);
+  bindPull($('chat-messages'), function () { if (S.conv) syncChat().catch(function () {}); });
 $('btn-export').onclick = () => {
   if (S.conv) { exportChat(S.conv); return; }
   const list = S.convs.filter(c => !convGone(c)).slice(0, 15).map(c => ({ label: peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
@@ -6587,7 +6691,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE };
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 boot();
 })();
 
