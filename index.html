@@ -667,6 +667,8 @@
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
   .toast { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); background: rgba(24,20,44,.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; padding: 10px 18px; border-radius: 22px; font-size: 13.5px; z-index: 9999; pointer-events: none; max-width: 88vw; text-align: center; line-height: 1.45; box-shadow: 0 10px 30px rgba(0,0,0,.3); animation: toastin .22s cubic-bezier(.3,1.4,.5,1); }
+  .toast-act { pointer-events: auto; display: flex; align-items: center; gap: 12px; text-align: left; }
+  .toast-act button { color: var(--accent); font-weight: 700; font-size: 13px; background: none; padding: 2px 0; flex-shrink: 0; }
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, -12px); } }
 
   /* ---------- 顶部横幅（App 开着时别的聊天来消息） ---------- */
@@ -1343,6 +1345,18 @@ function toast(msg) {
   const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; toastEl = el;
   document.body.appendChild(el);
   clearTimeout(toastT); toastT = setTimeout(() => { el.remove(); if (toastEl === el) toastEl = null; }, 2600);
+}
+function toastUndo(msg, label, fn, ms) {
+  if (toastEl) toastEl.remove();
+  const el = document.createElement('div'); el.className = 'toast toast-act';
+  el.appendChild(document.createTextNode(msg));
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+  el.appendChild(b);
+  toastEl = el; document.body.appendChild(el);
+  clearTimeout(toastT);
+  const close = function () { el.remove(); if (toastEl === el) toastEl = null; };
+  b.onclick = function () { close(); try { fn(); } catch (e) { logErr('undo', e); } };
+  toastT = setTimeout(close, ms || 6000);
 }
 const stopStream = s => { try { s && s.getTracks().forEach(t => t.stop()); } catch (e) {} };
 function gum(constraints, ms) {
@@ -2686,7 +2700,9 @@ function menuAction(kind) {
     hidden.add(id); saveHidden(); S.out.delete(id);
     const el = msgElOf(id); if (el) el.remove();
     if (!$('chat-messages').querySelector('.msg')) chatRender(true);
-    toast('已删除（仅在你这边）');
+    toastUndo('已删除（仅在你这边）', '撤销', function () {
+      hidden.delete(id); saveHidden(); chatRender(true); toast('已恢复');
+    });
   }
 }
 async function doRecall() {
@@ -6873,9 +6889,32 @@ $('ie-panel-stk').addEventListener('click', function (e) {
   };
 
   bindPull(document.querySelector('main'), pullRefresh);
+async function exportAll() {
+  if (!sb || !S.me) return;
+  toast('正在整理…');
+  try {
+    const rows = [];
+    for (let from = 0; ; from += 1000) {
+      const r = await sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,created_at').order('created_at', { ascending: true }).range(from, from + 999);
+      if (r.error) throw r.error;
+      const d = r.data || []; rows.push.apply(rows, d);
+      if (d.length < 1000 || rows.length >= 20000) break;
+    }
+    const out = { app: 'Chatter', account: ME(), exported_at: new Date().toISOString(), count: rows.length, messages: rows };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'chatter-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 5000);
+    toast('已导出 ' + rows.length + ' 条（含图片/语音链接）');
+  } catch (e) { toast('导出失败：' + ((e && e.message) || '请重试')); }
+}
 $('btn-export').onclick = () => {
-  if (S.conv) { exportChat(S.conv); return; }
-  const list = S.convs.filter(c => !convGone(c)).slice(0, 15).map(c => ({ label: peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
+  const list = [];
+  if (S.conv) list.push({ label: '📄 导出当前聊天', fn: () => exportChat(S.conv) });
+  list.push({ label: '📦 导出全部聊天（含图片/语音链接）', fn: () => exportAll() });
+  S.convs.filter(c => !convGone(c) && c.convKey !== S.conv).slice(0, 12).forEach(c => list.push({ label: '导出：' + peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
   if (!list.length) { toast('还没有聊天记录'); return; }
   list.push({ label: '取消', fn: null });
   openActs('导出哪个聊天？', list);
