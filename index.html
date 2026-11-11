@@ -213,6 +213,9 @@
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  .ie-stks { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; max-height: 96px; overflow-y: auto; }
+  .ie-stk { font-size: 22px; padding: 3px 6px; border-radius: 10px; background: var(--surface2); line-height: 1.25; }
+  .ie-stk.on { background: color-mix(in srgb, var(--accent) 26%, var(--surface2)); }
   .ep-mini { font-size: 11.5px; padding: 3px 9px; border-radius: 8px; background: var(--surface2); color: var(--ink); margin-left: 8px; }
   .ep-mini.danger { color: var(--danger); }
   .stk-m.sel { outline: 2.5px solid var(--accent); outline-offset: 1px; border-radius: 12px; }
@@ -1125,6 +1128,8 @@
     <button class="ie-tab on" data-t="crop" type="button">裁剪</button>
     <button class="ie-tab" data-t="draw" type="button">画笔</button>
     <button class="ie-tab" data-t="text" type="button">文字</button>
+    <button class="ie-tab" data-t="mosaic" type="button">马赛克</button>
+    <button class="ie-tab" data-t="stk" type="button">贴纸</button>
     <button class="ie-tab" data-t="rot" type="button">↻ 旋转</button>
   </div>
   <div class="ie-panel" id="ie-panel-crop">
@@ -1138,6 +1143,15 @@
   <div class="ie-panel" id="ie-panel-text" style="display:none">
     <div class="ie-colors" id="ie-colors2"></div>
     <div class="ie-tip">点图片上要写字的位置</div>
+  </div>
+  <div class="ie-panel" id="ie-panel-mosaic" style="display:none">
+    <div class="ie-sizes" id="ie-mo-sizes"><button type="button" data-s="8">小</button><button type="button" data-s="14" class="on">中</button><button type="button" data-s="24">大</button></div>
+    <div class="ie-tip">涂哪里糊哪里</div>
+  </div>
+  <div class="ie-panel" id="ie-panel-stk" style="display:none">
+    <div class="ie-stks" id="ie-stks"></div>
+    <div class="ie-sizes" id="ie-stk-sizes"><button type="button" data-s="40">小</button><button type="button" data-s="64" class="on">中</button><button type="button" data-s="96">大</button></div>
+    <div class="ie-tip">点图片上放贴纸</div>
   </div>
   <div class="fs-btns"><button id="ie-undo" type="button">撤销</button><button id="ie-cancel" type="button">取消</button><button id="ie-ok" class="btn-primary" type="button">发送</button></div>
 </div>
@@ -2367,10 +2381,13 @@ function ieDrawOverlay() {
 function ieSetTool(t) {
   IE.tool = t; IE.sel = null; IE.drag = null; IE.origin = null;
   document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); });
-  const pc = $('ie-panel-crop'), pd = $('ie-panel-draw'), pt = $('ie-panel-text');
+  const pc = $('ie-panel-crop'), pd = $('ie-panel-draw'), pt = $('ie-panel-text'), pm = $('ie-panel-mosaic'), ps = $('ie-panel-stk');
   if (pc) pc.style.display = t === 'crop' ? '' : 'none';
   if (pd) pd.style.display = t === 'draw' ? '' : 'none';
   if (pt) pt.style.display = t === 'text' ? '' : 'none';
+  if (pm) pm.style.display = t === 'mosaic' ? '' : 'none';
+  if (ps) ps.style.display = t === 'stk' ? '' : 'none';
+  if (t === 'stk' && ps && !ps.dataset.full) { paintIeStks(); ps.dataset.full = '1'; }
   ieLayout();
 }
 function iePoint(e) {
@@ -2388,6 +2405,7 @@ function paintIeColors() {
 function openImgEditor(file) {
   return new Promise(function (resolve) {
     IE.file = file; IE.resolve = resolve; IE.hist = []; IE.sel = null; IE.drag = null; IE.origin = null;
+    IE.mosaicSize = IE.mosaicSize || 14; IE.stk = IE.stk || '😀'; IE.stkSize = IE.stkSize || 64;
     const done = function (src) {
       const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
       if (!w || !h) { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); return; }
@@ -2416,6 +2434,39 @@ function openImgEditor(file) {
     }
   });
 }
+function ieMosaicAt(x, y) {
+  const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+  const R = Math.max(8, IE.mosaicSize || 14) * k;
+  const sx = Math.max(0, Math.round(x * k - R)), sy = Math.max(0, Math.round(y * k - R));
+  const sw = Math.min(cv.width - sx, Math.round(R * 2)), sh = Math.min(cv.height - sy, Math.round(R * 2));
+  if (sw < 3 || sh < 3) return;
+  const b = Math.max(4, Math.round(7 * k));
+  const tw = Math.max(1, Math.round(sw / b)), th = Math.max(1, Math.round(sh / b));
+  const tmp = IE.tmp || (IE.tmp = document.createElement('canvas'));
+  tmp.width = tw; tmp.height = th;
+  const tc = tmp.getContext('2d');
+  tc.imageSmoothingEnabled = false;
+  tc.drawImage(cv, sx, sy, sw, sh, 0, 0, tw, th);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, tw, th, sx, sy, sw, sh);
+  ctx.imageSmoothingEnabled = true;
+}
+const IE_STKS = ['😀', '😄', '😎', '🥳', '😭', '😡', '👍', '❤️', '🔥', '🎉', '🌹', '🍺', '🐶', '🐱', '💩', '✨'];
+function paintIeStks() {
+  const box = $('ie-stks'); if (!box) return;
+  box.innerHTML = IE_STKS.map(function (e) {
+    return '<button type="button" class="ie-stk' + (e === IE.stk ? ' on' : '') + '" data-e="' + e + '">' + e + '</button>';
+  }).join('');
+}
+function iePlaceStk(x, y) {
+  const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+  const size = Math.max(16, IE.stkSize || 64) * k;
+  ctx.save();
+  ctx.font = size + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(IE.stk || '😀', x * k, y * k);
+  ctx.restore();
+}
 function ieDown(e) {
   if (!IE.img) return;
   if (e.cancelable) e.preventDefault();
@@ -2434,6 +2485,10 @@ function ieDown(e) {
     ctx.moveTo(p.x * k, p.y * k); ctx.lineTo(p.x * k + 0.1, p.y * k + 0.1); ctx.stroke();
   } else if (IE.tool === 'text') {
     ieAddText(p);
+  } else if (IE.tool === 'mosaic') {
+    iePushHist(); IE.drag = 'mosaic'; IE.last = p; ieMosaicAt(p.x, p.y);
+  } else if (IE.tool === 'stk') {
+    iePushHist(); iePlaceStk(p.x, p.y);
   }
 }
 function ieMove(e) {
@@ -2467,6 +2522,12 @@ function ieMove(e) {
     const ctx = ieCanvas().getContext('2d'), k = ieScale();
     ctx.strokeStyle = IE.color; ctx.lineWidth = Math.max(1, IE.size * k);
     ctx.beginPath(); ctx.moveTo(IE.last.x * k, IE.last.y * k); ctx.lineTo(p.x * k, p.y * k); ctx.stroke();
+    IE.last = p;
+  } else if (IE.drag === 'mosaic') {
+    const a = IE.last, dx = p.x - a.x, dy = p.y - a.y, dist = Math.hypot(dx, dy);
+    const step = Math.max(4, (IE.mosaicSize || 14) * 0.6);
+    const n = Math.max(1, Math.ceil(dist / step));
+    for (let i = 1; i <= n; i++) ieMosaicAt(a.x + dx * i / n, a.y + dy * i / n);
     IE.last = p;
   }
 }
@@ -6723,6 +6784,17 @@ function bindUI() {
   $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
   $('ie-undo').onclick = ieUndo;
   $('ie-cancel').onclick = ieClose;
+$('ie-panel-mosaic').addEventListener('click', function (e) {
+  const b = e.target.closest('[data-s]'); if (!b) return;
+  IE.mosaicSize = +b.dataset.s;
+  Array.from(this.querySelectorAll('[data-s]')).forEach(function (x) { x.classList.toggle('on', x === b); });
+});
+$('ie-panel-stk').addEventListener('click', function (e) {
+  const s = e.target.closest('#ie-stk-sizes [data-s]');
+  if (s) { IE.stkSize = +s.dataset.s; Array.from($('ie-stk-sizes').children).forEach(function (x) { x.classList.toggle('on', x === s); }); return; }
+  const em = e.target.closest('#ie-stks [data-e]');
+  if (em) { IE.stk = em.dataset.e; Array.from($('ie-stks').children).forEach(function (x) { x.classList.toggle('on', x === em); }); }
+});
   $('ipv-edit').onclick = async function () {
     const f = IPV.file; if (!f) return;
     const edited = await openImgEditor(f);
