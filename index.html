@@ -213,6 +213,9 @@
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  .ep-mini { font-size: 11.5px; padding: 3px 9px; border-radius: 8px; background: var(--surface2); color: var(--ink); margin-left: 8px; }
+  .ep-mini.danger { color: var(--danger); }
+  .stk-m.sel { outline: 2.5px solid var(--accent); outline-offset: 1px; border-radius: 12px; }
   #voice-speed { position: absolute; right: 14px; bottom: calc(74px + env(safe-area-inset-bottom)); z-index: 6; background: var(--surface); color: var(--accent); border-radius: 14px; padding: 6px 11px; font-size: 12.5px; font-weight: 600; box-shadow: var(--shadow); }
   .ipv-stage { display: flex; align-items: center; justify-content: center; background: #000; border-radius: 14px; margin: 0 12px 10px; overflow: hidden; }
   #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
@@ -5555,6 +5558,19 @@ async function stkTop(s) {
   if (error || !data || !data.length) { toast('操作失败，请重试'); return; }
   s.created_at = t; S.stk = [s].concat(S.stk.filter(x => x.id !== s.id)); stkSave(); renderEp();
 }
+let stkManage = false, stkSel = new Set();
+async function stkDelSel() {
+  const ids = Array.from(stkSel); if (!ids.length) { toast('先选几个表情'); return; }
+  let n = 0;
+  for (const id of ids) {
+    const s = (S.stk || []).find(x => x.id === id); if (!s) continue;
+    const { data, error } = await sb.from('stickers').delete().eq('id', id).select('id');
+    if (error || !data || !data.length) continue;
+    S.stk = S.stk.filter(x => x.id !== id); dropRecent(s.url); n++;
+  }
+  stkSave(); stkSel.clear(); stkManage = false; renderEp();
+  toast(n ? '已删除 ' + n + ' 个表情' : '删除失败，请重试');
+}
 async function stkDel(s) {
   const { data, error } = await sb.from('stickers').delete().eq('id', s.id).select('id');
   if (error || !data || !data.length) { toast('删除失败，请重试'); return; }
@@ -5589,7 +5605,16 @@ function renderEp() {
   }
   const list = S.stk || [];
   if (!S.stk && !stkOk) { $('ep-mine').innerHTML = '<div class="ep-empty">加载中…</div>'; return; }
-  $('ep-mine').innerHTML = '<div class="ep-cat">我的表情 ' + list.length + ' / ' + STK_LIMIT + '　点一下发送，长按可设关键词或删除</div>' +
+  if (stkManage) {
+    $('ep-mine').innerHTML = '<div class="ep-cat">已选 ' + stkSel.size + ' / ' + list.length +
+      '　<button id="stk-all" class="ep-mini" type="button">全选</button>' +
+      '<button id="stk-del-sel" class="ep-mini danger" type="button">删除</button>' +
+      '<button id="stk-done" class="ep-mini" type="button">完成</button></div>' +
+      list.map(s => '<div class="stk-m' + (stkSel.has(s.id) ? ' sel' : '') + '" data-b="' + esc(s.url) + '" data-sid="' + esc(s.id) + '"><img src="' + esc(disp(s.url)) + '" alt="" loading="lazy" decoding="async"></div>').join('') +
+      (list.length ? '' : '<div class="ep-empty">还没有表情</div>');
+    return;
+  }
+  $('ep-mine').innerHTML = '<div class="ep-cat">我的表情 ' + list.length + ' / ' + STK_LIMIT + '　点一下发送，长按可设关键词或删除　<button id="stk-mg" class="ep-mini" type="button">管理</button></div>' +
     '<div class="stk-add" role="button" aria-label="添加表情">＋</div>' +
     list.map(s => '<div class="stk-m" data-b="' + esc(s.url) + '" data-sid="' + esc(s.id) + '"><img src="' + esc(disp(s.url)) + '" alt="" loading="lazy" decoding="async"></div>').join('') +
     (list.length ? '' : '<div class="ep-empty">点 ＋ 从相册选图片做成表情（原图不压缩，GIF 动图也行）<br>聊天里长按对方的图片，也能“添加到表情”</div>');
@@ -6543,10 +6568,16 @@ function bindUI() {
     if (now() - stkLpAt < 700) return;
     const tab = e.target.closest('.ep-tabs button'); if (tab) { epTab(tab.dataset.ep); return; }
     const em = e.target.closest('#ep-emoji span[data-e]'); if (em) { input.value += em.dataset.e; draftSave(S.conv, input.value); return; }
+    if (e.target.closest('#stk-mg')) { stkManage = true; stkSel.clear(); renderEp(); return; }
+    if (e.target.closest('#stk-done')) { stkManage = false; stkSel.clear(); renderEp(); return; }
+    if (e.target.closest('#stk-all')) { if (stkSel.size >= (S.stk || []).length) stkSel.clear(); else (S.stk || []).forEach(s => stkSel.add(s.id)); renderEp(); return; }
+    if (e.target.closest('#stk-del-sel')) { stkDelSel(); return; }
+    const mgIt = e.target.closest('#ep-mine .stk-m');
+    if (stkManage && mgIt) { const id = mgIt.dataset.sid; if (stkSel.has(id)) stkSel.delete(id); else stkSel.add(id); renderEp(); return; }
     if (e.target.closest('.stk-add')) { if (S.v6 === false) { toast(NEED_V6); return; } if ((S.stk || []).length >= STK_LIMIT) { toast('“我的表情”最多 ' + STK_LIMIT + ' 个，先删掉一些再加'); return; } $('stk-input').click(); return; }
     const it = e.target.closest('[data-b]'); if (it) sendSticker(it.dataset.b);
   });
-  const stkLp = it => { stkLpAt = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} stkActs(it.dataset.sid); };
+  const stkLp = it => { if (stkManage) return; stkLpAt = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} stkActs(it.dataset.sid); };
   ep.addEventListener('contextmenu', e => { const it = e.target.closest('.stk-m'); if (!it) return; e.preventDefault(); stkLp(it); });
   ep.addEventListener('touchstart', e => { const it = e.target.closest('.stk-m'); if (!it) return; clearTimeout(stkLpT); stkLpT = setTimeout(() => stkLp(it), 550); }, { passive: true });
   ['touchend', 'touchmove', 'touchcancel'].forEach(ev => ep.addEventListener(ev, () => clearTimeout(stkLpT), { passive: true }));
