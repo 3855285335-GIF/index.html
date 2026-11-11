@@ -212,7 +212,13 @@
   .ie-sizes { display: flex; gap: 8px; }
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  html[data-fs="big"] .bubble { font-size: 17px; line-height: 1.5; }
+  html[data-fs="big"] .mo-text { font-size: 16px; }
+  html[data-fs="big"] #chat-input { font-size: 17px; }
+  html[data-fs="big"] .conv-name { font-size: 16px; }
+  html[data-fs="big"] .day-sep span, html[data-fs="big"] .msg-time { font-size: 12px; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  #voice-speed { position: absolute; right: 14px; bottom: calc(74px + env(safe-area-inset-bottom)); z-index: 6; background: var(--surface); color: var(--accent); border-radius: 14px; padding: 6px 11px; font-size: 12.5px; font-weight: 600; box-shadow: var(--shadow); }
   .ipv-stage { display: flex; align-items: center; justify-content: center; background: #000; border-radius: 14px; margin: 0 12px 10px; overflow: hidden; }
   #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
   .ipv-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
@@ -945,6 +951,7 @@
               <button id="btn-theme" type="button">🎨 主题：跟随系统</button>
               <button id="btn-bg" type="button">🖼 聊天背景</button>
               <button id="btn-bg-clear" type="button">↩️ 默认背景</button>
+              <button id="btn-fs" type="button">🔠 字体大小：标准</button>
               <button id="btn-sound" type="button">🔔 音效：开</button>
               <button id="btn-relaysave" type="button" style="display:none">中转省流量</button>
             </div>
@@ -1007,6 +1014,7 @@
     </header>
     <div id="chat-search"><div class="cs-bar"><input id="cs-input" type="text" placeholder="搜索聊天记录" autocomplete="off" enterkeyhint="search"><button id="cs-close" type="button">取消</button></div><div id="cs-list"></div></div>
     <div id="chat-messages"></div>
+    <button id="voice-speed" type="button" style="display:none">1.0x</button>
     <div id="emoji-panel">
       <div class="ep-top"><input id="ep-search" type="search" placeholder="搜索表情（比如：笑、猫、加油）" autocomplete="off" enterkeyhint="search"></div>
       <div class="ep-tabs"><button type="button" data-ep="emoji" class="on">😀 表情</button><button type="button" data-ep="lib">🎭 表情库</button><button type="button" data-ep="mine">⭐ 我的</button></div>
@@ -1978,7 +1986,7 @@ async function checkConvMention(key) {
   try {
     const r = await sb.from('messages').select('mentions').eq('conv_key', key).order('created_at', { ascending: false }).limit(1);
     const m = r && r.data && r.data[0];
-    if (m && Array.isArray(m.mentions) && m.mentions.some(function (x) { return x && x.acc === ME(); })) {
+    if (m && Array.isArray(m.mentions) && m.mentions.some(function (x) { return x && (x.acc === ME() || x.acc === '@all'); })) {
       if (!atMeOf(key)) { setAtMe(key, true); SFX.at(); sched('list'); }
     }
   } catch (e) {}
@@ -2123,8 +2131,13 @@ function closeMention() { MENT.open = false; MENT.start = -1; const el = $('ment
 function mentionMembers() {
   const gid = S.conv && isGroupKey(S.conv) ? gidOf(S.conv) : '';
   if (!gid) return [];
-  return (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); })
+  const list = (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); })
     .map(function (m) { return { acc: m.account_id, name: peerName(m.account_id) }; });
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const g = grpOf(S.conv);
+  const canAll = (mine && (mine.role === 'owner' || mine.role === 'admin')) || (g && g.owner_acc === ME());
+  if (canAll) list.unshift({ acc: '@all', name: '所有人' });
+  return list;
 }
 function openMention(q) {
   const el = $('mention-pop'); if (!el) return;
@@ -2671,10 +2684,20 @@ async function loadOlder() {
 }
 
 /* ---- 语音播放 ---- */
+const vspeed = () => { try { const v = +LS.get('ch2vs', 1); return (v === 1.5 || v === 2) ? v : 1; } catch (e) { return 1; } };
+function paintSpeed() { const b = $('voice-speed'); if (!b) return; const v = vspeed(); b.textContent = v === 1 ? '1.0x' : v + 'x'; }
+function cycleSpeed() {
+  const order = [1, 1.5, 2], i = order.indexOf(vspeed());
+  LS.set('ch2vs', order[(i + 1) % 3]);
+  paintSpeed();
+  try { if (audioEl) audioEl.playbackRate = vspeed(); } catch (e) {}
+}
 function stopAudio() { if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl = null; } const id = playingId; playingId = null; if (id) markPlaying(id, false); }
 function markPlaying(id, on) {
   const el = msgElOf(id); const v = el && el.querySelector('.voice');
   if (v) { v.classList.toggle('playing', on); if (!on) { const i = v.querySelector('.vprog i'); if (i) i.style.width = '0'; } }
+  const sp = $('voice-speed'); if (sp) sp.style.display = on ? 'block' : 'none';
+  if (on) paintSpeed();
 }
 let vSeekAt = 0, vSeekEl = null;
 function voiceSeek(e, b) {
@@ -2697,7 +2720,7 @@ function togglePlay(id, url) {
   if (playingId === id) { stopAudio(); return; }
   stopAudio();
   const src = disp(url);
-  const a = new Audio(); audioEl = a; playingId = id; a.preload = 'auto'; a.src = src; markPlaying(id, true);
+  const a = new Audio(); audioEl = a; playingId = id; a.preload = 'auto'; a.src = src; a.playbackRate = vspeed(); markPlaying(id, true);
   voiceProgress(id, a);
   const end = () => { if (playingId === id) { playingId = null; audioEl = null; markPlaying(id, false); } };
   a.onended = end;
@@ -2715,7 +2738,7 @@ function togglePlay(id, url) {
       if (playingId !== id) return;
       const typ = /\.m4a(\?|$)/i.test(src) || /\.mp4(\?|$)/i.test(src) ? 'audio/mp4' : /\.webm(\?|$)/i.test(src) ? 'audio/webm' : 'audio/wav';
       const b = new Blob([buf], { type: typ }), u = URL.createObjectURL(b);
-      const a2 = new Audio(); audioEl = a2; a2.preload = 'auto'; a2.src = u;
+      const a2 = new Audio(); audioEl = a2; a2.preload = 'auto'; a2.src = u; a2.playbackRate = vspeed();
       voiceProgress(id, a2);
       a2.onended = () => { end(); try { URL.revokeObjectURL(u); } catch (e) {} };
       a2.onerror = () => { end(); toast('语音无法解码（错误码 ' + (a2.error ? a2.error.code : 0) + '，大小 ' + buf.byteLength + '）'); };
@@ -5688,7 +5711,7 @@ function mentionsOf(m) {
   if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
   return Array.isArray(a) ? a.filter(function (x) { return x && x.acc && x.name; }) : [];
 }
-function isAtMe(m) { return mentionsOf(m).some(function (x) { return x.acc === ME(); }); }
+function isAtMe(m) { return m.from_acc !== ME() && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; }); }
 function mentionify(text, mentions) {
   let h = linkify(text);
   (Array.isArray(mentions) ? mentions : []).forEach(function (x) {
@@ -6454,6 +6477,7 @@ function bindUI() {
   $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
   $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };
   $('btn-img').onclick = () => $('file-input').click();
+  $('voice-speed').onclick = cycleSpeed; paintSpeed();
   $('file-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('img', x); toast('发送失败'); }); };
   $('doc-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('doc', x); toast('发送失败'); }); };
 
@@ -6486,6 +6510,10 @@ function bindUI() {
   $('call-ui').onclick = () => { $('call-tip').style.display = 'none'; playEl($('remote-audio')); if (S.call && S.call.video) playEl($('remote-video')); };
 
   /* 我 */
+  const fsBig = () => { try { return LS.get('ch2fs', 'normal') === 'big'; } catch (e) { return false; } };
+  const paintFs = () => { document.documentElement.setAttribute('data-fs', fsBig() ? 'big' : 'normal'); const b = $('btn-fs'); if (b) b.textContent = '🔠 字体大小：' + (fsBig() ? '大' : '标准'); };
+  paintFs();
+  $('btn-fs').onclick = () => { LS.set('ch2fs', fsBig() ? 'normal' : 'big'); paintFs(); };
   const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
   const paintImgQ = () => { const b = $('btn-imgq'); if (b) b.textContent = imgOrig() ? '🖼 图片：原图' : '🖼 图片：压缩'; };
