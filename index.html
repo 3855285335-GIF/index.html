@@ -1669,7 +1669,7 @@ function renderRequests() {
 function renderChatTitle() {
   if (!S.peer) return;
   if (S.conv === SELF_KEY()) {
-    $('chat-title').innerHTML = '<span>我的备忘</span><span class="sub">只存在这台设备</span>';
+    $('chat-title').innerHTML = '<span>我的备忘</span><span class="sub">自己</span>';
     $('btn-voice-call').style.display = 'none'; $('btn-video-call').style.display = 'none';
     return;
   }
@@ -2460,9 +2460,23 @@ function ieClose() {
   const r = IE.resolve; IE.resolve = null; if (r) r();
 }
 
+function selfImage(file) {
+  compressImage(file).then(function (out) {
+    const fr = new FileReader();
+    fr.onload = function () {
+      const m = { id: uuid(), conv: S.conv, from_acc: ME(), to_acc: ME(), type: 'image', body: String(fr.result), created_at: new Date().toISOString() };
+      S.msgs.push(m); chatAppend(m, true);
+      msgCacheSave(S.conv, S.msgs);
+      try { LS.set('ch2self:' + S.uid, { body: '[图片]', ts: m.created_at }); } catch (e) {}
+      sched('list'); SFX.send();
+    };
+    fr.readAsDataURL(out);
+  }).catch(function () { toast('这张图存不进备忘'); });
+}
 async function sendImage(file) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
   if (!canSendHere()) return;
+  if (S.conv === SELF_KEY()) { selfImage(file); return; }
   if (!file._edited && imgEditOn() && !/gif|svg/i.test(file.type)) { return openImgEditor(file); }
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
   const out = imgOrig() ? file : await compressImage(file);
@@ -2470,6 +2484,7 @@ async function sendImage(file) {
   addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
 }
 function sendVoice(blob, dur, ext, ct) {
+  if (S.conv === SELF_KEY()) { toast('备忘先只支持文字和图片'); return; }
   if (!S.conv) return;
   if (!canSendHere()) return;
   addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
@@ -5518,6 +5533,7 @@ function videoProbe(file) {
 }
 async function sendVideo(file) {
   if (!S.conv || !canSendHere()) return;
+  if (S.conv === SELF_KEY()) { toast('备忘先只支持文字和图片'); return; }
   const pr = await videoProbe(file);
   if (!S.conv) return;
   const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
@@ -5533,6 +5549,12 @@ function sendDoc(file) {
 const kindOf = f => /^image\//.test((f && f.type) || '') ? 'image' : /^video\//.test((f && f.type) || '') ? 'video' : 'file';
 async function sendFiles(files) {
   if (!canSendHere()) return;
+  if (S.conv === SELF_KEY()) {
+    const imgs = Array.from(files || []).filter(f => f && /^image\//.test(f.type || ''));
+    if (imgs.length !== Array.from(files || []).filter(Boolean).length) toast('备忘先只支持文字和图片');
+    imgs.slice(0, 9).forEach(function (f) { selfImage(f); });
+    return;
+  }
   const list = Array.from(files || []).filter(f => f && f.size > 0);
   if (!list.length) { if (files && files.length) toast('这个文件是空的'); return; }
   if (list.length > 9) toast('一次最多 9 个，已发送前 9 个');
