@@ -213,6 +213,12 @@
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  .ipv-stage { display: flex; align-items: center; justify-content: center; background: #000; border-radius: 14px; margin: 0 12px 10px; overflow: hidden; }
+  #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
+  .ipv-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
+  .ipv-bar button { padding: 10px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 14px; }
+  #ipv-orig.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 18%, var(--surface2)); }
+  #ipv-send { margin-left: auto; background: var(--accent); color: #fff; }
   #pull-tip { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%) translateY(-8px); background: var(--surface); color: var(--muted); font-size: 12px; padding: 6px 14px; border-radius: 14px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; z-index: 80; }
   #pull-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .mo-end { text-align: center; color: var(--muted); font-size: 11.5px; padding: 16px 0 20px; letter-spacing: .3px; opacity: .75; }
@@ -940,10 +946,7 @@
               <button id="btn-bg" type="button">🖼 聊天背景</button>
               <button id="btn-bg-clear" type="button">↩️ 默认背景</button>
               <button id="btn-sound" type="button">🔔 音效：开</button>
-              <button id="btn-imgq" type="button">🖼 图片：压缩</button>
-              <button id="btn-imgedit" type="button">✂️ 发送前编辑：开</button>
-              <button id="btn-sfx-demo" type="button">🔔 试听音效</button>
-              <button id="btn-relaysave" type="button">📶 中转省流量：关</button>
+              <button id="btn-relaysave" type="button" style="display:none">中转省流量</button>
             </div>
           </div>
 
@@ -1078,6 +1081,16 @@
   <div class="fs-btns"><button id="vis-all" type="button">全部好友</button><button id="vis-ok" class="btn-primary" type="button">确定</button></div>
 </div>
 <div id="pull-tip"></div>
+<div id="ipv-backdrop" class="sheet-bd"></div>
+<div id="ipv-sheet" class="sheet">
+  <div class="ipv-stage"><img id="ipv-img" alt=""></div>
+  <div class="ipv-bar">
+    <button id="ipv-edit" type="button">编辑</button>
+    <button id="ipv-orig" type="button">原图</button>
+    <button id="ipv-cancel" type="button">取消</button>
+    <button id="ipv-send" class="btn-primary" type="button">发送</button>
+  </div>
+</div>
 <div id="imgedit-backdrop" class="sheet-bd"></div>
 <div id="imgedit-sheet" class="sheet">
   <div class="menu-title">编辑图片</div>
@@ -1403,10 +1416,11 @@ const S = {
 };
 let sb = null;
 const ME = () => S.me && S.me.account_id;
-const SELF_KEY = () => 'self:' + (ME() || '');
+const SELF_KEY = () => (ME() || '') + '::' + (ME() || '');
 const nickOf = a => (S.profiles[a] && S.profiles[a].nickname) || a;
 const remarkOf = a => (S.remarks && S.remarks[a] && S.remarks[a].r) || '';
 const peerName = a => {
+  if (typeof a === 'string' && a === SELF_KEY()) return '我的备忘';
   if (typeof a === 'string' && a.indexOf('g:') === 0) {
     const gid = a.slice(2);
     try { const g = (typeof GRP !== 'undefined' && GRP.list ? GRP.list : []).find(function (x) { return x.id === gid; }); if (g) return g.name; } catch (e) {}
@@ -1609,20 +1623,14 @@ function renderList() {
   const el = $('conv-list');
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   const gh = '';
-  let selfRow = '';
-  if (S.me) {
-    const sk = SELF_KEY(), sp = LS.get('ch2self:' + S.uid, {}) || {};
-    selfRow = '<div class="conv-item self" data-key="' + esc(sk) + '" data-peer="' + esc(sk) + '">' + avatarHTML('备忘', '', false, 'self') +
-      '<div class="conv-main"><div class="conv-top"><span class="conv-name">我的备忘</span><span class="conv-time">' + (sp.ts ? fmtListTime(sp.ts) : '') + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + esc(sp.body || '发给自己的消息，临时记点东西') + '</span></div></div></div>';
-  }
-  if (!shown.length && !gh) { el.innerHTML = selfRow || emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
-  el.innerHTML = selfRow + gh + shown.map(c => {
-    const name = peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
+  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
+  el.innerHTML = gh + shown.map(c => {
+    const selfConv = c.convKey === SELF_KEY();
+    const name = selfConv ? '我的备忘' : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
     const at = c.convKey !== S.conv && atMeOf(c.convKey);
-    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(gp ? name : nickOf(c.peer_acc), gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : isOnline(c.peer_acc), c.peer_acc) +
+    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(selfConv ? '备忘' : (gp ? name : nickOf(c.peer_acc)), gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : (selfConv ? false : isOnline(c.peer_acc)), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div></div>';
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(selfConv && !c.last_body ? '点这里写点什么' : convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div></div>';
   }).join('');
 }
 function renderContacts() {
@@ -1766,6 +1774,20 @@ function upsertConvRow(r) {
   else if (!S.profiles[n.peer_acc]) fetchProfile(n.peer_acc);
   sched('list'); saveCache();
 }
+let selfConvMade = false;
+async function ensureSelfConv() {
+  if (!sb || !S.me || selfConvMade) return;
+  const key = SELF_KEY();
+  if (S.convs.some(function (c) { return c.convKey === key; })) { selfConvMade = true; return; }
+  selfConvMade = true;
+  try {
+    const r = await sb.from('conversations').select('conv_key').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle();
+    if (!r.error && !r.data) {
+      await sb.from('conversations').insert({ owner_acc: ME(), conv_key: key, peer_acc: ME(), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), unread: 0 });
+    }
+    resyncSoon();
+  } catch (e) { selfConvMade = false; }
+}
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
@@ -1777,6 +1799,7 @@ function applyBoot(b) {
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
+  setTimeout(function () { ensureSelfConv(); }, 800);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -2060,6 +2083,15 @@ async function deliver(m, silent) {
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
     touchConv(m.conv, previewOf(m), t, false);
+    if (m.from_acc === ME() && m.to_acc === ME()) {   // 我的备忘：服务端触发器不更新自己的会话预览，这里补一下
+      try {
+        sb.from('conversations').update({ last_body: previewOf(m), last_ts: t, unread: 0 }).eq('owner_acc', ME()).eq('conv_key', m.conv).select('conv_key').then(function (r) {
+          if (r && !r.error && Array.isArray(r.data) && !r.data.length) {
+            sb.from('conversations').insert({ owner_acc: ME(), conv_key: m.conv, peer_acc: ME(), last_body: previewOf(m), last_ts: t, unread: 0 }).then(function () {}, function () {});
+          }
+        }, function () {});
+      } catch (e) {}
+    }
     saveMsgsSoon();
     if (!gp) pushAfterSend(m);
   } catch (e) {
@@ -2126,14 +2158,6 @@ function sendText() {
   let body = v.replace(/\u2063/g, '');
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
-  if (S.conv === SELF_KEY()) {
-    const m = { id: uuid(), conv: S.conv, from_acc: ME(), to_acc: ME(), type: 'text', body: body, created_at: new Date().toISOString() };
-    S.msgs.push(m); chatAppend(m, true);
-    msgCacheSave(S.conv, S.msgs);
-    try { LS.set('ch2self:' + S.uid, { body: previewOf(m), ts: m.created_at }); } catch (e) {}
-    sched('list'); SFX.send();
-    return;
-  }
   if (S.reply) { body = encQ(S.reply, body); clearReply(); }
   const men = takeMentions(body);
   addLocal(newMsg('text', body, null, men.length ? { mentions: men } : null));
@@ -2450,41 +2474,53 @@ function ieFinish() {
   const src = IE.file;
   cv.toBlob(function (blob) {
     const f = blob ? new File([blob], 'edit.jpg', { type: 'image/jpeg' }) : src;
-    if (f) f._edited = true;
-    ieClose();
-    if (f) sendImage(f);
+    $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
+    try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
+    IE.bmp = null;
+    const r = IE.resolve; IE.resolve = null;
+    if (r) r(f || null);
   }, 'image/jpeg', 0.92);
 }
 function ieClose() {
   $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
-  const r = IE.resolve; IE.resolve = null; if (r) r();
+  try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
+  IE.bmp = null;
+  const r = IE.resolve; IE.resolve = null; if (r) r(null);
 }
 
-function selfImage(file) {
-  compressImage(file).then(function (out) {
-    const fr = new FileReader();
-    fr.onload = function () {
-      const m = { id: uuid(), conv: S.conv, from_acc: ME(), to_acc: ME(), type: 'image', body: String(fr.result), created_at: new Date().toISOString() };
-      S.msgs.push(m); chatAppend(m, true);
-      msgCacheSave(S.conv, S.msgs);
-      try { LS.set('ch2self:' + S.uid, { body: '[图片]', ts: m.created_at }); } catch (e) {}
-      sched('list'); SFX.send();
-    };
-    fr.readAsDataURL(out);
-  }).catch(function () { toast('这张图存不进备忘'); });
-}
-async function sendImage(file) {
-  if (!file || !S.conv || !/^image\//.test(file.type)) return;
-  if (!canSendHere()) return;
-  if (S.conv === SELF_KEY()) { selfImage(file); return; }
-  if (!file._edited && imgEditOn() && !/gif|svg/i.test(file.type)) { return openImgEditor(file); }
+async function sendImageNow(file, orig) {
+  if (!file || !S.conv) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
-  const out = imgOrig() ? file : await compressImage(file);
+  const out = orig ? file : await compressImage(file);
   const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
   addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
 }
+let IPV = { file: null, orig: false, resolve: null, url: '' };
+function openImgPreview(file) {
+  return new Promise(function (resolve) {
+    IPV.file = file; IPV.orig = false; IPV.resolve = resolve;
+    try { if (IPV.url) URL.revokeObjectURL(IPV.url); } catch (e) {}
+    IPV.url = URL.createObjectURL(file);
+    $('ipv-img').src = IPV.url;
+    $('ipv-orig').classList.remove('on');
+    raiseSheet('ipv-sheet', 'ipv-backdrop');
+    $('ipv-backdrop').classList.add('active'); $('ipv-sheet').classList.add('active');
+  });
+}
+function closeImgPreview(send) {
+  $('ipv-backdrop').classList.remove('active'); $('ipv-sheet').classList.remove('active');
+  const r = IPV.resolve; IPV.resolve = null;
+  if (!r) return;
+  if (send) r({ file: IPV.file, orig: IPV.orig }); else r(null);
+}
+async function sendImage(file, direct) {
+  if (!file || !S.conv || !/^image\//.test(file.type)) return;
+  if (!canSendHere()) return;
+  if (direct || /gif|svg/i.test(file.type)) { return sendImageNow(file, imgOrig()); }
+  const r = await openImgPreview(file);
+  if (r) await sendImageNow(r.file, r.orig);
+}
 function sendVoice(blob, dur, ext, ct) {
-  if (S.conv === SELF_KEY()) { toast('备忘先只支持文字和图片'); return; }
   if (!S.conv) return;
   if (!canSendHere()) return;
   addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
@@ -2559,26 +2595,8 @@ async function fetchMsgs(conv, before) {
   const { data, error } = await q; if (error) throw error;
   return (data || []).reverse().map(rowToMsg);
 }
-async function openSelfConv() {
-  const key = SELF_KEY();
-  recAbort(); closeSearch(); closeActs();
-  S.conv = key; S.peer = key; S.hasMore = false; S.stick = true; S.typingUntil = 0; clearReply();
-  document.body.classList.add('chat-open');
-  if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
-  $('emoji-panel').classList.remove('active'); hideSuggest();
-  grpChatMode();
-  renderChatTitle();
-  $('grp-notice').classList.remove('show'); $('chat-mute-tip').classList.remove('show'); gcTipHide();
-  applyChatFor(null, null);
-  const list = await msgCacheGet(key);
-  if (S.conv !== key) return;
-  S.msgs = Array.isArray(list) ? list : [];
-  chatRender(true);
-  $('chat-input').value = draftOf(key);
-}
 async function openConv(key, peer) {
   if (!S.me) return;
-  if (key === SELF_KEY()) return openSelfConv();
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
@@ -4125,7 +4143,7 @@ document.addEventListener('paste', function (e) {
     for (let i = 0; i < items.length; i++) {
       if (items[i].kind === 'file' && /^image\//.test(items[i].type)) {
         const f = items[i].getAsFile();
-        if (f) { e.preventDefault(); sendImage(f); return; }
+        if (f) { e.preventDefault(); sendImage(f, true); return; }
       }
     }
   } catch (err) {}
@@ -5202,9 +5220,9 @@ function stPick(days) { const c = stCutoff(days); return (stFiles || []).filter(
 function stRenderInfo() {
   const all = stFiles || [], size = all.reduce((a, f) => a + ((f.metadata && f.metadata.size) || 0), 0);
   const tot = $('store-total');
-  if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">两个人一共用了 ' + fmtDec(S.stUsed) + ' / 1 GB（' + Math.round(r * 100) + '%）</div><div class="st-bar' + (r >= 0.8 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
+  if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">已用 ' + fmtDec(S.stUsed) + '</div><div class="st-bar' + (r >= 0.9 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
   else tot.style.display = 'none';
-  $('store-info').textContent = all.length ? '你发送的图片/语音/视频/文件共 ' + all.length + ' 个，占用约 ' + fmtMB(size) + '（免费额度 1 GB，是整个项目共用的）。文字消息几乎不占空间；图片发送前会自动压缩；语音按 AAC 约每分钟 0.36MB（浏览器不支持时回退 WAV，约 1.4MB/分钟）；通话不占这里（只走中转流量）。头像和“我的表情”里正在用的表情不算在内，也不会被清理。' : '你还没有发送过图片、语音、视频或文件。文字消息几乎不占空间；图片发送前会自动压缩。';
+  $('store-info').textContent = all.length ? '你发过的图片、语音、视频一共 ' + all.length + ' 个，约 ' + fmtMB(size) + '。文字几乎不占空间；图片发送时会自动压缩。这里的清理只删你自己发出去的文件，不会影响别人。' : '你还没发过图片、语音或视频。文字几乎不占空间，图片会自动压缩，不用特意清理。';
   [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
 }
 async function loadStore() {
@@ -5533,7 +5551,6 @@ function videoProbe(file) {
 }
 async function sendVideo(file) {
   if (!S.conv || !canSendHere()) return;
-  if (S.conv === SELF_KEY()) { toast('备忘先只支持文字和图片'); return; }
   const pr = await videoProbe(file);
   if (!S.conv) return;
   const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
@@ -5549,12 +5566,6 @@ function sendDoc(file) {
 const kindOf = f => /^image\//.test((f && f.type) || '') ? 'image' : /^video\//.test((f && f.type) || '') ? 'video' : 'file';
 async function sendFiles(files) {
   if (!canSendHere()) return;
-  if (S.conv === SELF_KEY()) {
-    const imgs = Array.from(files || []).filter(f => f && /^image\//.test(f.type || ''));
-    if (imgs.length !== Array.from(files || []).filter(Boolean).length) toast('备忘先只支持文字和图片');
-    imgs.slice(0, 9).forEach(function (f) { selfImage(f); });
-    return;
-  }
   const list = Array.from(files || []).filter(f => f && f.size > 0);
   if (!list.length) { if (files && files.length) toast('这个文件是空的'); return; }
   if (list.length > 9) toast('一次最多 9 个，已发送前 9 个');
@@ -6339,9 +6350,10 @@ function bindUI() {
   box.addEventListener('touchstart', e => { const b = mineBubble(e); if (!b) return; clearTimeout(pressT); pressT = setTimeout(() => { showMsgMenu(b.closest('.msg').dataset.id); try { if (navigator.vibrate) navigator.vibrate(40); } catch (x) {} }, 550); }, { passive: true });
   ['touchend', 'touchmove', 'touchcancel'].forEach(ev => box.addEventListener(ev, () => clearTimeout(pressT), { passive: true }));
   bindLightbox();
-  const paintRS = () => { $('btn-relaysave').textContent = relaySave() ? '📶 中转省流量：开' : '📶 中转省流量：关'; };
+  const rsBtn = $('btn-relaysave');
+  const paintRS = () => { if (rsBtn) rsBtn.textContent = relaySave() ? '中转省流量：开' : '中转省流量：关'; };
   paintRS();
-  $('btn-relaysave').onclick = () => {
+  if (rsBtn) rsBtn.onclick = () => {
     LS.set('ch2relaysave2', !relaySave()); paintRS();
     toast(relaySave() ? '已开启：通话走中转时降低码率省流量（直连时不受影响）' : '已关闭：走中转时保持你选的画质');
     if (S.call && S.call.connected) applyCallParams(S.call);
@@ -6471,13 +6483,15 @@ function bindUI() {
   paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
   const paintImgQ = () => { const b = $('btn-imgq'); if (b) b.textContent = imgOrig() ? '🖼 图片：原图' : '🖼 图片：压缩'; };
   paintImgQ();
-  $('btn-imgq').onclick = () => {
+  const imgqBtn = $('btn-imgq');
+  if (imgqBtn) imgqBtn.onclick = () => {
     LS.set('ch2imgq', imgOrig() ? 'auto' : 'orig'); paintImgQ();
     toast(imgOrig() ? '以后发图片用原图：更清晰，但更占空间' : '以后发图片自动压缩：省空间，日常够清晰');
   };
   const paintIe = () => { const b = $('btn-imgedit'); if (b) b.textContent = imgEditOn() ? '✂️ 发送前编辑：开' : '✂️ 发送前编辑：关'; };
   paintIe();
-  $('btn-imgedit').onclick = () => {
+  const ieBtn = $('btn-imgedit');
+  if (ieBtn) ieBtn.onclick = () => {
     LS.set('ch2imgedit', !imgEditOn()); paintIe();
     toast(imgEditOn() ? '发图片前会先让你编辑（旋转/裁剪/画笔/文字）' : '发图片直接发送，不再弹出编辑');
   };
@@ -6524,6 +6538,19 @@ function bindUI() {
   $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
   $('ie-undo').onclick = ieUndo;
   $('ie-cancel').onclick = ieClose;
+  $('ipv-edit').onclick = async function () {
+    const f = IPV.file; if (!f) return;
+    const edited = await openImgEditor(f);
+    if (!edited) return;
+    IPV.file = edited;
+    try { if (IPV.url) URL.revokeObjectURL(IPV.url); } catch (e) {}
+    IPV.url = URL.createObjectURL(edited);
+    $('ipv-img').src = IPV.url;
+  };
+  $('ipv-orig').onclick = function () { IPV.orig = !IPV.orig; this.classList.toggle('on', IPV.orig); };
+  $('ipv-cancel').onclick = function () { closeImgPreview(false); };
+  $('ipv-backdrop').onclick = function () { closeImgPreview(false); };
+  $('ipv-send').onclick = function () { closeImgPreview(true); };
   $('imgedit-backdrop').onclick = ieClose;
   $('ie-ok').onclick = ieFinish;
   $('moment-file').onchange = function (e) { const fs = Array.from(e.target.files || []); e.target.value = ''; addMomentFiles(fs); };
