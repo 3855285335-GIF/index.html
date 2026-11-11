@@ -205,6 +205,7 @@
   .ie-tab.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-panel { padding: 0 12px 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .ie-mini { padding: 8px 12px; border-radius: 11px; font-size: 12.5px; background: var(--surface2); color: var(--ink); }
+  .ie-mini.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); }
   .ie-mini.primary { background: var(--accent); color: #fff; }
   .ie-colors { display: flex; gap: 8px; }
   .ie-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
@@ -224,8 +225,17 @@
   #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
   .ipv-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
   .ipv-bar button { padding: 10px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 14px; }
-  #vpv-video { max-width: 100%; max-height: 55vh; display: block; background: #000; }
-  .vpv-info { font-size: 12.5px; color: var(--muted); padding: 0 14px 10px; text-align: center; }
+  #vpv-video { max-width: 100%; max-height: 48vh; display: block; background: #000; }
+  .vpv-edit { padding: 0 14px 8px; }
+  .vpv-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 8px; }
+  .vpv-row #vpv-range { font-size: 12.5px; color: var(--muted); margin-right: auto; }
+  .vpv-track { display: flex; flex-direction: column; gap: 2px; }
+  .vpv-track input[type="range"] { width: 100%; height: 22px; accent-color: var(--accent); }
+  .vpv-tip { font-size: 11.5px; color: var(--muted); padding-top: 4px; }
+  .vpv-progress { padding: 0 14px 10px; display: flex; align-items: center; gap: 10px; }
+  .vpv-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+  .vpv-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+  .vpv-ptext { font-size: 12px; color: var(--muted); }
   #ipv-orig.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 18%, var(--surface2)); }
   #ipv-send { margin-left: auto; background: var(--accent); color: #fff; }
   #pull-tip { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%) translateY(-8px); background: var(--surface); color: var(--muted); font-size: 12px; padding: 6px 14px; border-radius: 14px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; z-index: 80; }
@@ -1111,7 +1121,19 @@
 <div id="vpv-backdrop" class="sheet-bd"></div>
 <div id="vpv-sheet" class="sheet">
   <div class="ipv-stage"><video id="vpv-video" controls playsinline webkit-playsinline preload="metadata"></video></div>
-  <div class="vpv-info" id="vpv-info"></div>
+  <div class="vpv-edit">
+    <div class="vpv-row"><span id="vpv-range">0:00 - 0:00</span><button id="vpv-cover" type="button" class="ie-mini">当前画面做封面</button><button id="vpv-compress" type="button" class="ie-mini">压缩：关</button></div>
+    <div class="vpv-track">
+      <input id="vpv-start" type="range" min="0" max="1000" value="0" step="1" aria-label="开始时间">
+      <input id="vpv-end" type="range" min="0" max="1000" value="1000" step="1" aria-label="结束时间">
+    </div>
+    <div class="vpv-tip" id="vpv-tip">两条滑杆裁开头和结尾；不裁不压就是原样发送</div>
+  </div>
+  <div class="vpv-progress" id="vpv-progress" style="display:none">
+    <div class="vpv-bar"><i id="vpv-bar-i"></i></div>
+    <div class="vpv-ptext" id="vpv-ptext">处理中…</div>
+    <button id="vpv-pcancel" type="button" class="ie-mini">取消</button>
+  </div>
   <div class="ipv-bar">
     <button id="vpv-cancel" type="button">取消</button>
     <button id="vpv-send" class="btn-primary" type="button">发送</button>
@@ -5815,35 +5837,121 @@ function videoProbe(file) {
     try { u = URL.createObjectURL(file); v.src = u; v.load(); } catch (e) { fin(null); }
   });
 }
-let VPV = { file: null, resolve: null, url: '' };
+let VPV = { file: null, resolve: null, url: '', dur: 0, start: 0, end: 0, compress: false, poster: null, cover: null, busy: false, rec: null };
+function vpvFmt(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function vpvPaintRange() {
+  const d = VPV.dur || 0;
+  $('vpv-range').textContent = vpvFmt(VPV.start) + ' - ' + vpvFmt(VPV.end) + (d ? ' / ' + vpvFmt(d) : '');
+  const cut = (!d && VPV.start > 0.08) || (d && (VPV.start > 0.08 || VPV.end < d - 0.08));
+  $('vpv-tip').textContent = (VPV.compress || cut) ? '会重新编码，视频多长就等多久（可以取消）' : '两条滑杆裁开头和结尾；不裁不压就是原样发送';
+}
 function openVideoPreview(file, pr) {
   return new Promise(function (resolve) {
-    VPV.file = file; VPV.resolve = resolve;
+    VPV.file = file; VPV.resolve = resolve; VPV.poster = (pr && pr.poster) || null; VPV.cover = null;
+    VPV.compress = false; VPV.busy = false; VPV.rec = null; VPV.start = 0; VPV.end = 0;
     try { if (VPV.url) URL.revokeObjectURL(VPV.url); } catch (e) {}
     VPV.url = URL.createObjectURL(file);
     const v = $('vpv-video'); v.src = VPV.url; try { v.load(); } catch (e) {}
-    const mb = file.size / 1048576;
-    const d = pr && pr.dur ? (Math.floor(pr.dur / 60) + ':' + String(pr.dur % 60).padStart(2, '0') + ' · ') : '';
-    $('vpv-info').textContent = d + (mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(file.size / 1024)) + ' KB') + ' · 原样发送，不压缩';
+    $('vpv-compress').classList.remove('on'); $('vpv-compress').textContent = '压缩：关';
+    $('vpv-progress').style.display = 'none'; $('vpv-bar-i').style.width = '0';
+    VPV.dur = (pr && pr.dur) || 0; VPV.end = VPV.dur;
+    $('vpv-start').value = 0; $('vpv-end').value = 1000;
+    v.addEventListener('loadedmetadata', function () {
+      const d = isFinite(v.duration) ? v.duration : 0;
+      if (d && (!VPV.dur || Math.abs(d - VPV.dur) > 1)) { VPV.dur = d; VPV.end = d; $('vpv-end').value = 1000; }
+      vpvPaintRange();
+    }, { once: true });
+    vpvPaintRange();
     raiseSheet('vpv-sheet', 'vpv-backdrop');
     $('vpv-backdrop').classList.add('active'); $('vpv-sheet').classList.add('active');
   });
 }
-function closeVideoPreview(ok) {
+function closeVideoPreview(result) {
+  VPV.cancelEncode = true;
+  try { if (VPV.rec && VPV.rec.state !== 'inactive') VPV.rec.stop(); } catch (e) {}
   $('vpv-backdrop').classList.remove('active'); $('vpv-sheet').classList.remove('active');
   const v = $('vpv-video'); try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+  $('vpv-progress').style.display = 'none';
   const r = VPV.resolve; VPV.resolve = null;
-  if (r) r(!!ok);
+  if (r) r(result || null);
+}
+function vpvCancelEncode() {
+  VPV.cancelEncode = true;
+  try { if (VPV.rec && VPV.rec.state !== 'inactive') VPV.rec.stop(); } catch (e) {}
+  try { $('vpv-video').pause(); } catch (e) {}
+}
+async function vpvEncode() {
+  const v = $('vpv-video');
+  if (!v.captureStream) throw new Error('这台设备的浏览器不支持视频编辑，只能原样发送');
+  const start = Math.max(0, VPV.start), end = Math.min(VPV.end, VPV.dur || v.duration || 0);
+  if (end - start < 0.2) throw new Error('裁剪后太短了');
+  const w = v.videoWidth || 720, h = v.videoHeight || 1280;
+  const scale = VPV.compress ? Math.min(1, 720 / Math.max(w, h)) : 1;
+  const cw = Math.max(2, Math.round(w * scale / 2) * 2), ch = Math.max(2, Math.round(h * scale / 2) * 2);
+  const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+  const ctx = cv.getContext('2d');
+  const mixed = new MediaStream();
+  cv.captureStream(30).getVideoTracks().forEach(function (t) { mixed.addTrack(t); });
+  try { const vs = v.captureStream(); if (vs) vs.getAudioTracks().forEach(function (t) { mixed.addTrack(t); }); } catch (e) {}
+  const mime = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+  const rec = new MediaRecorder(mixed, { mimeType: mime, videoBitsPerSecond: VPV.compress ? 1600000 : 4000000, audioBitsPerSecond: 96000 });
+  VPV.rec = rec; VPV.cancelEncode = false;
+  const parts = [];
+  rec.ondataavailable = function (e) { if (e.data && e.data.size) parts.push(e.data); };
+  const stopped = new Promise(function (r) { rec.onstop = r; });
+  $('vpv-progress').style.display = 'flex';
+  try { v.pause(); v.currentTime = start; } catch (e) {}
+  await new Promise(function (r) { const h2 = function () { v.removeEventListener('seeked', h2); r(); }; v.addEventListener('seeked', h2, { once: true }); setTimeout(r, 700); });
+  rec.start(120);
+  try { await v.play(); } catch (e) {}
+  const total = Math.max(0.2, end - start);
+  await new Promise(function (resolve, reject) {
+    const tick = function () {
+      if (VPV.cancelEncode) { try { rec.stop(); } catch (e) {} reject(new Error('已取消')); return; }
+      const t = v.currentTime - start;
+      $('vpv-bar-i').style.width = Math.max(0, Math.min(100, Math.round(t / total * 100))) + '%';
+      $('vpv-ptext').textContent = '处理中 ' + vpvFmt(Math.min(t, total)) + ' / ' + vpvFmt(total);
+      if (v.currentTime >= end || v.ended) { try { rec.stop(); } catch (e) {} resolve(); return; }
+      try { ctx.drawImage(v, 0, 0, cw, ch); } catch (e) {}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  await stopped;
+  try { v.pause(); } catch (e) {}
+  $('vpv-progress').style.display = 'none';
+  if (VPV.cancelEncode) throw new Error('已取消');
+  const blob = new Blob(parts, { type: 'video/webm' });
+  if (!blob.size) throw new Error('处理失败，请重试');
+  return new File([blob], 'clip.webm', { type: 'video/webm' });
+}
+async function vpvSendNow() {
+  if (VPV.busy) return;
+  const v = $('vpv-video');
+  const d = VPV.dur || v.duration || 0;
+  const cut = VPV.start > 0.08 || (d && VPV.end < d - 0.08);
+  if (!VPV.compress && !cut) { closeVideoPreview({ file: VPV.file, poster: VPV.cover || VPV.poster, dur: d || null }); return; }
+  VPV.busy = true;
+  try {
+    const f = await vpvEncode();
+    closeVideoPreview({ file: f, poster: VPV.cover || VPV.poster, dur: Math.max(1, Math.round(VPV.end - VPV.start)) });
+  } catch (e) {
+    VPV.busy = false;
+    toast((e && e.message === '已取消') ? '已取消处理' : ('视频处理失败：' + ((e && e.message) || '请重试')));
+  }
 }
 async function sendVideo(file) {
   if (!S.conv || !canSendHere()) return;
   const pr = await videoProbe(file);
   if (!S.conv) return;
-  if (!(await openVideoPreview(file, pr))) return;
-  if (!S.conv) return;
-  const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
-  if (pr.poster) { ex._poster = pr.poster; try { ex._pu = URL.createObjectURL(pr.poster); } catch (e) {} }
-  addLocal(newMsg('video', URL.createObjectURL(file), pr.dur, ex));
+  const r = await openVideoPreview(file, pr);
+  if (!r || !S.conv) return;
+  const f = r.file;
+  const ext = extOfName(f.name) || (f.type.indexOf('webm') >= 0 ? 'webm' : extOfType(f.type, 'mp4'));
+  const ex = { _blob: f, _ext: ext, _ct: f.type || 'video/mp4' };
+  const poster = r.poster || pr.poster;
+  if (poster) { ex._poster = poster; try { ex._pu = URL.createObjectURL(poster); } catch (e) {} }
+  addLocal(newMsg('video', URL.createObjectURL(f), r.dur || pr.dur, ex));
 }
 function sendDoc(file) {
   const n = cpSlice(file.name || '文件', 120), lu = URL.createObjectURL(file);
@@ -6833,9 +6941,42 @@ function bindUI() {
   $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
   $('ie-undo').onclick = ieUndo;
   $('ie-cancel').onclick = ieClose;
-$('vpv-cancel').onclick = function () { closeVideoPreview(false); };
-$('vpv-backdrop').onclick = function () { closeVideoPreview(false); };
-$('vpv-send').onclick = function () { closeVideoPreview(true); };
+$('vpv-cancel').onclick = function () { closeVideoPreview(null); };
+$('vpv-backdrop').onclick = function () { if (!VPV.busy) closeVideoPreview(null); };
+$('vpv-send').onclick = function () { vpvSendNow(); };
+$('vpv-pcancel').onclick = function () { vpvCancelEncode(); };
+$('vpv-compress').onclick = function () {
+  VPV.compress = !VPV.compress;
+  this.classList.toggle('on', VPV.compress);
+  this.textContent = '压缩：' + (VPV.compress ? '开' : '关');
+  vpvPaintRange();
+};
+$('vpv-cover').onclick = function () {
+  const v = $('vpv-video'); const w = v.videoWidth, h = v.videoHeight;
+  if (!w || !h) { toast('视频还没加载好'); return; }
+  const k = Math.min(1, 720 / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  try { c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); } catch (e) { toast('这一帧取不到，换个时间再试'); return; }
+  c.toBlob(function (b) { if (!b) { toast('取封面失败'); return; } VPV.cover = b; toast('封面已换成当前画面'); }, 'image/jpeg', 0.82);
+};
+const vpvSlide = function (which) {
+  const d = VPV.dur || 0;
+  if (d <= 0) return;
+  if (which === 'start') {
+    let v = Math.min(+$('vpv-start').value / 1000 * d, VPV.end - 0.3);
+    VPV.start = Math.max(0, v);
+    $('vpv-start').value = Math.round(VPV.start / d * 1000);
+    try { $('vpv-video').currentTime = VPV.start; } catch (e) {}
+  } else {
+    let v = Math.max(+$('vpv-end').value / 1000 * d, VPV.start + 0.3);
+    VPV.end = Math.min(d, v);
+    $('vpv-end').value = Math.round(VPV.end / d * 1000);
+    try { $('vpv-video').currentTime = Math.max(0, VPV.end - 0.05); } catch (e) {}
+  }
+  vpvPaintRange();
+};
+$('vpv-start').addEventListener('input', function () { vpvSlide('start'); });
+$('vpv-end').addEventListener('input', function () { vpvSlide('end'); });
 $('ie-panel-mosaic').addEventListener('click', function (e) {
   const b = e.target.closest('[data-s]'); if (!b) return;
   IE.mosaicSize = +b.dataset.s;
