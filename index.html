@@ -171,7 +171,7 @@
   .mo-imgs.two { grid-template-columns: repeat(2, 1fr); }
   .mo-imgs.one { grid-template-columns: 1fr; }
   .mo-imgs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 9px; display: block; background: var(--surface2); cursor: pointer; }
-  .mo-imgs.one img { max-height: 320px; aspect-ratio: auto; }
+  .mo-imgs.one img { width: 100%; height: auto; max-height: none; aspect-ratio: auto; object-fit: contain; background: var(--surface2); }
   .mo-acts { display: flex; gap: 16px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
   .mo-act { background: none; color: var(--muted); font-size: 12.5px; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
   .mo-act.on { color: var(--accent2); font-weight: 600; animation: heartPop .36s cubic-bezier(.2,1.4,.4,1); }
@@ -376,11 +376,13 @@
   #grp-notice { display: none; padding: 7px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink); cursor: pointer;
     background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border-top: 1px solid var(--line);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #grp-notice.show { display: block; }
+  #grp-notice.show { display: flex; align-items: center; gap: 8px; }
+  #grp-notice .gn-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #grp-notice #gn-ok { flex-shrink: 0; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: 12px; padding: 4px 10px; border-radius: 9px; margin-left: 10px; }
   #grp-notice b { color: var(--accent); margin-right: 4px; }
   .gi-notice { margin: 2px 0 10px; padding: 10px 12px; background: var(--surface2); border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .gi-notice .gi-note-t { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
-  .gi-notice .gi-note-t button { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: 12.5px; padding: 5px 12px; border-radius: 9px; margin-left: 12px; }
+  .gi-notice .gi-note-t { font-size: 11.5px; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+  .gi-notice .gi-note-t button { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: 12.5px; padding: 6px 14px; border-radius: 10px; margin-left: 18px; }
   .gi-notice .gi-note-x { color: var(--ink); }
   .at { color: var(--accent); font-weight: 600; }
   .msg.mine .at { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
@@ -1832,7 +1834,10 @@ function paintPull(text, show) {
   if (text) el.innerHTML = '<i class="pull-dot' + (/正在刷新/.test(text) ? ' spin' : '') + '"></i>' + esc(text);
   el.classList.toggle('show', !!show);
 }
+let pullBusy = false;
 async function pullRefresh() {
+  if (pullBusy) return;
+  pullBusy = true;
   SFX.refresh();
   paintPull('正在刷新…', true);
   try {
@@ -1846,18 +1851,25 @@ async function pullRefresh() {
       await grpInvitesLoad(true);
     }
   } catch (e) { logErr('pull', e); }
-  setTimeout(function () { paintPull('', false); }, 500);
+  pullBusy = false;
+  paintPull('', false);
 }
 function bindPull(el, fn) {
   if (!el) return;
   let sx = 0, sy = 0, pulling = false, locked = false;
-  const end = function () { if (locked && pullDist > 80) fn(); else paintPull('', false); pulling = false; locked = false; };
+  const end = function () {
+    if (!pulling) return;
+    const dist = pullDist;
+    pulling = false; locked = false;
+    if (dist > 80 && !pullBusy) fn();
+    else if (!pullBusy) paintPull('', false);
+  };
   el.addEventListener('touchstart', function (e) {
-    if (el.scrollTop > 0 || e.touches.length !== 1) { pulling = false; return; }
+    if (pullBusy || el.scrollTop > 0 || e.touches.length !== 1) { pulling = false; return; }
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; pulling = true; locked = false; pullDist = 0;
   }, { passive: true });
   el.addEventListener('touchmove', function (e) {
-    if (!pulling) return;
+    if (!pulling || pullBusy) return;
     const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
     if (!locked) {
       if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { pulling = false; paintPull('', false); return; }   // 斜着/横着滑：不触发
@@ -1869,7 +1881,7 @@ function bindPull(el, fn) {
     paintPull(pullDist > 80 ? '松开刷新' : '下拉刷新', true);
   }, { passive: false });
   el.addEventListener('touchend', end);
-  el.addEventListener('touchcancel', function () { pulling = false; locked = false; paintPull('', false); });
+  el.addEventListener('touchcancel', function () { pulling = false; locked = false; if (!pullBusy) paintPull('', false); });
 }
 async function resync() {
   if (S.syncing || !sb || !S.me) return;
@@ -4288,14 +4300,22 @@ function grpOpenMeta(key) {
   const gid = gidOf(key); if (!gid) return;
   grpMembers(gid).then(function () { if (S.conv === key) renderChatTitle(); }, function (e) { logErr('grpMeta', e); });
 }
+function noticeAckKey() { return 'ch2na:' + (S.uid || ''); }
+function noticeAcked(gid, at) { try { const m = LS.get(noticeAckKey(), {}) || {}; return m[gid] && m[gid] === at; } catch (e) { return false; } }
+function ackNotice(gid, at) { try { const m = LS.get(noticeAckKey(), {}) || {}; m[gid] = at; LS.set(noticeAckKey(), m); } catch (e) {} }
 function renderGrpNotice() {
   const el = $('grp-notice'); if (!el) return;
   const g = (S.conv && isGroupKey(S.conv)) ? grpOf(S.conv) : null;
   const t = g && g.notice ? String(g.notice).trim() : '';
-  el.classList.toggle('show', !!t);
-  if (!t) { el.innerHTML = ''; el.onclick = null; return; }
-  el.innerHTML = '<b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 40));
-  el.onclick = function () { openActs('群公告', [{ label: t, fn: null }, { label: '关闭', fn: null }]); };
+  const at = (g && g.notice_at) || '';
+  if (!t || noticeAcked(g.id, at)) { el.classList.remove('show'); el.innerHTML = ''; el.onclick = null; return; }
+  el.innerHTML = '<span class="gn-text"><b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 40)) + '</span><button id="gn-ok" type="button">知道了</button>';
+  el.classList.add('show');
+  el.onclick = function (e) {
+    const ok = e.target.closest('#gn-ok');
+    if (ok) { e.stopPropagation(); ackNotice(g.id, at); el.classList.remove('show'); el.innerHTML = ''; return; }
+    openActs('群公告', [{ label: t, fn: null }, { label: '关闭', fn: null }]);
+  };
 }
 function editGroupNotice(gid) {
   const g = GRP.list.find(function (x) { return x.id === gid; }) || {};
