@@ -224,6 +224,8 @@
   #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
   .ipv-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
   .ipv-bar button { padding: 10px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 14px; }
+  #vpv-video { max-width: 100%; max-height: 55vh; display: block; background: #000; }
+  .vpv-info { font-size: 12.5px; color: var(--muted); padding: 0 14px 10px; text-align: center; }
   #ipv-orig.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 18%, var(--surface2)); }
   #ipv-send { margin-left: auto; background: var(--accent); color: #fff; }
   #pull-tip { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%) translateY(-8px); background: var(--surface); color: var(--muted); font-size: 12px; padding: 6px 14px; border-radius: 14px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; z-index: 80; }
@@ -1104,6 +1106,15 @@
   <div class="fs-btns"><button id="vis-all" type="button">全部好友</button><button id="vis-ok" class="btn-primary" type="button">确定</button></div>
 </div>
 <div id="pull-tip"></div>
+<div id="vpv-backdrop" class="sheet-bd"></div>
+<div id="vpv-sheet" class="sheet">
+  <div class="ipv-stage"><video id="vpv-video" controls playsinline webkit-playsinline preload="metadata"></video></div>
+  <div class="vpv-info" id="vpv-info"></div>
+  <div class="ipv-bar">
+    <button id="vpv-cancel" type="button">取消</button>
+    <button id="vpv-send" class="btn-primary" type="button">发送</button>
+  </div>
+</div>
 <div id="ipv-backdrop" class="sheet-bd"></div>
 <div id="ipv-sheet" class="sheet">
   <div class="ipv-stage"><img id="ipv-img" alt=""></div>
@@ -5788,9 +5799,31 @@ function videoProbe(file) {
     try { u = URL.createObjectURL(file); v.src = u; v.load(); } catch (e) { fin(null); }
   });
 }
+let VPV = { file: null, resolve: null, url: '' };
+function openVideoPreview(file, pr) {
+  return new Promise(function (resolve) {
+    VPV.file = file; VPV.resolve = resolve;
+    try { if (VPV.url) URL.revokeObjectURL(VPV.url); } catch (e) {}
+    VPV.url = URL.createObjectURL(file);
+    const v = $('vpv-video'); v.src = VPV.url; try { v.load(); } catch (e) {}
+    const mb = file.size / 1048576;
+    const d = pr && pr.dur ? (Math.floor(pr.dur / 60) + ':' + String(pr.dur % 60).padStart(2, '0') + ' · ') : '';
+    $('vpv-info').textContent = d + (mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(file.size / 1024)) + ' KB') + ' · 原样发送，不压缩';
+    raiseSheet('vpv-sheet', 'vpv-backdrop');
+    $('vpv-backdrop').classList.add('active'); $('vpv-sheet').classList.add('active');
+  });
+}
+function closeVideoPreview(ok) {
+  $('vpv-backdrop').classList.remove('active'); $('vpv-sheet').classList.remove('active');
+  const v = $('vpv-video'); try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+  const r = VPV.resolve; VPV.resolve = null;
+  if (r) r(!!ok);
+}
 async function sendVideo(file) {
   if (!S.conv || !canSendHere()) return;
   const pr = await videoProbe(file);
+  if (!S.conv) return;
+  if (!(await openVideoPreview(file, pr))) return;
   if (!S.conv) return;
   const ex = { _blob: file, _ext: extOfName(file.name) || extOfType(file.type, 'mp4'), _ct: file.type || 'video/mp4' };
   if (pr.poster) { ex._poster = pr.poster; try { ex._pu = URL.createObjectURL(pr.poster); } catch (e) {} }
@@ -6784,6 +6817,9 @@ function bindUI() {
   $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
   $('ie-undo').onclick = ieUndo;
   $('ie-cancel').onclick = ieClose;
+$('vpv-cancel').onclick = function () { closeVideoPreview(false); };
+$('vpv-backdrop').onclick = function () { closeVideoPreview(false); };
+$('vpv-send').onclick = function () { closeVideoPreview(true); };
 $('ie-panel-mosaic').addEventListener('click', function (e) {
   const b = e.target.closest('[data-s]'); if (!b) return;
   IE.mosaicSize = +b.dataset.s;
