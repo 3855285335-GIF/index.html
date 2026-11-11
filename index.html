@@ -213,6 +213,8 @@
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
+  .ver-line { text-align: center; font-size: 11.5px; color: var(--muted); padding: 8px 0 14px; }
+  .ver-line button { background: none; color: var(--accent); font-size: 11.5px; padding: 4px 8px; }
   .ipv-stage { display: flex; align-items: center; justify-content: center; background: #000; border-radius: 14px; margin: 0 12px 10px; overflow: hidden; }
   #ipv-img { max-width: 100%; max-height: 55vh; display: block; }
   .ipv-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
@@ -971,6 +973,8 @@
               <button id="btn-logout" class="btn-danger" type="button">退出登录</button>
             </div>
           </div>
+
+          <div class="ver-line">版本 <span id="ver-text">—</span><button id="btn-check-update" type="button">检查更新</button></div>
 
           <details class="me-diag"><summary>环境诊断 / 最近错误（通话、语音、通知打不开时看这里）</summary><pre id="diag"></pre><pre id="errlog"></pre></details>
 
@@ -3633,7 +3637,7 @@ async function gcTipPoll() {
     const n = st.members.length;
     const inIt = st.members.some(function (m) { return m.acc === ME(); });
     const el = $('gc-tip');
-    el.innerHTML = '<span class="gc-dot"></span><b>群语音中 · ' + n + ' 人</b><span>' + (inIt ? '点这里回到语音' : '点这里加入') + '</span>';
+    el.innerHTML = '<span class="gc-dot"></span><b>语音中 · ' + n + ' 人</b><span>' + (inIt ? '回到语音' : '加入') + '</span>';
     el.classList.add('show');
   } catch (e) { gcTipHide(); }
 }
@@ -4273,7 +4277,7 @@ function renderGrpNotice() {
   const t = g && g.notice ? String(g.notice).trim() : '';
   el.classList.toggle('show', !!t);
   if (!t) { el.innerHTML = ''; el.onclick = null; return; }
-  el.innerHTML = '<b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 90));
+  el.innerHTML = '<b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 40));
   el.onclick = function () { openActs('群公告', [{ label: t, fn: null }, { label: '关闭', fn: null }]); };
 }
 function editGroupNotice(gid) {
@@ -6587,6 +6591,9 @@ function bindUI() {
 
   bindPull(document.querySelector('main'), pullRefresh);
   bindPull($('chat-messages'), function () { if (S.conv) syncChat().catch(function () {}); });
+  const vt = $('ver-text'); if (vt) vt.textContent = '2026-11-11 20:30';
+  const cu = $('btn-check-update');
+  if (cu) cu.onclick = function () { location.replace(location.pathname + '?v=' + Date.now()); };
 $('btn-export').onclick = () => {
   if (S.conv) { exportChat(S.conv); return; }
   const list = S.convs.filter(c => !convGone(c)).slice(0, 15).map(c => ({ label: peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
