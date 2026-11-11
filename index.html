@@ -517,6 +517,15 @@
   .gi-search input { width: 100%; height: 36px; padding: 6px 12px; border-radius: 12px; background: var(--surface2); border: 1px solid transparent; font-size: 14px; }
   .gi-search input:focus { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
   .gi-empty { padding: 14px 4px; font-size: 13px; color: var(--muted); }
+  .gi-files { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 8px; }
+  .gi-file { display: flex; align-items: center; gap: 10px; background: var(--surface2); border-radius: 12px; padding: 9px 11px; }
+  .gi-file .gf-ic { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .gi-file .gf-main { flex: 1; min-width: 0; }
+  .gi-file .gf-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gi-file .gf-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .gi-file .gf-del { color: var(--danger); background: none; font-size: 12px; padding: 4px 6px; flex-shrink: 0; }
+  .gi-file-empty { font-size: 12.5px; color: var(--muted); padding: 2px 2px 8px; }
+  #gi-file-up { margin: 0 0 10px; }
   .gi-req { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); }
   .gi-req .avatar { width: 34px; height: 34px; font-size: 14px; border-radius: 12px; }
   .gi-rn { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1066,7 +1075,7 @@
 <div id="gi-backdrop" class="sheet-bd"></div>
 <div id="gi-sheet" class="sheet">
   <div class="gi-head"><div id="gi-av"></div><div class="gi-names"><div id="gi-name"></div><div id="gi-sub"></div></div><button id="gi-x" type="button" aria-label="关闭">×</button></div>
-  <div class="gi-body"><div id="gi-notice"></div><div class="section-title">群成员</div><div class="gi-search"><input id="gi-search" type="search" placeholder="搜索成员（名字 / 账号）" autocomplete="off"></div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div><div id="gi-approve-row" class="gi-opt" style="display:none"><span>新成员需要群主/管理员同意</span><button id="gi-approve-toggle" type="button" class="sw" aria-label="新成员需要同意"></button></div><div id="gi-requests"></div></div>
+  <div class="gi-body"><div id="gi-notice"></div><div class="section-title">群成员</div><div class="gi-search"><input id="gi-search" type="search" placeholder="搜索成员（名字 / 账号）" autocomplete="off"></div><div id="gi-members" class="gi-members"></div><div id="gi-pending" class="gi-pending"></div><div id="gi-approve-row" class="gi-opt" style="display:none"><span>新成员需要群主/管理员同意</span><button id="gi-approve-toggle" type="button" class="sw" aria-label="新成员需要同意"></button></div><div id="gi-requests"></div><div class="section-title">群文件</div><div id="gi-files" class="gi-files"></div><button id="gi-file-up" class="ie-mini" type="button">＋ 上传文件</button><input id="gi-file-input" type="file" hidden></div>
   <div class="gi-acts"><button id="gi-invite" type="button">邀请好友</button><button id="gi-settings" type="button">群设置</button><button id="gi-clear" type="button">清空聊天</button><button id="gi-leave" type="button" class="gi-danger">退出群聊</button></div>
 </div>
 <div id="moment-backdrop" class="sheet-bd"></div>
@@ -4452,6 +4461,69 @@ async function grpInvite(key) {
 }
 let giKey = null;
 function closeGrpInfo() { $('gi-backdrop').classList.remove('active'); $('gi-sheet').classList.remove('active'); giKey = null; }
+/* ---- 群文件 ---- */
+const gfSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round((n || 0) / 1024)) + ' KB';
+function gfURL(path) { try { return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl); } catch (e) { return ''; } }
+async function loadGroupFiles(gid) {
+  const box = $('gi-files'); if (!box || !gid) return;
+  box.innerHTML = '<div class="gi-file-empty">读取中…</div>';
+  try {
+    const r = await sb.from('group_files').select('id,group_id,uploader,name,size,mime,path,created_at').eq('group_id', gid).order('created_at', { ascending: false }).limit(100);
+    if (r.error) { box.innerHTML = '<div class="gi-file-empty">读取失败</div>'; return; }
+    renderGroupFiles(gid, r.data || []);
+  } catch (e) { box.innerHTML = '<div class="gi-file-empty">读取失败</div>'; }
+}
+function renderGroupFiles(gid, list) {
+  const box = $('gi-files'); if (!box) return;
+  if (!list.length) { box.innerHTML = '<div class="gi-file-empty">还没有群文件</div>'; return; }
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const g = GRP.list.find(function (x) { return x.id === gid; });
+  const canAll = (mine && (mine.role === 'owner' || mine.role === 'admin')) || (g && g.owner_acc === ME());
+  box.innerHTML = list.map(function (f) {
+    const ext = (String(f.name || '').split('.').pop() || 'FILE').toUpperCase().slice(0, 4);
+    const canDel = f.uploader === ME() || canAll;
+    return '<div class="gi-file" data-id="' + esc(f.id) + '">' +
+      '<div class="gf-ic">' + esc(ext) + '</div>' +
+      '<div class="gf-main"><div class="gf-name">' + esc(f.name) + '</div><div class="gf-sub">' + gfSize(f.size) + ' · ' + esc(peerName(f.uploader)) + '</div></div>' +
+      '<a class="ie-mini" href="' + esc(gfURL(f.path)) + '" target="_blank" rel="noopener" download>下载</a>' +
+      (canDel ? '<button class="gf-del" type="button">删</button>' : '') + '</div>';
+  }).join('');
+  box.onclick = function (e) {
+    const del = e.target.closest('.gf-del'); if (!del) return;
+    e.preventDefault();
+    deleteGroupFile(gid, del.closest('.gi-file').dataset.id);
+  };
+}
+async function uploadGroupFile(gid, file) {
+  if (!file || !gid) return;
+  if (file.size > 50 * 1048576) { toast('文件最大 50MB'); return; }
+  toast('正在上传 ' + file.name + '…');
+  const ext = (String(file.name || '').match(/\.([a-z0-9]{1,6})$/i) || [])[1] || 'bin';
+  const path = ME() + '/gf_' + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext.toLowerCase();
+  const up = await sb.storage.from('chat-media').upload(path, file, { contentType: file.type || 'application/octet-stream', cacheControl: '31536000' });
+  if (up.error) { logErr('gf-up', up.error); toast('上传失败：' + (up.error.message || '请重试')); return; }
+  const r = await sb.from('group_files').insert({ group_id: gid, uploader: ME(), name: file.name || ('文件.' + ext), size: file.size, mime: file.type || '', path: path });
+  if (r.error) { logErr('gf-ins', r.error); toast('保存失败：' + (r.error.message || '请重试')); return; }
+  toast('已上传到群文件');
+  loadGroupFiles(gid);
+}
+function deleteGroupFile(gid, id) {
+  const box = $('gi-files'); const row = box && box.querySelector('.gi-file[data-id="' + id + '"]');
+  const nm = row && row.querySelector('.gf-name') ? row.querySelector('.gf-name').textContent : '这个文件';
+  openActs('删除“' + nm + '”？\n会从群文件里移除。', [
+    { label: '删除', danger: true, fn: async function () {
+      try {
+        const q = await sb.from('group_files').select('path').eq('id', id).maybeSingle();
+        const path = q && q.data && q.data.path;
+        const d = await sb.from('group_files').delete().eq('id', id);
+        if (d.error) throw d.error;
+        if (path) sb.storage.from('chat-media').remove([path]).catch(function () {});
+        toast('已删除'); loadGroupFiles(gid);
+      } catch (e) { toast('删除失败：' + ((e && e.message) || '请重试')); }
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
 async function grpInfo(key) {
   const k = key || S.conv;
   if (!isGroupKey(k)) return;
@@ -4519,6 +4591,7 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   }).join('') : '';
   $('gi-settings').style.display = (canManage || (mine && mine.title)) ? '' : 'none';
   $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
+  try { loadGroupFiles(gid); } catch (e) {}
 }
 let giMembers = [];
 function giMemberHTML(m) {
@@ -6664,6 +6737,11 @@ $('gi-approve-toggle').onclick = async function () {
 };
 $('gi-notice').onclick = function (e) { const b = e.target.closest('#gi-note-edit'); if (!b || !giKey) return; editGroupNotice(gidOf(giKey)); };
 $('gi-search').addEventListener('input', function () { renderGiMembers(this.value); });
+$('gi-file-up').onclick = function () { if (!giKey) return; const i = $('gi-file-input'); i.value = ''; i.click(); };
+$('gi-file-input').onchange = function (e) {
+  const f = (e.target.files || [])[0]; e.target.value = '';
+  if (f && giKey) uploadGroupFile(gidOf(giKey), f);
+};
 $('gi-requests').onclick = async function (e) {
   const row = e.target.closest('.gi-req'); if (!row || !giKey) return;
   const ok = !!e.target.closest('[data-ok]'), no = !!e.target.closest('[data-no]');
