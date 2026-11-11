@@ -4877,6 +4877,36 @@ async function grpPoll() {
   } catch (e) { logErr('grpPoll', e); }
 }
 /* ================= 朋友圈 ================= */
+const MV = {};
+async function loadMomentViews(rows) {
+  try {
+    const mine = [], others = [];
+    rows.forEach(function (r) { if (r.author_acc === ME()) mine.push(r.id); else others.push(r.id); });
+    if (others.length) {
+      const r = await sb.from('moment_views').select('moment_id').in('moment_id', others);
+      if (!r.error) {
+        const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
+        const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
+        if (add.length) sb.from('moment_views').insert(add).then(function () {}, function () {});
+      }
+    }
+    if (mine.length) {
+      const c = await sb.from('moment_views').select('moment_id').in('moment_id', mine);
+      const cnt = {};
+      (c.data || []).forEach(function (x) { cnt[x.moment_id] = (cnt[x.moment_id] || 0) + 1; });
+      mine.forEach(function (id) { MV[id] = cnt[id] || 0; });
+    }
+  } catch (e) { logErr('mv', e); }
+}
+async function openMomentViews(mid) {
+  const r = await sb.from('moment_views').select('viewer_acc,created_at').eq('moment_id', mid).order('created_at', { ascending: false }).limit(100);
+  if (r.error) { toast('读取失败：' + (r.error.message || '请重试')); return; }
+  const list = r.data || [];
+  if (!list.length) { toast('还没有人看过'); return; }
+  openActs('看过这条的 ' + list.length + ' 人', list.map(function (x) {
+    return { label: peerName(x.viewer_acc) + ' · ' + fmtMomentTime(x.created_at), fn: null };
+  }).concat([{ label: '关闭', fn: null }]));
+}
 async function momentsLoad(reset) {
   if (!sb || !S.me || MO.loading) return;
   MO.loading = true;
@@ -4893,10 +4923,10 @@ async function momentsLoad(reset) {
     MO.has = rows.length === 15;
     if (rows.length) MO.cursor = rows[rows.length - 1].created_at;
     const ids = rows.map(function (r) { return r.id; });
+    if (ids.length) await loadMomentViews(rows);
     const likes = reset ? {} : Object.assign({}, MO.likes), cmts = reset ? {} : Object.assign({}, MO.comments);
     if (ids.length) {
-      const [lk, cm] = await Promise.all([
-        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
+      const [lk, cm] = await Promise.all([        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
         sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at,reply_to_acc,parent_id').in('moment_id', ids).order('created_at', { ascending: true })
       ]);
       if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
@@ -4916,14 +4946,16 @@ async function momentsLoad(reset) {
     if (el && !MO.list.length) el.innerHTML = '<div class="empty">朋友圈加载失败：' + esc((e && e.message) || '请重试') + '</div>';
   } finally { MO.loading = false; }
 }
-function momentReactHTML(id) {
+function momentReactHTML(id, isMine) {
   const like = MO.likes[id] || [], liked = like.indexOf(ME()) >= 0, cms = MO.comments[id] || [];
   const likers = like.length ? '<div class="mo-likers">♥ ' + like.map(function (a) { return '<span class="mo-liker" data-acc="' + esc(a) + '">' + esc(peerName(a)) + '</span>'; }).join('、') + '</div>' : '';
   const list = cms.length ? '<div class="mo-comments">' + cms.map(function (c) {
     const to = c.reply_to_acc ? '<span class="mo-rep"> 回复 </span><b class="mo-cauthor" data-acc="' + esc(c.reply_to_acc) + '">' + esc(peerName(c.reply_to_acc)) + '</b>' : '';
     return '<div class="mo-comment" data-cid="' + esc(c.id) + '" data-acc="' + esc(c.author_acc) + '"><b class="mo-cauthor" data-acc="' + esc(c.author_acc) + '">' + esc(peerName(c.author_acc)) + '</b>' + to + '：' + esc(c.body) + '</div>';
   }).join('') + '</div>' : '';
-  return '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button></div>' + likers + list;
+  const vn = (isMine && MV[id]) || 0;
+  const vBtn = vn ? '<button class="mo-act mo-views" data-views="1" type="button">👀 ' + vn + ' 人看过</button>' : '';
+  return '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button>' + vBtn + '</div>' + likers + list;
 }
 function momentCardHTML(m, i) {
   const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
@@ -4936,7 +4968,7 @@ function momentCardHTML(m, i) {
       ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '') + '</div>' +
       (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
     (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
-    '<div class="mo-react">' + momentReactHTML(m.id) + '</div>' +
+    '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
     '</div>';
 }
 function renderMoments() {
@@ -4980,7 +5012,7 @@ function fmtMomentTime(t) {
 function refreshMomentReact(id) {
   const card = document.querySelector('#moment-list .moment[data-id="' + String(id).replace(/[^a-zA-Z0-9_-]/g, '') + '"]');
   const zone = card && card.querySelector('.mo-react');
-  if (zone) zone.innerHTML = momentReactHTML(id);
+  if (zone) { const mm = MO.list.find(function (x) { return x.id === id; }); zone.innerHTML = momentReactHTML(id, !!(mm && mm.author_acc === ME())); }
 }
 function paintVisLabel() {
   const b = $('moment-vis'); if (!b) return;
@@ -6720,6 +6752,7 @@ function bindUI() {
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
+    if (e.target.closest('[data-views]')) { openMomentViews(id); return; }
     const cm = e.target.closest('.mo-comment');
     if (cm && cm.dataset.cid) { commentMoment(id, { acc: cm.dataset.acc, cid: cm.dataset.cid }); return; }   // 点评论 = 回复他
     const im = e.target.closest('.mo-imgs img'); if (im && im.dataset.url) openMomentImage(im.dataset.url);
