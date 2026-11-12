@@ -22,38 +22,37 @@
   a.btn, button.btn { flex: 1; text-align: center; padding: 9px 6px; border-radius: 11px; background: #2a243d; color: #cfc7e6; text-decoration: none; font-size: 13px; border: 0; font-family: inherit; }
   a.btn.main { background: #7c5cff; color: #fff; font-weight: 600; }
   .ok { color: #6ee7a8; }
-  h2 { font-size: 14px; color: #b3abc8; margin: 22px 2px 8px; font-weight: 600; }
 </style>
 </head>
 <body>
   <h1>Chatter 代码审查包</h1>
-  <div class="sub">按「风险从高到低」排的顺序，一次只喂一个文件，省额度。</div>
+  <div class="sub">当前线上版本：526477 字节（main abf4de35，2026-11-13）。按风险排序，一次喂一个文件。</div>
 
   <div class="how">
-    <b>省额度用法：</b>每个文件单独发一条消息，让 Claude 只审这一个；每 2–3 个文件换一个新对话，把上一轮的发现贴过去当上下文。<br>
-    <b>先看 1、2、3、4</b>（SQL + 消息核心 + 事件绑定 + 群聊），这四块占了大部分风险；<b>01 样式</b>放最后，可以不看。
+    <b>省额度用法：</b>每个文件单独发一条消息，只让它审这一个；每 2–3 个文件换新对话，把上一轮结论贴过去。<br>
+    <b>先看 1、2、3、4</b>（SQL / 消息核心 / 事件绑定 / 群聊），样式放最后。
   </div>
 
   <div id="list"></div>
 
 <script>
 const items = [
-  ['数据库结构（表 + 全部 RLS 策略 + 函数 + 触发器）', 'schema.md', '23 KB', '先看这个：所有权限边界都在这里'],
-  ['全部 SQL 补丁（按执行顺序）', 'all-sql.sql', '80 KB', '和 schema.md 对照着看，确认没有漏掉的策略'],
-  ['消息核心', 'parts/03-消息核心.txt', '68 KB', '发送 deliver、实时 onDbMsg、@提醒、撤回、已读；重点查竞态和重复'],
-  ['事件绑定', 'parts/13-事件绑定.txt', '47 KB', '所有 onclick/监听；重点查空元素、重复绑定、未清理监听'],
-  ['群聊', 'parts/07-群聊.txt', '35 KB', '建群、邀请、审批、公告、群文件、退群；重点查权限和并发'],
-  ['朋友圈', 'parts/08-朋友圈.txt', '23 KB', '发布、可见性、点赞评论、访客；重点查越权'],
-  ['好友 / 通话 / 群语音', 'parts/04-好友通话群语音.txt', '46 KB', '好友关系、1 对 1 信令、4 人群语音；重点查信令竞态'],
-  ['实时与降级', 'parts/05-实时与降级.txt', '13 KB', 'Realtime 重连、轮询兜底；重点查重复渲染'],
-  ['媒体与视频编辑', 'parts/10-媒体与视频编辑.txt', '43 KB', '表情、视频裁剪/压缩、文件；重点查 MediaRecorder 和内存'],
-  ['登录与账号', 'parts/06-登录与账号.txt', '23 KB', '登录/注册/启动、草稿、背景、错误上报'],
-  ['查看器与通知', 'parts/12-查看器与通知.txt', '22 KB', '图片查看器、引用跳转、系统通知、Web Push'],
-  ['多选与导出', 'parts/09-多选与导出.txt', '12 KB', '多选转发、导出、清空、搜索'],
-  ['好友资料与存储', 'parts/11-好友资料与存储.txt', '14 KB', '备注、资料卡、上传进度、存储提醒'],
-  ['配置与工具', 'parts/02-配置与工具.txt', '39 KB', '配置、esc、工具函数、全局状态'],
-  ['页面结构与样式', 'parts/01-页面结构与样式.txt', '122 KB', 'HTML + CSS；最后看，主要是样式覆盖问题'],
-  ['启动', 'parts/14-启动.txt', '2 KB', '初始化、定时器']
+  ['数据库结构（表 + RLS + 函数 + 触发器）', 'schema.md', '23 KB', '所有权限边界'],
+  ['全部 SQL 补丁（含最新安全/免打扰）', 'all-sql.sql', '87 KB', '和 schema 对照'],
+  ['消息核心', 'code/parts/03-消息核心.txt', '90 KB', '发送/实时/撤回/已读/缺口'],
+  ['事件绑定', 'code/parts/13-事件绑定.txt', '49 KB', '所有点击/监听'],
+  ['群聊', 'code/parts/07-群聊.txt', '36 KB', '建群/邀请/审批/公告/群文件'],
+  ['好友通话群语音', 'code/parts/04-好友通话群语音.txt', '46 KB', '信令/群语音'],
+  ['媒体与视频编辑', 'code/parts/10-媒体与视频编辑.txt', '43 KB', '表情/视频/文件'],
+  ['朋友圈', 'code/parts/08-朋友圈.txt', '23 KB', '可见性/点赞/访客'],
+  ['登录与账号', 'code/parts/06-登录与账号.txt', '23 KB', '登录/资料/背景'],
+  ['查看器与通知', 'code/parts/12-查看器与通知.txt', '21 KB', '图片查看/通知/推送'],
+  ['配置与工具', 'code/parts/02-配置与工具.txt', '18 KB', 'esc/工具/状态'],
+  ['实时与降级', 'code/parts/05-实时与降级.txt', '13 KB', '重连/轮询'],
+  ['好友资料与存储', 'code/parts/11-好友资料与存储.txt', '14 KB', '备注/资料卡'],
+  ['多选与导出', 'code/parts/09-多选与导出.txt', '12 KB', '多选/导出'],
+  ['启动', 'code/parts/14-启动.txt', '2 KB', '初始化'],
+  ['页面结构与样式', 'code/parts/01-页面结构与样式.txt', '124 KB', 'CSS/结构（最后看）']
 ];
 const list = document.getElementById('list');
 items.forEach(function (it, i) {
