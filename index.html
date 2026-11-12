@@ -2803,6 +2803,22 @@ function closeChat() {
   $('btn-voice-call').style.display = ''; $('btn-video-call').style.display = '';
   sched('list');
 }
+async function pollConv(conv) {
+  if (!conv || !sb) return;
+  if (document.hidden) return;
+  try {
+    const last = S.msgs.length ? ts(S.msgs[S.msgs.length - 1]) : 0;
+    const since = new Date((last || now() - 60000) - 5000).toISOString();
+    const { data, error } = await sb.from('messages').select('*').eq('conv_key', conv).gt('created_at', since).order('created_at', { ascending: true }).limit(50);
+    if (error) throw error;
+    if (S.conv !== conv) return;
+    (data || []).forEach(function (r) {
+      const m = rowToMsg(r);
+      if (m.from_acc !== ME() && !S.msgs.some(function (x) { return x.id === m.id; })) onIncoming(m);
+      else upsertMsg(m);
+    });
+  } catch (e) { logErr('poll', e); }
+}
 async function syncChat() {
   const conv = S.conv; if (!conv || !sb) return;
   try {
@@ -4472,10 +4488,10 @@ function grpChatMode() {
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
   if (gp) {
-    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) pollConv(S.conv); }, 8000);
     refreshMyMuteState(gidOf(S.conv));
-    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 2000);
-    GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 3000);
+    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 20000);
+    GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 6000);
     setTimeout(function () { if (isGroupKey(S.conv)) gcTipPoll(); }, 500);
   }
   applyMuteState();
