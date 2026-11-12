@@ -1,0 +1,1202 @@
+<!-- Chatter 前端 · 03-消息核心 · 原文件第 1802-3002 行 -->
+<!-- 这一段负责：会话/消息读写、发送 deliver、实时 onDbMsg、@、撤回、已读（最高优先级） -->
+/* ================= 会话 / 消息数据 ================= */
+function touchConv(key, preview, t, inc) {
+  let c = convOf(key);
+  if (c) { c.last_body = preview; c.last_ts = t; if (inc && key !== S.conv) c.unread = (c.unread || 0) + 1; }
+  else {
+    const peer = peerOf(key, ME());
+    S.convs.push({ convKey: key, peer_acc: peer, last_body: preview, last_ts: t, last_read_ts: null, unread: inc && key !== S.conv ? 1 : 0 });
+    if (isGroupKey(peer)) { if (!grpOf(peer)) setTimeout(() => grpLoad(true), 0); }
+    else if (!S.profiles[peer]) fetchProfile(peer);
+  }
+  S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
+  sched('list'); saveCache();
+}
+async function fetchProfile(acc, force) {
+  if (!sb) return;
+  if (!force && S.profiles[acc]) return;
+  const { data } = await sb.from('profiles').select('account_id,nickname,avatar_url,signature,bg_url,cover_url').eq('account_id', acc).maybeSingle();
+  if (data) {
+    S.profiles[acc] = Object.assign({}, S.profiles[acc] || {}, data, { _at: now() });
+    if (acc === ME()) S.me = S.profiles[acc];
+    sched('list'); sched('contacts'); sched('title'); saveCache();
+  }
+}
+let readT = {};
+const isMissingFn = e => /42883|PGRST202|PGRST204|schema cache|does not exist|Could not find the function/i.test(String((e && (e.code || '')) + ' ' + (e && e.message || '')));
+async function fetchPeerRead(conv) {
+  if (!sb || !conv || S.noPR || !S.me || isGroupKey(conv)) return;
+  try {
+    const { data, error } = await sb.rpc('peer_read', { p_conv: conv });
+    if (error) { if (isMissingFn(error)) S.noPR = true; return; }
+    const t = data ? Date.parse(data) : 0;
+    if (t > 0 && t > peerReadOf(conv)) { S.peerRead[conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); if (S.conv === conv) refreshReads(); }
+  } catch (e) { logErr('peerRead', e); }
+}
+function markReadSoon(key) {
+  if (key === S.conv) setTimeout(() => sendReadAck(key), 120);
+  const c = convOf(key); if (c) { c.unread = 0; c.last_read_ts = new Date().toISOString(); sched('list'); }
+  clearTimeout(readT[key]);
+  readT[key] = setTimeout(() => {
+    if (!sb || !S.me) return;
+    const direct = () => sb.from('conversations').update({ unread: 0, last_read_ts: new Date().toISOString() }).eq('owner_acc', ME()).eq('conv_key', key).then(r => { if (r && r.error) logErr('markRead', r.error); });
+    if (S.noMR) { direct(); return; }
+    sb.rpc('mark_read', { p_conv: key }).then(r => {
+      if (r && r.error) { if (isMissingFn(r.error)) S.noMR = true; logErr('mark_read', r.error); direct(); }
+    }, () => direct());
+  }, 250);
+  saveCache();
+}
+function upsertConvRow(r) {
+  const key = r.conv_key; if (!key) return;
+  const c = convOf(key);
+  const n = { convKey: key, peer_acc: r.peer_acc || peerOf(key, ME()), last_body: r.last_body || (c && c.last_body) || r.last_body, last_ts: r.last_ts, last_read_ts: r.last_read_ts, unread: r.unread || 0 };
+  if (key === S.conv) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
+  if (isGroupKey(key) && (n.unread || 0) > 0 && now() - (AT_CHK[key] || 0) > 4000) { AT_CHK[key] = now(); checkConvMention(key); }
+  if (c) Object.assign(c, n); else S.convs.push(n);
+  S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
+  if (isGroupKey(n.peer_acc)) { if (!grpOf(n.peer_acc)) grpLoad(); }
+  else if (!S.profiles[n.peer_acc]) fetchProfile(n.peer_acc);
+  sched('list'); saveCache();
+}
+let selfConvMade = false;
+async function ensureSelfConv() {
+  if (!sb || !S.me || selfConvMade) return;
+  const key = SELF_KEY();
+  if (S.convs.some(function (c) { return c.convKey === key; })) { selfConvMade = true; return; }
+  selfConvMade = true;
+  try {
+    const r = await sb.from('conversations').select('conv_key').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle();
+    if (!r.error && !r.data) {
+      await sb.from('conversations').insert({ owner_acc: ME(), conv_key: key, peer_acc: ME(), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), unread: 0 });
+    }
+    resyncSoon();
+  } catch (e) { selfConvMade = false; }
+}
+function applyBoot(b) {
+  S.me = b.me; S.profiles[b.me.account_id] = b.me;
+  S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
+  (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
+  const oldConvs = S.convs || [];
+  S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
+  S.requests = b.requests || [];
+  const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
+  if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
+  saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
+  setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
+  setTimeout(function () { ensureSelfConv(); }, 800);
+  try { grpLoad(); grpInvitesLoad(); } catch (e) {}
+}
+async function bootstrap() {
+  const { data, error } = await sb.rpc('bootstrap');
+  if (error) {
+    if (error.code === 'PGRST202' || /bootstrap/i.test(error.message || '')) throw new Error('数据库脚本还没更新：请先在 Supabase 执行最新的 setup.sql');
+    throw error;
+  }
+  return data;
+}
+async function ensureProfile(user) {
+  const meta = user.user_metadata || {};
+  const acc = String(meta.account_id || ('user_' + user.id.slice(0, 6))).toLowerCase();
+  await sb.from('profiles').upsert({ id: user.id, account_id: acc, nickname: meta.nickname || '新用户' }, { onConflict: 'id', ignoreDuplicates: true });
+}
+/* ---- 下拉刷新 ---- */
+let pullDist = 0;
+function paintPull(text, show) {
+  const el = $('pull-tip'); if (!el) return;
+  if (text) el.innerHTML = '<i class="pull-dot' + (/正在刷新/.test(text) ? ' spin' : '') + '"></i>' + esc(text);
+  el.classList.toggle('show', !!show);
+}
+let pullBusy = false;
+async function pullRefresh() {
+  if (pullBusy) return;
+  pullBusy = true;
+  SFX.refresh();
+  paintPull('正在刷新…', true);
+  try {
+    if ($('tab-moments').classList.contains('active')) {
+      applyMomentCover(); loadMyCover(); await momentsLoad(true);
+    } else if ($('tab-me').classList.contains('active')) {
+      renderMe(); renderEnv();
+    } else {
+      if (S.me) await resync();
+      await grpLoad(true);
+      await grpInvitesLoad(true);
+    }
+  } catch (e) { logErr('pull', e); }
+  pullBusy = false;
+  paintPull('', false);
+}
+function bindPull(el, fn) {
+  if (!el) return;
+  let sx = 0, sy = 0, pulling = false, locked = false;
+  const end = function () {
+    if (!pulling) return;
+    const dist = pullDist;
+    pulling = false; locked = false;
+    if (dist > 80 && !pullBusy) fn();
+    else if (!pullBusy) paintPull('', false);
+  };
+  el.addEventListener('touchstart', function (e) {
+    if (pullBusy || el.scrollTop > 0 || e.touches.length !== 1) { pulling = false; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; pulling = true; locked = false; pullDist = 0;
+  }, { passive: true });
+  el.addEventListener('touchmove', function (e) {
+    if (!pulling || pullBusy) return;
+    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (!locked) {
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { pulling = false; paintPull('', false); return; }   // 斜着/横着滑：不触发
+      if (dy > 12 && dy > Math.abs(dx) * 1.6) locked = true; else return;
+    }
+    pullDist = Math.max(0, dy);
+    if (el.scrollTop > 0) { pulling = false; locked = false; paintPull('', false); return; }
+    if (e.cancelable) e.preventDefault();
+    paintPull(pullDist > 80 ? '松开刷新' : '下拉刷新', true);
+  }, { passive: false });
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', function () { pulling = false; locked = false; if (!pullBusy) paintPull('', false); });
+}
+async function resync() {
+  if (S.syncing || !sb || !S.me) return;
+  S.syncing = true;
+  try { const b = await bootstrap(); if (b) applyBoot(b); if (S.conv) await syncChat(); if (S.v8 !== true) checkSchema(); if (S.v7 === true) loadRemarks(); }
+  catch (e) { logErr('resync', e); }
+  finally { S.syncing = false; }
+}
+
+/* ---- 聊天窗口 DOM（增量更新，不整页重绘）---- */
+let audioEl = null, playingId = null;
+function msgHTML(m) {
+  const mine = m.from_acc === ME(); let body;
+  switch (m.type) {
+    case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
+    case 'image': body = '<div class="bubble img"><img src="' + esc(disp(m.body)) + '" alt="" decoding="async">' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; break;
+    case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
+    case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
+      const u = disp(m.body), local = /^blob:/.test(m.body);
+      const cover = m._pu ? '<img class="vposter" src="' + esc(m._pu) + '" alt="">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
+      body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span><span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
+    }
+    case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
+    case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
+    case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + '</div>'; }
+  }
+  const st = m._st === 'sending' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
+  const gp = isGroupKey(m.conv);
+  let senderTag = '';
+  if (!mine && gp) {
+    const gm = groupMemberOf(gidOf(m.conv), m.from_acc);
+    if (gm) {
+      const role = gm.role === 'owner' ? '群主' : gm.role === 'admin' ? '管理员' : '';
+      const title = (gm.title && gm.title_on) ? gm.title : '';
+      senderTag = role + (title ? (role ? ' · ' : '') + title : '');
+    }
+  }
+  return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
+    (mine ? '' : avatarHTML(nickOf(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
+    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
+}
+function dayLabel(t) {
+  const d = new Date(t), n = new Date();
+  if (isNaN(d.getTime())) return '';
+  if (d.toDateString() === n.toDateString()) return '今天';
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天';
+  if (d.getFullYear() === n.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+function chatRender(stick) {
+  const b = $('chat-messages');
+  const vis = S.msgs.filter(m => !isHidden(m));
+  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; return; }
+  let prevDay = '';
+  b.innerHTML = vis.map(function (m) {
+    const day = new Date(m.created_at).toDateString();
+    let sep = '';
+    if (day !== prevDay) { prevDay = day; sep = '<div class="day-sep"><span>' + dayLabel(m.created_at) + '</span></div>'; }
+    return sep + msgHTML(m);
+  }).join('');
+  if (stick) b.scrollTop = b.scrollHeight;
+}
+function chatAppend(m, force) {
+  if (isHidden(m)) return;
+  const b = $('chat-messages'), e = b.querySelector('.empty'); if (e) e.remove();
+  b.insertAdjacentHTML('beforeend', msgHTML(m));
+  if (force || S.stick) b.scrollTop = b.scrollHeight;
+}
+function msgElOf(id) { return $('chat-messages').querySelector('.msg[data-id="' + id + '"]'); }
+function chatReplace(m) {
+  if (isHidden(m)) return;
+  const el = msgElOf(m.id);
+  if (!el) { chatRender(S.stick); return; }
+  el.outerHTML = msgHTML(m);
+}
+function patchMsg(id, p) {
+  const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
+  Object.assign(S.msgs[i], p); chatReplace(S.msgs[i]); return S.msgs[i];
+}
+/* S.msgs[i] 的时间变了或是新来的：如果位置不对，只把这一条挪到正确位置（以前会整页重画，聊天里图片视频多时很卡） */
+function placeMsg(i) {
+  const m = S.msgs[i]; if (!m) return; const t = ts(m); let j = i;
+  while (j > 0 && ts(S.msgs[j - 1]) > t) j--;
+  if (j === i) while (j < S.msgs.length - 1 && ts(S.msgs[j + 1]) < t) j++;
+  if (j === i) return;
+  S.msgs.splice(i, 1); S.msgs.splice(j, 0, m);
+  const el = msgElOf(m.id); if (!el) return;
+  let next = null; for (let k = j + 1; k < S.msgs.length && !next; k++) next = msgElOf(S.msgs[k].id);
+  const box = $('chat-messages'); if (next) box.insertBefore(el, next); else box.appendChild(el);
+}
+function upsertMsg(m) {
+  const i = S.msgs.findIndex(x => x.id === m.id);
+  if (i > -1) {
+    const o = S.msgs[i];
+    if (o._rx && m.created_at && !m._rx) { addSkew(Date.parse(m.created_at) - o._rx); delete o._rx; }
+    if (o.type === m.type && o.body === m.body && o.dur === m.dur && !o._st) { if (o.created_at !== m.created_at) { o.created_at = m.created_at; placeMsg(i); } return; }
+    S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; S.out.delete(m.id); chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
+  }
+  S.msgs.push(m); chatAppend(m); placeMsg(S.msgs.length - 1);
+  saveMsgsSoon();
+}
+
+/* ---- 收到消息 ---- */
+const AT_KEY = () => 'ch2at:' + (S.uid || 'anon');
+function atMeMap() { if (!S.atMe) { try { S.atMe = LS.get(AT_KEY(), {}) || {}; } catch (e) { S.atMe = {}; } } return S.atMe; }
+function setAtMe(key, on) { const m = atMeMap(); if (on) m[key] = 1; else delete m[key]; try { LS.set(AT_KEY(), m); } catch (e) {} }
+function atMeOf(key) { return !!atMeMap()[key]; }
+const AT_CHK = {};
+async function checkConvMention(key) {
+  if (!sb || !isGroupKey(key)) return;
+  try {
+    const r = await sb.from('messages').select('mentions').eq('conv_key', key).order('created_at', { ascending: false }).limit(1);
+    const m = r && r.data && r.data[0];
+    if (m && Array.isArray(m.mentions) && m.mentions.some(function (x) { return x && (x.acc === ME() || x.acc === '@all'); })) {
+      if (!atMeOf(key)) { setAtMe(key, true); SFX.at(); sched('list'); }
+    }
+  } catch (e) {}
+}
+function onIncoming(m, noInc) {
+  if (S.recalledEarly.has(m.id) && m.type !== 'recalled') { m = Object.assign({}, m, { type: 'recalled', body: '' }); }
+  const first = !S.seen.has(m.id); S.seen.add(m.id);
+  if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
+  const open = S.conv === m.conv;
+  const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME(); });
+  if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
+  if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
+  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
+  if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
+  touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
+  if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
+}
+function onDbMsg(row, kind) {
+  const m = rowToMsg(row);
+  if (kind === 'ins') { if (m.from_acc !== ME()) onIncoming(m); }
+  else if (S.conv === m.conv) upsertMsg(m);
+}
+function onFastMsg(p) {
+  try {
+    if (!p || typeof p !== 'object') return;
+    const me = ME();
+    if (p.to !== me || typeof p.from !== 'string' || !S.friends.includes(p.from)) return;
+    if (typeof p.id !== 'string' || p.conv !== convKeyOf(p.from, p.to)) return;
+    if (['text', 'image', 'voice', 'sticker', 'video', 'file'].indexOf(p.type) < 0) return;
+    let body = typeof p.body === 'string' ? p.body : '';
+    if (p.type === 'text') body = body.slice(0, TEXT_MAX);
+    else if (p.type === 'sticker') { if (!validStk(body)) return; }
+    else if (p.type === 'file') { const f = parseFile(body); if (!f || !isStoreUrl(f.u) || body.length > 1000) return; }
+    else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音/视频只接受本项目存储的地址
+    onIncoming({ id: p.id, conv: p.conv, from_acc: p.from, to_acc: me, type: p.type, body, dur: p.dur | 0 || null, created_at: stampAfterClr(p.conv), _rx: now() });
+  } catch (e) { logErr('fast', e); }
+}
+function onFastRecall(p) {
+  if (!p || typeof p.id !== 'string' || !S.friends.includes(p.from)) return;
+  const m = S.msgs.find(x => x.id === p.id);
+  if (m && m.from_acc === p.from && m.type !== 'recalled') patchMsg(p.id, { type: 'recalled', body: '' });
+  else if (!m) { S.recalledEarly.add(p.id); if (S.recalledEarly.size > 200) S.recalledEarly = new Set(Array.from(S.recalledEarly).slice(-100)); }
+}
+
+/* ---- 发送 ---- */
+async function bcast(topic, event, payload, keep) {
+  if (!S.token) return false;
+  try {
+    const r = await fetch(API_URL + '/realtime/v1/api/broadcast', {
+      method: 'POST', keepalive: !!keep,
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + S.token },
+      body: JSON.stringify({ messages: [{ topic, event, payload, private: true }] })
+    });
+    if (!r.ok) { logErr('bcast', event + ' HTTP ' + r.status); return false; }
+    return true;
+  } catch (e) { logErr('bcast', e); return false; }
+}
+function newMsg(type, body, dur, extra) {
+  return Object.assign({ id: uuid(), conv: S.conv, from_acc: ME(), to_acc: S.peer, type, body, dur: dur || null, created_at: stampAfterClr(S.conv), _st: 'sending' }, extra || {});
+}
+function addLocal(m) {
+  S.out.set(m.id, m); S.msgs.push(m); chatAppend(m, true);
+  touchConv(m.conv, previewOf(m), m.created_at, false);
+  deliver(m); SFX.send();
+}
+async function upload(blob, ext, ct, pre, fixed, onPct) {
+  const path = fixed || ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+  let done = false, tried = false;
+  if (onPct && typeof XMLHttpRequest !== 'undefined' && typeof FormData !== 'undefined') {
+    try {
+      const { data } = await sb.auth.getSession(); const tok = data && data.session && data.session.access_token;
+      if (tok) { tried = true; await xhrUpload(path, blob, ct, tok, onPct); done = true; }
+    } catch (e) { if (tooBigErr(e)) throw e; logErr('xhr-upload', e); }   // 别的问题：退回官方库再传一次
+  }
+  if (!done) {
+    const { error } = await sb.storage.from('chat-media').upload(path, blob, { contentType: ct, cacheControl: '31536000' });
+    if (error && !(tried && /already exists|Duplicate/i.test(String(error.message || '')))) throw error;   // 刚才其实已经传上去了（只是回应丢了）
+  }
+  return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+}
+async function deliver(m, silent) {
+  const id = m.id;
+  try {
+    if (m._blob) {
+      const old = m.body, url = await upload(m._blob, m._ext, m._ct, '', '', m._blob.size > 300 * 1024 ? f => upPct(m, f) : null);
+      setTimeout(() => checkStorage(), 1500);
+      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : url;
+      if (m._poster) {   // 视频封面：和视频同名加 .jpg，传不上也不影响视频本身
+        const vp = /\/chat-media\/([^?#]+)/.exec(url);
+        if (vp) { try { await upload(m._poster, 'jpg', 'image/jpeg', '', decodeURIComponent(vp[1]) + '.jpg'); } catch (x) { logErr('poster', x); } }
+        m._poster = null;
+      }
+      m.body = nb; m._blob = null; patchMsg(id, { body: nb });
+      try { URL.revokeObjectURL(m._fm ? (parseFile(old) || {}).u : old); } catch (e) {}
+    }
+    // 新类型（表情/视频/文件）在确认后端支持之前，先写数据库再通知对方，免得对方看到一条其实没发成的消息
+    const gp = isGroupKey(m.conv);
+    const fastFirst = !gp && S.token && m.type !== 'call' && (S.v6 === true || !/^(sticker|video|file)$/.test(m.type));
+    const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
+    if (fastFirst) fast();
+    const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null };
+    const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
+    if (error && error.code !== '23505') throw error;
+    if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
+    if (!fastFirst && !gp && S.token && m.type !== 'call') fast();
+    S.out.delete(id); delete m._blob;
+    const t = data ? data.created_at : m.created_at;
+    patchMsg(id, { _st: '', created_at: t, _blob: undefined });
+    touchConv(m.conv, previewOf(m), t, false);
+    if (m.from_acc === ME() && m.to_acc === ME()) {   // 我的备忘：服务端触发器不更新自己的会话预览，这里补一下
+      try {
+        sb.from('conversations').update({ last_body: previewOf(m), last_ts: t, unread: 0 }).eq('owner_acc', ME()).eq('conv_key', m.conv).select('conv_key').then(function (r) {
+          if (r && !r.error && Array.isArray(r.data) && !r.data.length) {
+            sb.from('conversations').insert({ owner_acc: ME(), conv_key: m.conv, peer_acc: ME(), last_body: previewOf(m), last_ts: t, unread: 0 }).then(function () {}, function () {});
+          }
+        }, function () {});
+      } catch (e) {}
+    }
+    saveMsgsSoon();
+    if (!gp) pushAfterSend(m);
+  } catch (e) {
+    logErr('send', e);
+    SFX.error();
+    const em = String((e && (e.message || '')) || '') + ' ' + String((e && (e.statusCode || e.status)) || '');
+    const noType = /invalid message type/i.test(em), tooBig = /maximum allowed size|exceeded|too large|413/i.test(em);
+    if (noType) S.v6 = false;
+    m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' });
+    if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
+  }
+}
+/* ---- @某人 ---- */
+let pendingMentions = [];
+let MENT = { open: false, start: -1 };
+function takeMentions(body) {
+  const t = String(body || '');
+  const list = pendingMentions.filter(function (x) { return t.indexOf('@' + x.name) >= 0; });
+  pendingMentions = [];
+  const seen = {};
+  return list.filter(function (x) { if (seen[x.acc]) return false; seen[x.acc] = 1; return true; });
+}
+function closeMention() { MENT.open = false; MENT.start = -1; const el = $('mention-pop'); if (el) el.classList.remove('show'); }
+function mentionMembers() {
+  const gid = S.conv && isGroupKey(S.conv) ? gidOf(S.conv) : '';
+  if (!gid) return [];
+  const list = (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); })
+    .map(function (m) { return { acc: m.account_id, name: peerName(m.account_id) }; });
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const g = grpOf(S.conv);
+  const canAll = (mine && (mine.role === 'owner' || mine.role === 'admin')) || (g && g.owner_acc === ME());
+  if (canAll) list.unshift({ acc: '@all', name: '所有人' });
+  return list;
+}
+function openMention(q) {
+  const el = $('mention-pop'); if (!el) return;
+  const items = mentionMembers().filter(function (x) { return !q || String(x.name).toLowerCase().indexOf(String(q).toLowerCase()) >= 0; });
+  el.innerHTML = items.length ? items.slice(0, 30).map(function (x) {
+    return '<button type="button" class="mp-item" data-acc="' + esc(x.acc) + '" data-name="' + esc(x.name) + '">' + avatarHTML(x.name, avatarOf(x.acc), false, x.acc) + '<span class="mp-name">' + esc(x.name) + '</span></button>';
+  }).join('') : '<div class="mp-empty">没有匹配的成员</div>';
+  el.classList.add('show');
+  MENT.open = true;
+}
+function mentionInput() {
+  const inp = $('chat-input'); if (!inp) return;
+  if (!isGroupKey(S.conv)) { closeMention(); return; }
+  const v = inp.value, pos = inp.selectionStart == null ? v.length : inp.selectionStart;
+  const m = /@([^\s@]{0,12})$/.exec(v.slice(0, pos));
+  if (!m) { closeMention(); return; }
+  MENT.start = pos - m[0].length;
+  const gid = gidOf(S.conv);
+  if (!(GRP.members[gid] || []).length) { grpMembers(gid).catch(function () {}); }
+  openMention(m[1]);
+}
+function pickMention(acc, name) {
+  const inp = $('chat-input'); if (!inp) return;
+  const v = inp.value, pos = inp.selectionStart == null ? v.length : inp.selectionStart;
+  const start = MENT.start >= 0 ? MENT.start : pos;
+  inp.value = v.slice(0, start) + '@' + name + ' ' + v.slice(pos);
+  const np = start + name.length + 2;
+  try { inp.setSelectionRange(np, np); } catch (e) {}
+  pendingMentions.push({ acc: acc, name: name });
+  closeMention(); try { inp.focus(); } catch (e) {}
+}
+function sendText() {
+  const input = $('chat-input'), v = input.value.trim();
+  if (!v || !S.conv) return;
+  if (!canSendHere()) return;
+  input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
+  let body = v.replace(/\u2063/g, '');
+  if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
+  if (!body) return;
+  if (S.reply) { body = encQ(S.reply, body); clearReply(); }
+  const men = takeMentions(body);
+  addLocal(newMsg('text', body, null, men.length ? { mentions: men } : null));
+  closeMention();
+}
+function setReply(m) {
+  S.reply = { id: m.id, snip: previewOf(m).slice(0, 40) };
+  $('reply-text').textContent = (m.from_acc === ME() ? '我' : peerName(m.from_acc)) + '：' + S.reply.snip;
+  $('reply-bar').classList.add('active'); $('chat-input').focus();
+}
+function clearReply() { S.reply = null; $('reply-bar').classList.remove('active'); }
+let lastTy = 0;
+function sendTyping() {
+  if (!S.conv || !S.peer || !S.token || isGroupKey(S.conv) || now() - lastTy < 3000) return;
+  lastTy = now(); const p = { t: 'ty', from: ME(), conv: S.conv, sq: sqOf() };
+  bcast('u:' + S.peer, 'ty', p); dbSignal(S.peer, p);
+}
+function onTyping(p) {
+  if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
+  if (sigDup(p)) return;
+  if (S.conv !== p.conv || S.peer !== p.from) return;
+  S.typingUntil = now() + 4500; renderChatTitle();
+  setTimeout(() => { if (S.typingUntil <= now()) renderChatTitle(); }, 4600);
+}
+/* 已读回执 */
+let lastAck = 0;
+function sendReadAck(conv, force) {
+  if (!conv || !S.token || document.hidden || isGroupKey(conv)) return;
+  if (!force && now() - lastAck < 400) return; lastAck = now();
+  const peer = peerOf(conv, ME());
+  let t = 0; if (S.conv === conv) S.msgs.forEach(m => { if (m.from_acc === peer && !m._st) t = Math.max(t, ts(m)); });
+  if (!t) return;
+  bcast('u:' + peer, 'rd', { from: ME(), conv, ts: new Date(t).toISOString() });
+}
+function refreshReads() {
+  if (!S.conv) return;
+  $('chat-messages').querySelectorAll('.msg.mine').forEach(el => {
+    const m = S.msgs.find(x => x.id === el.dataset.id); if (!m) return;
+    const tEl = el.querySelector('.msg-time'); if (tEl) tEl.textContent = fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '');
+  });
+}
+function onReadAck(p) {
+  if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
+  const t = Date.parse(p.ts); if (!(t > 0)) return;
+  if (t <= peerReadOf(p.conv)) return;
+  S.peerRead[p.conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); refreshReads();
+}
+function onReadReq(p) {
+  if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
+  if (S.conv === p.conv && !document.hidden) { sendReadAck(p.conv, true); return; }
+  const c = convOf(p.conv);
+  if (c && !(c.unread > 0) && c.last_ts && S.token) bcast('u:' + p.from, 'rd', { from: ME(), conv: p.conv, ts: c.last_ts });
+}
+/* 图片先压缩再上传：手机原图几 MB，压到 1600px/JPEG 85% 能省一大半空间 */
+function loadImgEl(file) {
+  return new Promise(function (res, rej) {
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = function () { URL.revokeObjectURL(u); res(im); };
+    im.onerror = function (e) { URL.revokeObjectURL(u); rej(e); };
+    im.src = u;
+  });
+}
+async function compressImage(file) {
+  const t = String((file && file.type) || '');
+  if (!/^image\//.test(t) || /gif|svg/i.test(t) || file.size < 250 * 1024) return file;
+  try {
+    let src, w, h;
+    if (window.createImageBitmap) {
+      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(function () { return createImageBitmap(file); });
+      src = bmp; w = bmp.width; h = bmp.height;
+    } else {
+      const im = await loadImgEl(file);
+      src = im; w = im.naturalWidth || im.width; h = im.naturalHeight || im.height;
+    }
+    if (!w || !h) return file;
+    const max = 1600, r = Math.min(1, max / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * r)), ch = Math.max(1, Math.round(h * r));
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(src, 0, 0, cw, ch);
+    if (src.close) { try { src.close(); } catch (e) {} }
+    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.85); });
+    if (!blob || blob.size >= file.size * 0.92) return file;
+    return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (e) { logErr('img-compress', e); return file; }
+}
+const imgOrig = () => { try { return LS.get('ch2imgq', 'auto') === 'orig'; } catch (e) { return false; } };
+/* ---- 发送前编辑图片：裁剪 / 画笔 / 文字 / 旋转（不依赖 ctx.filter，手机也能用） ---- */
+const IE = { file: null, img: null, tool: 'crop', color: '#ff3b30', size: 10, sel: null, origin: null, drag: null, last: null, hist: [], resolve: null };
+const IE_COLORS = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#0a84ff', '#af52de', '#ffffff', '#111111'];
+function imgEditOn() { try { return LS.get('ch2imgedit', true) !== false; } catch (e) { return true; } }
+
+function ieCanvas() { return $('ie-canvas'); }
+function ieOverlay() { return $('ie-overlay'); }
+function ieWrap() { return $('ie-wrap'); }
+function ieScale() { const cv = ieCanvas(), w = ieWrap().clientWidth || 1; return cv.width / w; }
+
+function iePushHist() {
+  try {
+    const cv = ieCanvas();
+    IE.hist.push(cv.toDataURL('image/jpeg', 0.85));
+    if (IE.hist.length > 4) IE.hist.shift();
+  } catch (e) {}
+}
+function ieUndo() {
+  const u = IE.hist.pop(); if (!u) { toast('没有可撤销的步骤'); return; }
+  const im = new Image();
+  im.onload = function () {
+    const cv = ieCanvas(); cv.width = im.width; cv.height = im.height;
+    cv.getContext('2d').drawImage(im, 0, 0);
+    IE.sel = null; ieLayout();
+  };
+  im.src = u;
+}
+let ieHintT = 0;
+function ieShowHint() {
+  const h = $('ie-hint'); if (!h) return;
+  if (!(IE.tool === 'crop' && !IE.sel)) { h.style.display = 'none'; return; }
+  h.style.display = 'block';
+  clearTimeout(ieHintT);
+  ieHintT = setTimeout(function () { const x = $('ie-hint'); if (x) x.style.display = 'none'; }, 2600);
+}
+function ieLayout() {
+  const cv = ieCanvas(), ov = ieOverlay(), wrap = ieWrap(); if (!cv || !ov || !wrap) return;
+  const w = wrap.clientWidth || 0, h = wrap.clientHeight || 0;
+  if (!w || !h) return;
+  ov.width = w; ov.height = h;
+  ieDrawOverlay();
+  ieShowHint();
+}
+function ieHandles(s) {
+  return [
+    { k: 'nw', x: s.x, y: s.y }, { k: 'n', x: s.x + s.w / 2, y: s.y }, { k: 'ne', x: s.x + s.w, y: s.y },
+    { k: 'w', x: s.x, y: s.y + s.h / 2 }, { k: 'e', x: s.x + s.w, y: s.y + s.h / 2 },
+    { k: 'sw', x: s.x, y: s.y + s.h }, { k: 's', x: s.x + s.w / 2, y: s.y + s.h }, { k: 'se', x: s.x + s.w, y: s.y + s.h }
+  ];
+}
+function ieHit(p) {
+  const s = IE.sel; if (!s) return null;
+  const T = 24;
+  let best = null, bd = 1e9;
+  ieHandles(s).forEach(function (h) {
+    const d = Math.hypot(p.x - h.x, p.y - h.y);
+    if (d <= T && d < bd) { bd = d; best = h.k; }
+  });
+  if (best) return best;
+  if (p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) return 'move';
+  return null;
+}
+function ieDrawOverlay() {
+  const ov = ieOverlay(); if (!ov) return;
+  const ctx = ov.getContext('2d'); if (!ctx) return;
+  ctx.clearRect(0, 0, ov.width, ov.height);
+  if (IE.tool !== 'crop') return;
+  if (!IE.sel) return;
+  const s = IE.sel;
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(0, 0, ov.width, ov.height);
+  ctx.clearRect(s.x, s.y, s.w, s.h);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.strokeRect(Math.round(s.x) + 1, Math.round(s.y) + 1, Math.max(0, Math.round(s.w) - 2), Math.max(0, Math.round(s.h) - 2));
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1;
+  ieHandles(s).forEach(function (h) {
+    ctx.beginPath(); ctx.rect(h.x - 7, h.y - 7, 14, 14); ctx.fill(); ctx.stroke();
+  });
+}
+function ieSetTool(t) {
+  IE.tool = t; IE.sel = null; IE.drag = null; IE.origin = null;
+  document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) { b.classList.toggle('on', b.dataset.t === t); });
+  const pc = $('ie-panel-crop'), pd = $('ie-panel-draw'), pt = $('ie-panel-text'), pm = $('ie-panel-mosaic'), ps = $('ie-panel-stk');
+  if (pc) pc.style.display = t === 'crop' ? '' : 'none';
+  if (pd) pd.style.display = t === 'draw' ? '' : 'none';
+  if (pt) pt.style.display = t === 'text' ? '' : 'none';
+  if (pm) pm.style.display = t === 'mosaic' ? '' : 'none';
+  if (ps) ps.style.display = t === 'stk' ? '' : 'none';
+  if (t === 'stk' && ps && !ps.dataset.full) { paintIeStks(); ps.dataset.full = '1'; }
+  ieLayout();
+}
+function iePoint(e) {
+  const r = ieWrap().getBoundingClientRect();
+  return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) };
+}
+function paintIeColors() {
+  ['ie-colors', 'ie-colors2'].forEach(function (id) {
+    const box = $(id); if (!box) return;
+    box.innerHTML = IE_COLORS.map(function (c) {
+      return '<button type="button" class="ie-sw' + (c === IE.color ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>';
+    }).join('');
+  });
+}
+function openImgEditor(file) {
+  return new Promise(function (resolve) {
+    IE.file = file; IE.resolve = resolve; IE.hist = []; IE.sel = null; IE.drag = null; IE.origin = null;
+    IE.mosaicSize = IE.mosaicSize || 14; IE.stk = IE.stk || '😀'; IE.stkSize = IE.stkSize || 64;
+    const done = function (src) {
+      const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+      if (!w || !h) { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); return; }
+      const cv = ieCanvas();
+      const max = 1600, sc = Math.min(1, max / Math.max(w, h));
+      cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(h * sc));
+      cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+      IE.img = src;
+      raiseSheet('imgedit-sheet', 'imgedit-backdrop');
+      $('imgedit-backdrop').classList.add('active'); $('imgedit-sheet').classList.add('active');
+      paintIeColors(); ieSetTool('crop');
+      setTimeout(ieLayout, 40);
+    };
+    if (window.createImageBitmap) {
+      createImageBitmap(file).then(done, function () {
+        const im = new Image();
+        im.onload = function () { done(im); };
+        im.onerror = function () { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); };
+        im.src = URL.createObjectURL(file);
+      });
+    } else {
+      const im = new Image();
+      im.onload = function () { done(im); };
+      im.onerror = function () { toast('这张图打不开，直接发原图'); IE.resolve = null; resolve(); sendImage(file, true); };
+      im.src = URL.createObjectURL(file);
+    }
+  });
+}
+function ieMosaicAt(x, y) {
+  const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+  const R = Math.max(8, IE.mosaicSize || 14) * k;
+  const sx = Math.max(0, Math.round(x * k - R)), sy = Math.max(0, Math.round(y * k - R));
+  const sw = Math.min(cv.width - sx, Math.round(R * 2)), sh = Math.min(cv.height - sy, Math.round(R * 2));
+  if (sw < 3 || sh < 3) return;
+  const b = Math.max(4, Math.round(7 * k));
+  const tw = Math.max(1, Math.round(sw / b)), th = Math.max(1, Math.round(sh / b));
+  const tmp = IE.tmp || (IE.tmp = document.createElement('canvas'));
+  tmp.width = tw; tmp.height = th;
+  const tc = tmp.getContext('2d');
+  tc.imageSmoothingEnabled = false;
+  tc.drawImage(cv, sx, sy, sw, sh, 0, 0, tw, th);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, tw, th, sx, sy, sw, sh);
+  ctx.imageSmoothingEnabled = true;
+}
+const IE_STKS = ['😀', '😄', '😎', '🥳', '😭', '😡', '👍', '❤️', '🔥', '🎉', '🌹', '🍺', '🐶', '🐱', '💩', '✨'];
+function paintIeStks() {
+  const box = $('ie-stks'); if (!box) return;
+  box.innerHTML = IE_STKS.map(function (e) {
+    return '<button type="button" class="ie-stk' + (e === IE.stk ? ' on' : '') + '" data-e="' + e + '">' + e + '</button>';
+  }).join('');
+}
+function iePlaceStk(x, y) {
+  const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+  const size = Math.max(16, IE.stkSize || 64) * k;
+  ctx.save();
+  ctx.font = size + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(IE.stk || '😀', x * k, y * k);
+  ctx.restore();
+}
+function ieDown(e) {
+  if (!IE.img) return;
+  if (e.cancelable) e.preventDefault();
+  const p = iePoint(e);
+  if (IE.tool === 'crop') {
+    const hit = ieHit(p);
+    if (hit) { IE.drag = hit; IE.origin = p; IE.base = { x: IE.sel.x, y: IE.sel.y, w: IE.sel.w, h: IE.sel.h }; }
+    else { IE.drag = 'new'; IE.origin = p; IE.base = { x: p.x, y: p.y, w: 0, h: 0 }; IE.sel = { x: p.x, y: p.y, w: 0, h: 0 }; }
+    ieDrawOverlay();
+  } else if (IE.tool === 'draw') {
+    iePushHist();
+    IE.drag = 'draw'; IE.last = p;
+    const ctx = ieCanvas().getContext('2d'), k = ieScale();
+    ctx.beginPath(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = IE.color; ctx.lineWidth = Math.max(1, IE.size * k);
+    ctx.moveTo(p.x * k, p.y * k); ctx.lineTo(p.x * k + 0.1, p.y * k + 0.1); ctx.stroke();
+  } else if (IE.tool === 'text') {
+    ieAddText(p);
+  } else if (IE.tool === 'mosaic') {
+    iePushHist(); IE.drag = 'mosaic'; IE.last = p; ieMosaicAt(p.x, p.y);
+  } else if (IE.tool === 'stk') {
+    iePushHist(); iePlaceStk(p.x, p.y);
+  }
+}
+function ieMove(e) {
+  if (!IE.drag) return;
+  if (e.cancelable) e.preventDefault();
+  const p = iePoint(e);
+  if (IE.drag === 'crop') {
+    const o = IE.origin;
+    IE.sel = { x: Math.min(o.x, p.x), y: Math.min(o.y, p.y), w: Math.abs(p.x - o.x), h: Math.abs(p.y - o.y) };
+    ieDrawOverlay();
+  } else if (IE.drag === 'new' || IE.drag === 'move' || { n: 1, s: 1, e: 1, w: 1, nw: 1, ne: 1, sw: 1, se: 1 }[IE.drag]) {
+    const ov = ieOverlay(), W = ov.width, H = ov.height, o = IE.origin, b = IE.base, min = 28;
+    let nx = b.x, ny = b.y, nw = b.w, nh = b.h;
+    const dx = p.x - o.x, dy = p.y - o.y, d = IE.drag;
+    if (d === 'new') {
+      nx = Math.min(o.x, p.x); ny = Math.min(o.y, p.y);
+      nw = Math.max(min, Math.abs(p.x - o.x)); nh = Math.max(min, Math.abs(p.y - o.y));
+      nw = Math.min(nw, W - nx); nh = Math.min(nh, H - ny);
+    } else if (d === 'move') {
+      nx = Math.max(0, Math.min(W - b.w, b.x + dx));
+      ny = Math.max(0, Math.min(H - b.h, b.y + dy));
+    } else {
+      if (d.indexOf('w') >= 0) { nx = Math.max(0, Math.min(b.x + b.w - min, b.x + dx)); nw = b.x + b.w - nx; }
+      if (d.indexOf('e') >= 0) { nw = Math.max(min, Math.min(W - b.x, b.w + dx)); }
+      if (d.indexOf('n') >= 0) { ny = Math.max(0, Math.min(b.y + b.h - min, b.y + dy)); nh = b.y + b.h - ny; }
+      if (d.indexOf('s') >= 0) { nh = Math.max(min, Math.min(H - b.y, b.h + dy)); }
+    }
+    IE.sel = { x: nx, y: ny, w: nw, h: nh };
+    ieDrawOverlay();
+  } else if (IE.drag === 'draw') {
+    const ctx = ieCanvas().getContext('2d'), k = ieScale();
+    ctx.strokeStyle = IE.color; ctx.lineWidth = Math.max(1, IE.size * k);
+    ctx.beginPath(); ctx.moveTo(IE.last.x * k, IE.last.y * k); ctx.lineTo(p.x * k, p.y * k); ctx.stroke();
+    IE.last = p;
+  } else if (IE.drag === 'mosaic') {
+    const a = IE.last, dx = p.x - a.x, dy = p.y - a.y, dist = Math.hypot(dx, dy);
+    const step = Math.max(4, (IE.mosaicSize || 14) * 0.6);
+    const n = Math.max(1, Math.ceil(dist / step));
+    for (let i = 1; i <= n; i++) ieMosaicAt(a.x + dx * i / n, a.y + dy * i / n);
+    IE.last = p;
+  }
+}
+function ieUp() {
+  if (IE.drag === 'new') { const s = IE.sel; if (s && (s.w < 12 || s.h < 12)) IE.sel = null; ieDrawOverlay(); }
+  IE.drag = null; IE.origin = null; IE.last = null;
+  ieShowHint();
+}
+function ieCropApply() {
+  const s = IE.sel; if (!s || s.w < 10 || s.h < 10) { toast('先在图片上拖出要保留的区域'); return; }
+  iePushHist();
+  const k = ieScale(), cv = ieCanvas();
+  const sx = Math.round(s.x * k), sy = Math.round(s.y * k), sw = Math.max(1, Math.round(s.w * k)), sh = Math.max(1, Math.round(s.h * k));
+  const tmp = document.createElement('canvas'); tmp.width = sw; tmp.height = sh;
+  tmp.getContext('2d').drawImage(cv, sx, sy, sw, sh, 0, 0, sw, sh);
+  cv.width = sw; cv.height = sh;
+  cv.getContext('2d').drawImage(tmp, 0, 0);
+  IE.sel = null; ieLayout(); toast('已裁剪');
+}
+function ieRotate() {
+  iePushHist();
+  const cv = ieCanvas(), w = cv.width, h = cv.height;
+  const tmp = document.createElement('canvas'); tmp.width = h; tmp.height = w;
+  const c = tmp.getContext('2d');
+  c.translate(h / 2, w / 2); c.rotate(Math.PI / 2); c.drawImage(cv, -w / 2, -h / 2);
+  cv.width = h; cv.height = w;
+  cv.getContext('2d').drawImage(tmp, 0, 0);
+  IE.sel = null; ieLayout();
+}
+function ieAddText(p) {
+  openForm('添加文字', [{ ph: '输入文字（最多 30 字）', max: 30 }], function (vals) {
+    const t = String((vals && vals[0]) || '').trim();
+    if (!t) return null;
+    iePushHist();
+    const cv = ieCanvas(), ctx = cv.getContext('2d'), k = ieScale();
+    const fs = Math.max(12, Math.round(30 * k));
+    ctx.fillStyle = IE.color;
+    ctx.font = 'bold ' + fs + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText(t, p.x * k, p.y * k);
+    return null;
+  }, '添加');
+}
+function ieFinish() {
+  const cv = ieCanvas(); if (!cv) return;
+  const src = IE.file;
+  cv.toBlob(function (blob) {
+    const f = blob ? new File([blob], 'edit.jpg', { type: 'image/jpeg' }) : src;
+    $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
+    try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
+    IE.bmp = null;
+    const r = IE.resolve; IE.resolve = null;
+    if (r) r(f || null);
+  }, 'image/jpeg', 0.92);
+}
+function ieClose() {
+  $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
+  try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
+  IE.bmp = null;
+  const r = IE.resolve; IE.resolve = null; if (r) r(null);
+}
+
+async function sendImageNow(file, orig) {
+  if (!file || !S.conv) return;
+  if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
+  const out = orig ? file : await compressImage(file);
+  const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
+  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
+}
+let IPV = { file: null, orig: false, resolve: null, url: '' };
+function openImgPreview(file) {
+  return new Promise(function (resolve) {
+    IPV.file = file; IPV.orig = false; IPV.resolve = resolve;
+    try { if (IPV.url) URL.revokeObjectURL(IPV.url); } catch (e) {}
+    IPV.url = URL.createObjectURL(file);
+    $('ipv-img').src = IPV.url;
+    $('ipv-orig').classList.remove('on');
+    raiseSheet('ipv-sheet', 'ipv-backdrop');
+    $('ipv-backdrop').classList.add('active'); $('ipv-sheet').classList.add('active');
+  });
+}
+function closeImgPreview(send) {
+  $('ipv-backdrop').classList.remove('active'); $('ipv-sheet').classList.remove('active');
+  const r = IPV.resolve; IPV.resolve = null;
+  if (!r) return;
+  if (send) r({ file: IPV.file, orig: IPV.orig }); else r(null);
+}
+async function sendImage(file, direct) {
+  if (!file || !S.conv || !/^image\//.test(file.type)) return;
+  if (!canSendHere()) return;
+  if (direct || /gif|svg/i.test(file.type)) { return sendImageNow(file, imgOrig()); }
+  const r = await openImgPreview(file);
+  if (r) await sendImageNow(r.file, r.orig);
+}
+function sendVoice(blob, dur, ext, ct) {
+  if (!S.conv) return;
+  if (!canSendHere()) return;
+  addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
+}
+function retryMsg(id) {
+  const m = S.out.get(id); if (!m || m._st !== 'failed') return;
+  m._tries = 0; m._fatal = false; m._st = 'sending'; patchMsg(id, { _st: 'sending' }); deliver(m);
+}
+function retryFailed() {
+  if (!sb || !S.me || navigator.onLine === false) return;
+  S.out.forEach(m => {
+    if (m._st !== 'failed' || m._fatal || (m._tries || 0) >= 8) return;
+    m._tries = (m._tries || 0) + 1; m._st = 'sending'; patchMsg(m.id, { _st: 'sending' }); deliver(m, true);
+  });
+}
+
+/* ---- 撤回 ---- */
+let menuId = null;
+let menuOpenAt = 0;
+function showMsgMenu(id) {
+  const m = S.msgs.find(x => x.id === id);
+  if (!m || m._st === 'sending') return;
+  const mine = m.from_acc === ME(), plain = m.type !== 'recalled' && m.type !== 'call' && !m._st;
+  const canRecall = mine && plain && now() - ts(m) <= RECALL_MS;
+  $('msg-menu-reply').style.display = plain ? '' : 'none';
+  $('msg-menu-copy').style.display = plain && m.type === 'text' ? '' : 'none';
+  $('msg-menu-fwd').style.display = plain ? '' : 'none';
+  $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
+  $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
+  $('msg-menu-recall').style.display = canRecall ? '' : 'none';
+  $('msg-menu-del').style.display = '';
+  $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
+  menuId = id; menuOpenAt = now(); $('msg-menu-backdrop').classList.add('active'); $('msg-menu').classList.add('active');
+}
+function closeMenu() { $('msg-menu-backdrop').classList.remove('active'); $('msg-menu').classList.remove('active'); menuId = null; }
+function copyText(t) {
+  const done = () => { SFX.tap(); toast('已复制'); };
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, () => fb()); return; } } catch (e) {}
+  fb();
+  function fb() { try { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;left:-999px;top:0;opacity:0'; document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length); document.execCommand('copy'); ta.remove(); done(); } catch (e) { toast('复制失败'); } }
+}
+function menuAction(kind) {
+  const id = menuId, m = S.msgs.find(x => x.id === id); closeMenu(); if (!m) return;
+  if (kind === 'reply') setReply(m);
+  else if (kind === 'copy') copyText(parseQ(m.body).text);
+  else if (kind === 'fwd') setTimeout(() => openForward(m), 50);
+  else if (kind === 'stk') addToStickers(m);
+  else if (kind === 'save') saveMsg(m);
+  else if (kind === 'del') {
+    hidden.add(id); saveHidden(); S.out.delete(id);
+    const el = msgElOf(id); if (el) el.remove();
+    if (!$('chat-messages').querySelector('.msg')) chatRender(true);
+    toastUndo('已删除（仅在你这边）', '撤销', function () {
+      hidden.delete(id); saveHidden(); chatRender(true); toast('已恢复');
+    });
+  }
+}
+async function doRecall() {
+  const id = menuId; closeMenu(); if (!id) return;
+  const m = S.msgs.find(x => x.id === id);
+  if (!m || m.from_acc !== ME() || m.type === 'recalled' || now() - ts(m) > RECALL_MS) { toast('超过 2 分钟，无法撤回'); return; }
+  const prev = { type: m.type, body: m.body };
+  patchMsg(id, { type: 'recalled', body: '' });
+  const { data, error } = await sb.from('messages').update({ type: 'recalled', body: '' }).eq('id', id).select('id');
+  if (error || !data || !data.length) { patchMsg(id, prev); toast('撤回失败：' + (error ? error.message : '已超时')); return; }
+  if (S.token && !isGroupKey(m.conv)) bcast('u:' + m.to_acc, 'r', { id, from: ME(), conv: m.conv });
+  SFX.cancel();
+  saveMsgsSoon();
+}
+
+/* ---- 打开 / 关闭聊天 ---- */
+async function fetchMsgs(conv, before) {
+  let q = sb.from('messages').select('*').eq('conv_key', conv).order('created_at', { ascending: false }).limit(PAGE);
+  if (before) q = q.lt('created_at', before);
+  const { data, error } = await q; if (error) throw error;
+  return (data || []).reverse().map(rowToMsg);
+}
+async function openConv(key, peer) {
+  if (!S.me) return;
+  recAbort();
+  setAtMe(key, false);
+  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  applyChatFor(key, S.peer);
+  S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
+  document.body.classList.add('chat-open');
+  if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
+  $('emoji-panel').classList.remove('active'); hideSuggest();
+  grpChatMode();
+  renderChatTitle();
+  renderGrpNotice();
+  const mem = MSG.mem.get(msgKey(key));
+  if (mem && mem.length) { S.msgs = mem.slice(); S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); }); chatRender(true); }
+  else $('chat-messages').innerHTML = '<div class="empty">正在打开…</div>';
+  markReadSoon(key); sendReadAck(key, true);
+  if (S.token && !isGroupKey(key)) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
+  { const pa = S.peer; closeNotes(t => t === 'm:' + pa || t === 'c:' + pa || t === pa); if (nbCur && nbCur.acc === pa) hideNBar(); }
+  if (isGroupKey(key)) { grpOpenMeta(key); refreshMyMuteState(gidOf(key)); }
+  const cachedMsgs = await msgCacheGet(key);
+  if (S.conv !== key) return;
+  S.msgs = cachedMsgs.slice();
+  S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
+  chatRender(true);                                // 缓存先显示，网络结果再补
+  try {
+    const rows = await fetchMsgs(key);
+    if (S.conv !== key) return;
+    rows.forEach(r => S.seen.add(r.id));
+    const map = new Map(); rows.forEach(r => map.set(r.id, r));
+    S.msgs.forEach(m => { if (!map.has(m.id) && !isHidden(m)) map.set(m.id, m); });   // 刚发出去、还没进这次查询结果的消息不能丢
+    S.msgs = Array.from(map.values()).sort((a, b) => ts(a) - ts(b));
+    S.hasMore = rows.length >= PAGE && !(rows.length && rows.every(isHidden));
+    chatRender(true); saveMsgsSoon(); sendReadAck(key, true); fetchPeerRead(key);
+  } catch (e) { logErr('open', e); if (!S.msgs.length) $('chat-messages').innerHTML = '<div class="empty">加载失败，请检查网络后重新打开</div>'; }
+}
+function closeChat() {
+  recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs();
+  clearInterval(GRP.chatT); GRP.chatT = 0;
+  clearInterval(GRP.muteT); GRP.muteT = 0;
+  clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
+  S.conv = null; S.peer = null; S.msgs = []; S.hist = false; S.typingUntil = 0; clearReply();
+  document.body.classList.remove('chat-open'); $('emoji-panel').classList.remove('active'); hideSuggest(); closeMenu();
+  $('btn-voice-call').style.display = ''; $('btn-video-call').style.display = '';
+  sched('list');
+}
+async function syncChat() {
+  const conv = S.conv; if (!conv || !sb) return;
+  try {
+    const rows = await fetchMsgs(conv); if (S.conv !== conv) return;
+    rows.forEach(r => { if (r.from_acc !== ME() && !S.msgs.some(x => x.id === r.id)) onIncoming(r); else upsertMsg(r); });
+    fetchPeerRead(conv);
+  } catch (e) { logErr('syncChat', e); }
+}
+async function loadOlder() {
+  if (S.loadingOlder || !S.hasMore || !S.conv || !S.msgs.length) return;
+  S.loadingOlder = true; const conv = S.conv;
+  try {
+    const rows = await fetchMsgs(conv, S.msgs[0].created_at); if (S.conv !== conv) return;
+    const have = new Set(S.msgs.map(m => m.id)), add = rows.filter(r => !have.has(r.id));
+    S.hasMore = rows.length >= PAGE && !(rows.length && rows.every(isHidden));
+    if (add.length) {
+      const b = $('chat-messages'), h = b.scrollHeight, t = b.scrollTop;
+      S.msgs = add.concat(S.msgs); chatRender(false); b.scrollTop = b.scrollHeight - h + t;
+    }
+  } catch (e) { logErr('older', e); } finally { S.loadingOlder = false; }
+}
+
+/* ---- 语音播放 ---- */
+const vspeed = () => { try { const v = +LS.get('ch2vs', 1); return (v === 1.5 || v === 2) ? v : 1; } catch (e) { return 1; } };
+function paintSpeed() { const b = $('voice-speed'); if (!b) return; const v = vspeed(); b.textContent = v === 1 ? '1.0x' : v + 'x'; }
+function cycleSpeed() {
+  const order = [1, 1.5, 2], i = order.indexOf(vspeed());
+  LS.set('ch2vs', order[(i + 1) % 3]);
+  paintSpeed();
+  try { if (audioEl) audioEl.playbackRate = vspeed(); } catch (e) {}
+}
+function stopAudio() { if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl = null; } const id = playingId; playingId = null; if (id) markPlaying(id, false); }
+function markPlaying(id, on) {
+  const el = msgElOf(id); const v = el && el.querySelector('.voice');
+  if (v) { v.classList.toggle('playing', on); if (!on) { const i = v.querySelector('.vprog i'); if (i) i.style.width = '0'; } }
+  const sp = $('voice-speed'); if (sp) sp.style.display = on ? 'block' : 'none';
+  if (on) paintSpeed();
+}
+let vSeekAt = 0, vSeekEl = null;
+function voiceSeek(e, b) {
+  if (!audioEl || !isFinite(audioEl.duration) || !audioEl.duration) return;
+  const r = b.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  try { audioEl.currentTime = ratio * audioEl.duration; } catch (err) {}
+  const bar = b.querySelector('.vprog i'); if (bar) bar.style.width = (ratio * 100).toFixed(1) + '%';
+}
+function voiceProgress(id, a) {
+  const upd = function () {
+    if (playingId !== id) return;
+    const el = msgElOf(id), bar = el && el.querySelector('.vprog i');
+    if (bar && isFinite(a.duration) && a.duration) bar.style.width = (a.currentTime / a.duration * 100).toFixed(1) + '%';
+  };
+  a.addEventListener('timeupdate', upd);
+  return upd;
+}
+function togglePlay(id, url) {
+  if (playingId === id) { stopAudio(); return; }
+  stopAudio();
+  const src = disp(url);
+  const a = new Audio(); audioEl = a; playingId = id; a.preload = 'auto'; a.src = src; a.playbackRate = vspeed(); markPlaying(id, true);
+  voiceProgress(id, a);
+  const end = () => { if (playingId === id) { playingId = null; audioEl = null; markPlaying(id, false); } };
+  a.onended = end;
+  let tried = false;
+  // 直接播放失败时：先把文件下载成 Blob 再播（绕开服务器返回的类型/分段请求问题），仍失败就说明具体原因
+  a.onerror = async () => {
+    const code = a.error ? a.error.code : 0;
+    logErr('voice-play', 'MediaError ' + code + ' ' + src.slice(0, 120));
+    if (tried || playingId !== id || src.indexOf('blob:') === 0) { end(); toast('语音播放失败（错误码 ' + code + '）'); return; }
+    tried = true;
+    try {
+      const r = await fetch(src, { cache: 'no-store' });
+      if (!r.ok) { end(); toast('语音文件读取失败（HTTP ' + r.status + '）'); logErr('voice-http', r.status + ' ' + src.slice(0, 120)); return; }
+      const buf = await r.arrayBuffer();
+      if (playingId !== id) return;
+      const typ = /\.m4a(\?|$)/i.test(src) || /\.mp4(\?|$)/i.test(src) ? 'audio/mp4' : /\.webm(\?|$)/i.test(src) ? 'audio/webm' : 'audio/wav';
+      const b = new Blob([buf], { type: typ }), u = URL.createObjectURL(b);
+      const a2 = new Audio(); audioEl = a2; a2.preload = 'auto'; a2.src = u; a2.playbackRate = vspeed();
+      voiceProgress(id, a2);
+      a2.onended = () => { end(); try { URL.revokeObjectURL(u); } catch (e) {} };
+      a2.onerror = () => { end(); toast('语音无法解码（错误码 ' + (a2.error ? a2.error.code : 0) + '，大小 ' + buf.byteLength + '）'); };
+      const p2 = a2.play(); if (p2 && p2.catch) p2.catch(e => { if (e && e.name === 'NotAllowedError') { end(); toast('无法播放语音，请再点一次'); } });
+    } catch (e) { end(); toast('语音下载失败：网络连不上存储服务'); logErr('voice-fetch', e); }
+  };
+  const p = a.play(); if (p && p.catch) p.catch(e => { if (e && e.name === 'NotAllowedError') { end(); toast('无法播放语音'); } });
+}
+
+/* ================= 录音（优先 AAC/M4A，失败回退 WAV；通话不受影响）================= */
+const rec = { state: 'idle', token: 0, ctx: null, stream: null, src: null, proc: null, chunks: [], len: 0, rate: 44100, t0: 0, y0: 0, cancel: false, tm: 0, mr: null, mrChunks: [], mime: '' };
+function pickVoiceMime() {
+  if (!window.MediaRecorder || !window.MediaRecorder.isTypeSupported) return '';
+  const list = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4'];   // AAC：iPhone/安卓/电脑都能放
+  for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return '';
+}
+function recProblem() {
+  if (iosAppWebview()) return IOS_APP_MSG;
+  if (!window.isSecureContext) return '录音需要 https 地址（或 localhost）';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return '当前浏览器不支持录音（微信/QQ 等内置浏览器常见），请用 Safari / Chrome 打开';
+  if (!(window.AudioContext || window.webkitAudioContext)) return '当前浏览器不支持录音';
+  return '';
+}
+function recUI(on, text) {
+  const o = $('record-overlay'); o.classList.toggle('active', !!on); if (!on) o.classList.remove('cancel');
+  if (text) $('record-text').textContent = text;
+  $('btn-audio').textContent = on ? '松开 发送' : '按住 说话';
+}
+function recCleanup() {
+  clearInterval(rec.tm);
+  try { if (rec.mr && rec.mr.state !== 'inactive') rec.mr.stop(); } catch (e) {}
+  try { if (rec.proc) { rec.proc.onaudioprocess = null; rec.proc.disconnect(); } if (rec.src) rec.src.disconnect(); } catch (e) {}
+  stopStream(rec.stream);
+  try { if (rec.ctx && rec.ctx.state !== 'closed') { const p = rec.ctx.close(); if (p && p.catch) p.catch(() => {}); } } catch (e) {}
+  rec.stream = rec.src = rec.proc = rec.ctx = rec.mr = null; rec.chunks = []; rec.len = 0; rec.mrChunks = []; rec.mime = ''; rec.state = 'idle';
+  recUI(false);
+}
+function recAbort() { if (rec.state === 'idle') return; rec.token++; recCleanup(); }
+function recTick() {
+  const s = (now() - rec.t0) / 1000;
+  $('record-overlay').classList.toggle('cancel', rec.cancel);
+  $('record-text').textContent = Math.floor(s) + '″  ' + (rec.cancel ? '松开手指，取消发送' : '手指上滑，取消发送');
+  if (s >= 60) recEnd(false);
+}
+function recStart(y) {
+  if (rec.state !== 'idle' || !S.conv) return;
+  const pr = recProblem(); if (pr) { toast(pr); return; }
+  const token = ++rec.token; rec.state = 'starting'; rec.y0 = y || 0; rec.cancel = false; rec.chunks = []; rec.len = 0; rec.mrChunks = []; rec.mime = ''; rec.mr = null;
+  recUI(true, '手指上滑，取消发送');
+  let ctx;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC(); rec.ctx = ctx; rec.rate = ctx.sampleRate || 44100;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});   // iOS：必须在手势里创建/恢复
+  } catch (e) { logErr('rec-ctx', e); recCleanup(); toast('无法初始化录音'); return; }
+  gum({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }, 20000).then(stream => {
+    if (token !== rec.token || rec.state !== 'starting') { stopStream(stream); return; }
+    try {
+      rec.stream = stream;
+      const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+      proc.onaudioprocess = e => { if (rec.state !== 'recording') return; const d = e.inputBuffer.getChannelData(0); rec.chunks.push(new Float32Array(d)); rec.len += d.length; };
+      src.connect(proc); proc.connect(ctx.destination); rec.src = src; rec.proc = proc;
+      rec.mime = pickVoiceMime();
+      if (rec.mime) {
+        try {
+          const mr = new MediaRecorder(stream, { mimeType: rec.mime, audioBitsPerSecond: 48000 });
+          mr.ondataavailable = e => { if (e.data && e.data.size) rec.mrChunks.push(e.data); };
+          mr.start(250); rec.mr = mr;
+        } catch (e) { logErr('mr-start', e); rec.mime = ''; rec.mr = null; }
+      }
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      rec.state = 'recording'; rec.t0 = now(); rec.tm = setInterval(recTick, 200);
+    } catch (e) { logErr('rec-start', e); recCleanup(); toast('无法开始录音'); }
+  }).catch(e => { if (token !== rec.token) return; logErr('rec-gum', e); recCleanup(); toast('无法录音：' + micError(e)); });
+}
+function recMove(y) { if (rec.state === 'idle') return; rec.cancel = rec.y0 - y > 60; }
+async function recEnd(cancel) {
+  if (rec.state === 'idle') return;
+  if (rec.state === 'starting') { rec.token++; recCleanup(); return; }
+  if (rec.state !== 'recording') return;
+  const token = rec.token;
+  const dc = cancel || rec.cancel, sec = (now() - rec.t0) / 1000;
+  rec.state = 'stopping';
+  let blob = null, ext = 'wav', ct = 'audio/wav';
+  if (!dc && rec.mr) {
+    blob = await new Promise(function (res) {
+      let done = false;
+      const fin = function () {
+        if (done) return; done = true;
+        const b = new Blob(rec.mrChunks, { type: (rec.mime || 'audio/mp4').split(';')[0] });
+        res(b.size ? b : null);
+      };
+      try { rec.mr.onstop = fin; if (rec.mr.state !== 'inactive') rec.mr.stop(); else fin(); } catch (e) { fin(); }
+      setTimeout(fin, 1800);
+    });
+    if (blob) {
+      if (/mp4/i.test(rec.mime)) { ext = 'm4a'; ct = 'audio/mp4'; }
+      else if (/webm/i.test(rec.mime)) { ext = 'webm'; ct = 'audio/webm'; }
+    }
+  }
+  const wav = (!dc && !blob) ? encodeWav(rec.chunks, rec.len, rec.rate) : null;
+  recCleanup();
+  if (token !== rec.token) return;          // 这期间被取消/关了聊天
+  if (dc) { SFX.cancel(); return; }
+  if (sec < 0.8) { toast('说话时间太短'); return; }
+  if (blob && blob.size) { sendVoice(blob, Math.max(1, Math.round(sec)), ext, ct); return; }
+  if (wav && wav.size) { sendVoice(wav, Math.max(1, Math.round(sec)), 'wav', 'audio/wav'); return; }
+  toast('录音失败，请再试一次');
+}
+function encodeWav(chunks, len, srcRate) {
+  const target = 12000, ratio = srcRate / target, outLen = Math.max(1, Math.floor(len / ratio));
+  const merged = new Float32Array(len); let o = 0, peak = 0;
+  for (const c of chunks) { merged.set(c, o); o += c.length; }
+  for (let i = 0; i < len; i++) { const a = Math.abs(merged[i]); if (a > peak) peak = a; }
+  const gain = peak > 0.0001 ? Math.min(4, 0.9 / peak) : 1;
+  const buf = new ArrayBuffer(44 + outLen * 2), v = new DataView(buf);
+  const w = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + outLen * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, target, true); v.setUint32(28, target * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, outLen * 2, true);
+  for (let i = 0; i < outLen; i++) {
+    const s = Math.floor(i * ratio), e = Math.min(len, Math.max(s + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0; for (let j = s; j < e; j++) sum += merged[j];
+    let x = (sum / Math.max(1, e - s)) * gain; x = Math.max(-1, Math.min(1, x));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
