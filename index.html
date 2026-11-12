@@ -349,7 +349,7 @@
   #chat-title .sub.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
   .call-btns { display: flex; gap: 0; flex-shrink: 0; }
   #chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 14px 12px 8px; display: flex; flex-direction: column; gap: 10px; background-image: var(--doodle); background-size: 180px 180px; }
-  .msg { display: flex; gap: 8px; align-items: flex-end; animation: pop .22s cubic-bezier(.3,1.3,.5,1); }
+  .msg { display: flex; gap: 8px; align-items: flex-start; animation: pop .22s cubic-bezier(.3,1.3,.5,1); }
   @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
   /* 屏幕正中的弹窗本身靠 translate(-50%, -50%) 居中，动画必须带着它，否则动画期间会偏到右下角再跳回中间 */
   @keyframes popc { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
@@ -500,7 +500,8 @@
   #msg-menu-backdrop.active { display: block; }
   .grp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 14px; }
   .msg-sender { font-size: 11.5px; color: var(--muted); margin: 0 0 3px 4px; line-height: 1.2; max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .msg-sender .msg-tag { color: var(--accent); font-size: 10px; margin-left: 2px; }
+  .msg-sender .msg-tag { color: var(--accent); font-size: 10px; margin-left: 6px; background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 1px 5px; border-radius: 6px; }
+  .msg.grp .avatar-wrapper { margin-top: 20px; }
   .grp-mark { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   #pick-sheet { display: none; flex-direction: column; max-height: 76vh; }
   #pick-sheet.active { display: flex; }
@@ -2002,7 +2003,7 @@ function msgHTML(m) {
   const st = m._st === 'sending' && m.type !== 'text' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
   let senderTag = '';
-  if (!mine && gp) {
+  if (gp) {
     const gm = groupMemberOf(gidOf(m.conv), m.from_acc);
     if (gm) {
       const role = gm.role === 'owner' ? '群主' : gm.role === 'admin' ? '管理员' : '';
@@ -2010,9 +2011,9 @@ function msgHTML(m) {
       senderTag = role + (title ? (role ? ' · ' : '') + title : '');
     }
   }
-  return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
+  return '<div class="msg ' + (mine ? 'mine' : 'theirs') + (gp ? ' grp' : '') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
     (mine ? avatarHTML(nickOf(ME()), avatarOf(ME()), false, ME()) : avatarHTML(nickOf(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
-    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div>' + '</div>';
+    '<div class="msg-body">' + (gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div>' + '</div>';
 }
 function dayLabel(t) {
   const d = new Date(t), n = new Date();
