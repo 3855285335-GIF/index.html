@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 07-群聊 · 原文件第 4357-4988 行 -->
-<!-- 这一段负责：建群、成员、邀请、审批、公告、群文件、退群解散（查：权限、竞态） -->
+<!-- Chatter 前端 · 07-群聊 · 原文件第 4428-5076 行 · 当前线上版本 -->
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
@@ -107,10 +106,10 @@ function grpChatMode() {
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
   if (gp) {
-    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) pollConv(S.conv); }, 8000);
     refreshMyMuteState(gidOf(S.conv));
-    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 2000);
-    GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 3000);
+    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 20000);
+    GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 6000);
     setTimeout(function () { if (isGroupKey(S.conv)) gcTipPoll(); }, 500);
   }
   applyMuteState();
@@ -353,6 +352,23 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   try { loadGroupFiles(gid); } catch (e) {}
 }
 let giMembers = [];
+function showSelfCard(gid) {
+  const items = [
+    { label: '昵称：' + nickOf(ME()), fn: null },
+    { label: '账号：@' + ME(), fn: null }
+  ];
+  if (S.me && S.me.signature) items.push({ label: '签名：' + S.me.signature, fn: null });
+  if (gid) {
+    const m = (GRP.members && GRP.members[gid] || []).find(function (x) { return x.account_id === ME(); });
+    const role = m ? (m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '成员') : '成员';
+    const t = (m && m.title && m.title_on) ? m.title : '';
+    items.push({ label: '本群身份：' + role + (t ? ' · ' + t : ''), fn: null });
+  }
+  items.push({ label: '修改昵称', fn: function () { setTimeout(editNick, 30); } });
+  items.push({ label: '修改个性签名', fn: function () { setTimeout(editSign, 30); } });
+  items.push({ label: '关闭', fn: null });
+  openActs('我的资料', items);
+}
 function giMemberHTML(m) {
   const acc = m.account_id, isMe = acc === ME();
   const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
@@ -610,7 +626,7 @@ async function grpPoll() {
     if (!GRP.cursor[k]) { const c = convOf(k); GRP.cursor[k] = Date.parse(c && c.last_ts || 0) || (now() - 60000); }
   });
   let since = 0;
-  keys.forEach(function (k) { const v = GRP.cursor[k]; if (!since || v < since) since = v; });
+  keys.forEach(function (k) { const v = GRP.cursor[k]; if (v > since) since = v; });   // 用最新的游标：旧的群消息交给未读数，别把新消息挤出 200 条上限
   try {
     const { data, error } = await sb.from('messages').select('*')
       .in('conv_key', keys).gt('created_at', new Date(since - 5000).toISOString())
