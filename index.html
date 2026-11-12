@@ -1527,7 +1527,7 @@ const SELF_KEY = () => (ME() || '') + '::' + (ME() || '');
 const nickOf = a => (S.profiles[a] && S.profiles[a].nickname) || a;
 const remarkOf = a => (S.remarks && S.remarks[a] && S.remarks[a].r) || '';
 const peerName = a => {
-  if (typeof a === 'string' && a === SELF_KEY()) return '我的备忘';
+  if (typeof a === 'string' && a === SELF_KEY()) return nickOf(ME()) || '我';
   if (typeof a === 'string' && a.indexOf('g:') === 0) {
     const gid = a.slice(2);
     try { const g = (typeof GRP !== 'undefined' && GRP.list ? GRP.list : []).find(function (x) { return x.id === gid; }); if (g) return g.name; } catch (e) {}
@@ -1736,9 +1736,9 @@ function renderList() {
   if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   el.innerHTML = gh + shown.map(c => {
     const selfConv = c.convKey === SELF_KEY();
-    const name = selfConv ? '我的备忘' : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
+    const name = selfConv ? (nickOf(ME()) || '我') : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
     const at = c.convKey !== S.conv && atMeOf(c.convKey);
-    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(selfConv ? '备忘' : (gp ? name : nickOf(c.peer_acc)), gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : (selfConv ? false : isOnline(c.peer_acc)), c.peer_acc) +
+    return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(selfConv ? (nickOf(ME()) || '我') : (gp ? name : nickOf(c.peer_acc)), selfConv ? avatarOf(ME()) : (gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc)), gp ? false : (selfConv ? false : isOnline(c.peer_acc)), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
       '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(selfConv && !c.last_body ? '点这里写点什么' : convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div>' + '</div>';
   }).join('');
@@ -1791,7 +1791,7 @@ function renderRequests() {
 function renderChatTitle() {
   if (!S.peer) return;
   if (S.conv === SELF_KEY()) {
-    $('chat-title').innerHTML = '<span>我的备忘</span><span class="sub">自己</span>';
+    $('chat-title').innerHTML = '<span>' + esc(nickOf(ME()) || '我') + '</span><span class="sub">自己</span>';
     $('btn-voice-call').style.display = 'none'; $('btn-video-call').style.display = 'none';
     return;
   }
@@ -6842,7 +6842,12 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  window.addEventListener('popstate', () => { if (S.call) { try { history.pushState({ chat: 1 }, ''); } catch (e) {} return; } if (S.conv) { S.hist = false; closeChat(); } });
+  try { if (!history.state || !history.state.app) history.pushState({ app: 1 }, '', location.href); } catch (e) {}
+  window.addEventListener('popstate', () => {
+    if (S.call) { try { history.pushState({ app: 1 }, '', location.href); } catch (e) {} return; }
+    if (S.conv) { S.hist = false; closeChat(); return; }
+    try { history.pushState({ app: 1 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
+  });
   const box = $('chat-messages');
   box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
   box.addEventListener('error', e => {
