@@ -1715,7 +1715,7 @@ function renderList() {
     const at = c.convKey !== S.conv && atMeOf(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(selfConv ? '备忘' : (gp ? name : nickOf(c.peer_acc)), gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc), gp ? false : (selfConv ? false : isOnline(c.peer_acc)), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
-      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(selfConv && !c.last_body ? '点这里写点什么' : convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div></div>';
+      '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(selfConv && !c.last_body ? '点这里写点什么' : convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div>' + '</div>';
   }).join('');
 }
 function renderContacts() {
@@ -1999,7 +1999,7 @@ function msgHTML(m) {
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
     default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + '</div>'; }
   }
-  const st = m._st === 'sending' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
+  const st = m._st === 'sending' && m.type !== 'text' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
   let senderTag = '';
   if (!mine && gp) {
@@ -2011,8 +2011,8 @@ function msgHTML(m) {
     }
   }
   return '<div class="msg ' + (mine ? 'mine' : 'theirs') + '" data-id="' + esc(m.id) + '" data-mine="' + mine + '">' +
-    (mine ? '' : avatarHTML(nickOf(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
-    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div></div>';
+    (mine ? avatarHTML(nickOf(ME()), avatarOf(ME()), false, ME()) : avatarHTML(nickOf(m.from_acc), avatarOf(m.from_acc), false, m.from_acc)) +
+    '<div class="msg-body">' + (!mine && gp ? '<div class="msg-sender">' + esc(peerName(m.from_acc)) + (senderTag ? '<span class="msg-tag">' + esc(senderTag) + '</span>' : '') + '</div>' : '') + '<div class="row">' + (mine ? st : '') + body + '</div><div class="msg-time">' + fmtTime(m.created_at) + (isRead(m) ? ' · 已读' : '') + '</div></div>' + '</div>';
 }
 function dayLabel(t) {
   const d = new Date(t), n = new Date();
@@ -6801,7 +6801,7 @@ function bindUI() {
   box.addEventListener('pointermove', e => { if (vSeekEl) voiceSeek(e, vSeekEl); });
   window.addEventListener('pointerup', () => { vSeekEl = null; });
   box.addEventListener('click', e => {
-    const av = e.target.closest('.msg.theirs .avatar-wrapper'); if (av && av.dataset.acc) { openProfile(av.dataset.acc); return; }
+    const av = e.target.closest('.msg .avatar-wrapper'); if (av && av.dataset.acc) { if (av.dataset.acc === ME()) showSelfCard(''); else openProfile(av.dataset.acc); return; }
     const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
     const v = e.target.closest('.bubble.voice'); if (v) { if (now() - vSeekAt < 600) return; togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
