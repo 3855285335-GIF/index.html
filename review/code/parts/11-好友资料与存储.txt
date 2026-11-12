@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 11-好友资料与存储 · 原文件第 6091-6281 行 -->
-<!-- 这一段负责：备注、资料卡、上传进度、存储提醒 -->
+<!-- Chatter 前端 · 11-好友资料与存储 · 原文件第 6203-6394 行 · 当前线上版本 -->
 /* ================= 好友备注 / 好友资料 / 上传进度 / 存储提醒 / 导出聊天记录 ================= */
 /* ---- 好友备注：存在数据库（换手机也在）；还没运行 setup-v7.sql 时先存在这台手机上，运行后自动同步上去 ---- */
 const rmkKey = () => 'ch2rmk:' + (S.uid || '');
@@ -11,10 +10,11 @@ function loadRemarks() {
   rmkAt = now();
   rmkLoading = (async () => {
     try {
-      const { data, error } = await sb.from('friendships').select('friend_acc,remark').eq('owner_acc', ME());
+      const { data, error } = await sb.from('friendships').select('friend_acc,remark,created_at').eq('owner_acc', ME());
       if (error) { if (isMissingFn(error) || /remark/.test(error.message || '')) S.v7 = false; else logErr('remarks', error); return; }
-      const old = S.remarks || {}, next = {};
-      (data || []).forEach(r => { if (r.remark) next[r.friend_acc] = { r: r.remark }; });
+      const old = S.remarks || {}, next = {}, at = {};
+      (data || []).forEach(r => { if (r.remark) next[r.friend_acc] = { r: r.remark }; if (r.created_at) at[r.friend_acc] = Date.parse(r.created_at) || 0; });
+      S.frAt = at;
       for (const a in old) {   // 这台手机上先存着、还没同步的备注：现在传上去
         if (!old[a].p) continue;
         next[a] = old[a];
@@ -170,7 +170,7 @@ function exportHTML(peer, list, truncated) {
   const link = (u, t) => '<a href="' + esc(disp(u)) + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
   const body = m => {
     switch (m.type) {
-      case 'text': { const q = parseQ(m.body); return (q.q ? '<blockquote>' + esc(q.q.slice(0, 120)) + '</blockquote>' : '') + linkify(q.text).replace(/\n/g, '<br>'); }
+      case 'text': { const q = parseQ(m.body); return (q.q ? '<blockquote>' + esc(String(q.q.snip || '').slice(0, 120)) + '</blockquote>' : '') + linkify(q.text).replace(/\n/g, '<br>'); }
       case 'image': return '<a href="' + esc(disp(m.body)) + '" target="_blank" rel="noopener"><img src="' + esc(disp(m.body)) + '" alt="图片" loading="lazy"></a>';
       case 'video': return link(m.body, '[视频' + (m.dur ? ' ' + fmtDur(m.dur) : '') + '] 点开播放');
       case 'voice': return '<audio controls preload="none" src="' + esc(disp(m.body)) + '"></audio> ' + (m.dur ? m.dur + '″' : '');
