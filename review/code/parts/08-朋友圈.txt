@@ -1,0 +1,360 @@
+<!-- Chatter 前端 · 08-朋友圈 · 原文件第 4989-5346 行 -->
+<!-- 这一段负责：发布、可见性、点赞评论、访客、封面、视频 -->
+/* ================= 朋友圈 ================= */
+const MV = {};
+async function loadMomentViews(rows) {
+  try {
+    const mine = [], others = [];
+    rows.forEach(function (r) { if (r.author_acc === ME()) mine.push(r.id); else others.push(r.id); });
+    if (others.length) {
+      const r = await sb.from('moment_views').select('moment_id').in('moment_id', others);
+      if (!r.error) {
+        const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
+        const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
+        if (add.length) sb.from('moment_views').insert(add).then(function () {}, function () {});
+      }
+    }
+    if (mine.length) {
+      const c = await sb.from('moment_views').select('moment_id').in('moment_id', mine);
+      const cnt = {};
+      (c.data || []).forEach(function (x) { cnt[x.moment_id] = (cnt[x.moment_id] || 0) + 1; });
+      mine.forEach(function (id) { MV[id] = cnt[id] || 0; });
+    }
+  } catch (e) { logErr('mv', e); }
+}
+async function openMomentViews(mid) {
+  const r = await sb.from('moment_views').select('viewer_acc,created_at').eq('moment_id', mid).order('created_at', { ascending: false }).limit(100);
+  if (r.error) { toast('读取失败：' + (r.error.message || '请重试')); return; }
+  const list = r.data || [];
+  if (!list.length) { toast('还没有人看过'); return; }
+  openActs('看过这条的 ' + list.length + ' 人', list.map(function (x) {
+    return { label: peerName(x.viewer_acc) + ' · ' + fmtMomentTime(x.created_at), fn: null };
+  }).concat([{ label: '关闭', fn: null }]));
+}
+async function momentsLoad(reset) {
+  if (!sb || !S.me || MO.loading) return;
+  MO.loading = true;
+  const el = $('moment-list'), had = MO.list.length;
+  if (reset && !had) { MO.list = []; MO.cursor = null; MO.has = true; }
+  if (reset) { MO.cursor = null; MO.has = true; if (!had) el.innerHTML = '<div class="empty">加载中…</div>'; }   // 已有内容就先留着，不重画（重画会闪）
+  try {
+    let q = sb.from('moments').select('id,author_acc,body,images,visibility,created_at,visible_to,video').order('created_at', { ascending: false }).limit(15);
+    if (!reset && MO.cursor) q = q.lt('created_at', MO.cursor);
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = data || [];
+    if (reset) MO.list = rows; else MO.list = MO.list.concat(rows);
+    MO.has = rows.length === 15;
+    if (rows.length) MO.cursor = rows[rows.length - 1].created_at;
+    const ids = rows.map(function (r) { return r.id; });
+    if (ids.length) await loadMomentViews(rows);
+    const likes = reset ? {} : Object.assign({}, MO.likes), cmts = reset ? {} : Object.assign({}, MO.comments);
+    if (ids.length) {
+      const [lk, cm] = await Promise.all([        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
+        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at,reply_to_acc,parent_id').in('moment_id', ids).order('created_at', { ascending: true })
+      ]);
+      if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
+      if (!cm.error) (cm.data || []).forEach(function (x) { (cmts[x.moment_id] = cmts[x.moment_id] || []).push(x); });
+      MO.likes = likes; MO.comments = cmts;
+      MO.loadAt = now();
+      const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); }); (lk.data || []).forEach(function (x) { accs.add(x.account_id); });
+      const needProf = Array.from(accs).some(function (a) { return !S.profiles[a]; });
+      const sig = ids.map(function (id) { return id + ':' + (likes[id] || []).length + ':' + (cmts[id] || []).length; }).join(',') + '|' + rows.length;
+      if (sig !== MO.sig) { MO.sig = sig; renderMoments(); }   // 内容没变就不重画：切回来不会闪、图片不重新加载
+      Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (S.me && needProf) { MO.sig = sig; renderMoments(); } }, function () {});
+    } else {
+      MO.likes = likes; MO.comments = cmts; MO.loadAt = now(); renderMoments();
+    }
+  } catch (e) {
+    logErr('moments', e);
+    if (el && !MO.list.length) el.innerHTML = '<div class="empty">朋友圈加载失败：' + esc((e && e.message) || '请重试') + '</div>';
+  } finally { MO.loading = false; }
+}
+function momentReactHTML(id, isMine) {
+  const like = MO.likes[id] || [], liked = like.indexOf(ME()) >= 0, cms = MO.comments[id] || [];
+  const likers = like.length ? '<div class="mo-likers">♥ ' + like.map(function (a) { return '<span class="mo-liker" data-acc="' + esc(a) + '">' + esc(peerName(a)) + '</span>'; }).join('、') + '</div>' : '';
+  const list = cms.length ? '<div class="mo-comments">' + cms.map(function (c) {
+    const to = c.reply_to_acc ? '<span class="mo-rep"> 回复 </span><b class="mo-cauthor" data-acc="' + esc(c.reply_to_acc) + '">' + esc(peerName(c.reply_to_acc)) + '</b>' : '';
+    return '<div class="mo-comment" data-cid="' + esc(c.id) + '" data-acc="' + esc(c.author_acc) + '"><b class="mo-cauthor" data-acc="' + esc(c.author_acc) + '">' + esc(peerName(c.author_acc)) + '</b>' + to + '：' + esc(c.body) + '</div>';
+  }).join('') + '</div>' : '';
+  const vn = (isMine && MV[id]) || 0;
+  const vBtn = vn ? '<button class="mo-act mo-views" data-views="1" type="button">👀 ' + vn + ' 人看过</button>' : '';
+  return '<div class="mo-acts"><button class="mo-act' + (liked ? ' on' : '') + '" data-like="1" type="button">♥ ' + (like.length || '赞') + '</button><button class="mo-act" data-comment="1" type="button">评论</button>' + vBtn + '</div>' + likers + list;
+}
+function momentCardHTML(m, i) {
+  const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
+  const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
+  const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
+  const vid = (typeof m.video === 'string' && m.video) ? '<div class="mo-video"><video src="' + esc(disp(m.video)) + '" controls preload="metadata" playsinline webkit-playsinline></video></div>' : '';
+  return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
+    '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
+      '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
+      ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '') + '</div>' +
+      (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
+    (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
+    '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
+    '</div>';
+}
+function renderMoments() {
+  const el = $('moment-list'); if (!el) return;
+  if (!MO.list.length) { el.innerHTML = emptyHTML('还没有朋友圈<br>点右上角发一条'); $('moment-more').style.display = 'none'; return; }
+  el.innerHTML = MO.list.map(momentCardHTML).join('') + (!MO.has ? '<div class="mo-end">— 就这些了 —</div>' : '');
+  $('moment-more').style.display = MO.has ? '' : 'none';
+}
+function paintMomentsHead() {
+  const av = $('mo-me-av'), nm = $('mo-me-name'); if (!av || !nm) return;
+  const n = S.me ? (S.me.nickname || S.me.account_id || '') : '';
+  av.innerHTML = S.me ? avatarHTML(n, S.me.avatar_url, false, S.me.account_id) : '';
+  nm.textContent = n;
+  const sub = $('mo-sub');
+  if (sub) {
+    const h = new Date().getHours();
+    const g = h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : h < 23 ? '晚上好' : '夜深了';
+    sub.textContent = n ? g + '，' + n : '朋友们的近况';
+  }
+}
+function fmtListTime(t) {
+  const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
+  const diff = (n - d) / 1000;
+  if (diff < 60) return '刚刚';
+  if (d.toDateString() === n.toDateString()) return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天';
+  return fmtTime(t);
+}
+function fmtMomentTime(t) {
+  const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
+  const diff = (n - d) / 1000;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (d.toDateString() === n.toDateString()) return '今天 ' + hm;
+  if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天 ' + hm;
+  if (d.getFullYear() === n.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+}
+// 点赞/评论只重画这一块，不整页重建：图片不会重新加载，也就不会闪
+function refreshMomentReact(id) {
+  const card = document.querySelector('#moment-list .moment[data-id="' + String(id).replace(/[^a-zA-Z0-9_-]/g, '') + '"]');
+  const zone = card && card.querySelector('.mo-react');
+  if (zone) { const mm = MO.list.find(function (x) { return x.id === id; }); zone.innerHTML = momentReactHTML(id, !!(mm && mm.author_acc === ME())); }
+}
+function paintVisLabel() {
+  const b = $('moment-vis'); if (!b) return;
+  b.textContent = '谁可以看：' + (MO.vis && MO.vis.length ? MO.vis.length + ' 位好友' : '全部好友');
+}
+let visSel = [];
+function paintMomentVideo() {
+  const box = $('moment-video-preview'); if (!box) return;
+  if (!MO.vid) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = '';
+  box.innerHTML = '<video src="' + esc(MO.vurl) + '" muted playsinline></video><button type="button" id="moment-video-x">×</button>';
+  box.querySelector('#moment-video-x').onclick = function () {
+    try { URL.revokeObjectURL(MO.vurl); } catch (e) {}
+    MO.vid = null; MO.vurl = ''; paintMomentVideo();
+  };
+}
+function addMomentVideo(f) {
+  if (!f || !/^video\//.test(f.type || '')) { toast('请选择视频'); return; }
+  if (f.size > 50 * 1048576) { toast('视频最多 50MB'); return; }
+  try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
+  MO.vid = f; MO.vurl = URL.createObjectURL(f); paintMomentVideo();
+}
+function openVisPicker() {
+  visSel = MO.vis ? MO.vis.slice() : [];
+  raiseSheet('vis-sheet', 'vis-backdrop');
+  $('vis-list').innerHTML = S.friends.length ? S.friends.map(function (a) {
+    return '<label class="vis-item"><input type="checkbox" data-acc="' + esc(a) + '"' + (visSel.indexOf(a) >= 0 ? ' checked' : '') + '><span>' + esc(peerName(a)) + '</span></label>';
+  }).join('') : '<div class="vis-empty">还没有好友</div>';
+  $('vis-list').onchange = function (e) {
+    const c = e.target.closest('input[data-acc]'); if (!c) return;
+    const a = c.dataset.acc;
+    if (c.checked) { if (visSel.indexOf(a) < 0) visSel.push(a); } else visSel = visSel.filter(function (x) { return x !== a; });
+  };
+  $('vis-backdrop').classList.add('active'); $('vis-sheet').classList.add('active');
+}
+function closeVis() { $('vis-backdrop').classList.remove('active'); $('vis-sheet').classList.remove('active'); }
+function openMomentCompose() {
+  MO.imgs = []; MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); MO.urls = []; MO.vis = null; paintVisLabel();
+  try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
+  MO.vid = null; MO.vurl = ''; paintMomentVideo();
+  $('moment-text').value = ''; renderMomentEditor();
+  raiseSheet('moment-sheet', 'moment-backdrop');
+  $('moment-backdrop').classList.add('active'); $('moment-sheet').classList.add('active');
+  setTimeout(function () { $('moment-text').focus(); }, 60);
+}
+function closeMomentCompose() {
+  $('moment-backdrop').classList.remove('active'); $('moment-sheet').classList.remove('active');
+  MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+  try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
+  MO.imgs = []; MO.urls = []; MO.vid = null; MO.vurl = '';
+}
+function renderMomentEditor() {
+  $('moment-count').textContent = MO.imgs.length + '/9';
+  $('moment-imgs').innerHTML = MO.imgs.map(function (f, i) {
+    return '<div class="mo-thumb"><img src="' + esc(MO.urls[i]) + '" alt=""><button type="button" data-i="' + i + '">×</button></div>';
+  }).join('');
+  $('moment-add-img').style.display = MO.imgs.length >= 9 ? 'none' : '';
+}
+function addMomentFiles(files) {
+  Array.from(files || []).forEach(function (f) {
+    if (MO.imgs.length >= 9) return;
+    if (!f || !/^image\//.test(f.type || '')) return;
+    MO.imgs.push(f);
+    try { MO.urls.push(URL.createObjectURL(f)); } catch (e) { MO.urls.push(''); }
+  });
+  renderMomentEditor();
+}
+async function postMoment() {
+  const body = $('moment-text').value.trim();
+  if (!body && !MO.imgs.length) { toast('写点什么，或者选一张图片'); return; }
+  if (body.length > 1000) { toast('最多 1000 个字'); return; }
+  const btn = $('moment-post'); if (btn.disabled) return; btn.disabled = true;
+  toast('正在发表…');
+  try {
+    const urls = [];
+    for (let i = 0; i < MO.imgs.length; i++) {
+      let blob = MO.imgs[i];
+      try { blob = await fitJpeg(blob, 1600, 0.85); } catch (e) { logErr('momentImg', e); }
+      const path = ME() + '/moment_' + now() + '_' + i + '.jpg';
+      const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+      if (up.error) throw up.error;
+      urls.push(canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl));
+    }
+    let videoUrl = '';
+    if (MO.vid) {
+      toast('正在上传视频…');
+      const mx = /\.([a-z0-9]{2,5})$/i.exec(MO.vid.name || '');
+      const path = ME() + '/moment_v_' + now() + (mx ? '.' + mx[1].toLowerCase() : '.mp4');
+      const upv = await sb.storage.from('chat-media').upload(path, MO.vid, { contentType: MO.vid.type || 'video/mp4', cacheControl: '31536000' });
+      if (upv.error) throw upv.error;
+      videoUrl = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+    }
+    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends', visible_to: MO.vis || null, video: videoUrl || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video').single();
+    if (error) throw error;
+    closeMomentCompose(); toast('已发表');
+    if (data) { MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments(); }
+  } catch (e) { logErr('momentPost', e); toast('发表失败：' + ((e && e.message) || '请重试')); }
+  finally { btn.disabled = false; }
+}
+async function toggleMomentLike(id) {
+  const arr = MO.likes[id] || [], liked = arr.indexOf(ME()) >= 0;
+  MO.likes[id] = liked ? arr.filter(function (a) { return a !== ME(); }) : arr.concat([ME()]);
+  if (!liked) SFX.like();
+  refreshMomentReact(id);
+  try {
+    if (liked) await sb.from('moment_likes').delete().eq('moment_id', id).eq('account_id', ME());
+    else await sb.from('moment_likes').insert({ moment_id: id, account_id: ME() });
+  } catch (e) { MO.likes[id] = arr; refreshMomentReact(id); logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
+}
+function commentMoment(id, reply) {
+  const toAcc = (reply && reply.acc) || '';
+  const toName = toAcc ? peerName(toAcc) : '';
+  const title = toName ? '回复 ' + toName : '评论';
+  openForm(title, [{ ph: title + '…（最多 200 字）', max: 200 }], async ([v]) => {
+    v = String(v || '').trim(); if (!v) return '写点什么';
+    const parent = reply && reply.cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reply.cid) ? reply.cid : null;
+    const tmp = { id: 'tmp' + now(), moment_id: id, author_acc: ME(), body: v, created_at: new Date().toISOString(), reply_to_acc: toAcc || null, parent_id: parent };
+    (MO.comments[id] = MO.comments[id] || []).push(tmp); refreshMomentReact(id);
+    sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v, reply_to_acc: tmp.reply_to_acc, parent_id: tmp.parent_id }).select('id,created_at').single().then(function (r) {
+      if (r.error) {
+        MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
+        toast('评论失败：' + ((r.error && r.error.message) || '请重试'));
+      } else if (r.data) { tmp.id = r.data.id; tmp.created_at = r.data.created_at; refreshMomentReact(id); }
+    }, function (e) {
+      MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
+      logErr('momentComment', e); toast('评论失败：' + ((e && e.message) || '请重试'));
+    });
+    return null;
+  }, '发送');
+}
+function deleteMoment(id) {
+  const mm = MO.list.find(function (m) { return m.id === id; });
+  openActs('删除这条朋友圈？\n点赞和评论也会一起删除。', [
+    { label: '删除', danger: true, fn: async function () {
+      const { error } = await sb.from('moments').delete().eq('id', id);
+      if (error) { toast('删除失败：' + ((error && error.message) || '请重试')); return; }
+      if (mm && Array.isArray(mm.images)) {
+        const keys = mm.images.map(function (u) { const m = /\/chat-media\/([^?]+)/.exec(u || ''); return m ? decodeURIComponent(m[1]) : ''; })
+          .filter(function (k) { return k && k.indexOf(ME() + '/moment_') === 0; });
+        if (keys.length) sb.storage.from('chat-media').remove(keys).catch(function () {});
+      }
+      if (mm && typeof mm.video === 'string' && mm.video) {
+        const mv = /\/chat-media\/([^?]+)/.exec(mm.video);
+        if (mv) { const kv = decodeURIComponent(mv[1]); if (kv.indexOf(ME() + '/moment_v_') === 0) sb.storage.from('chat-media').remove([kv]).catch(function () {}); }
+      }
+      MO.list = MO.list.filter(function (m) { return m.id !== id; });
+      delete MO.likes[id]; delete MO.comments[id];
+      renderMoments(); toast('已删除');
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
+function openMomentImage(url) {
+  lbList = [{ id: 'moment', url: url }]; lbIdx = 0;
+  $('lb-save').style.display = 'none'; lbShow(); $('lightbox').classList.add('active');
+}
+function paintMomentBadge() {
+  const b = $('moment-badge'); if (!b) return;
+  const n = (MO.notices || []).length;
+  b.style.display = n ? '' : 'none';
+  b.textContent = n > 9 ? '9+' : n;
+}
+function renderMomentNotices() {
+  const el = $('moment-notify'); if (!el) return;
+  if (!MO.notices.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = '<div class="mo-notify-title">最近互动</div>' + MO.notices.map(function (n) {
+    return '<div class="mo-notice" data-id="' + esc(n.moment_id) + '"><b>' + esc(peerName(n.actor)) + '</b> ' +
+      (n.kind === 'like' ? '赞了' : '评论了') + '你的朋友圈<span>' + fmtTime(n.created_at) + '</span>' +
+      (n.kind === 'comment' ? '<div>' + esc(n.preview) + '</div>' : '') + '</div>';
+  }).join('');
+}
+async function momentNotifyCheck() {
+  if (!sb || !S.me || document.hidden) return;
+  try {
+    const { data: ms, error } = await sb.from('moments').select('id,body,created_at').eq('author_acc', ME()).order('created_at', { ascending: false }).limit(60);
+    if (error || !ms || !ms.length) { MO.notices = []; paintMomentBadge(); renderMomentNotices(); return; }
+    const ids = ms.map(function (m) { return m.id; }), map = {}; ms.forEach(function (m) { map[m.id] = m; });
+    const since = S.me.moments_seen_at || '1970-01-01T00:00:00Z';
+    const [lk, cm] = await Promise.all([
+      sb.from('moment_likes').select('moment_id,account_id,created_at').in('moment_id', ids).neq('account_id', ME()).gt('created_at', since),
+      sb.from('moment_comments').select('moment_id,author_acc,body,created_at').in('moment_id', ids).neq('author_acc', ME()).gt('created_at', since)
+    ]);
+    const list = [];
+    (lk.data || []).forEach(function (x) { list.push({ kind: 'like', actor: x.account_id, moment_id: x.moment_id, created_at: x.created_at, preview: (map[x.moment_id] && map[x.moment_id].body) || '你的朋友圈' }); });
+    (cm.data || []).forEach(function (x) { list.push({ kind: 'comment', actor: x.author_acc, moment_id: x.moment_id, created_at: x.created_at, preview: x.body }); });
+    list.sort(function (a, b) { return Date.parse(b.created_at) - Date.parse(a.created_at); });
+    MO.notices = list.slice(0, 30);
+    const actors = Array.from(new Set(MO.notices.map(function (n) { return n.actor; })));
+    await Promise.all(actors.map(function (a) { return fetchProfile(a); }));
+    paintMomentBadge(); renderMomentNotices();
+  } catch (e) { logErr('momentNotify', e); }
+}
+async function markMomentsSeen() {
+  if (!S.me) return;
+  const t = new Date().toISOString();
+  try {
+    await sb.from('profiles').update({ moments_seen_at: t }).eq('id', S.uid);
+    S.me.moments_seen_at = t; saveCache(); paintMomentBadge();
+  } catch (e) { logErr('momentSeen', e); }
+}
+
+/* 选择成员弹窗 */
+let pickCb = null, pickSel = new Set();
+function openPick(title, items, cb) {
+  raiseSheet('pick-sheet', 'pick-backdrop');
+  pickCb = cb; pickSel = new Set();
+  $('pick-title').textContent = title || '选择成员';
+  $('pick-list').innerHTML = (items || []).length
+    ? items.map(function (x) { return '<button type="button" class="pick-item" data-acc="' + esc(x.acc) + '"><span class="pk-name">' + esc(x.name || x.acc) + '</span><span class="pk-ck">✓</span></button>'; }).join('')
+    : '<div class="grp-empty">没有可选的成员</div>';
+  $('pick-ok').textContent = '确定';
+  $('pick-backdrop').classList.add('active'); $('pick-sheet').classList.add('active');
+}
+function closePick() { $('pick-backdrop').classList.remove('active'); $('pick-sheet').classList.remove('active'); pickCb = null; pickSel = new Set(); }
+function pickToggle(acc) {
+  if (!acc) return;
+  if (pickSel.has(acc)) pickSel.delete(acc); else pickSel.add(acc);
+  Array.prototype.forEach.call($('pick-list').querySelectorAll('.pick-item'), function (el) { el.classList.toggle('on', pickSel.has(el.getAttribute('data-acc'))); });
+  $('pick-ok').textContent = pickSel.size ? '确定（' + pickSel.size + '）' : '确定';
+}
