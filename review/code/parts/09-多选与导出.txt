@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 09-多选与导出 · 原文件第 5347-5528 行 -->
-<!-- 这一段负责：多选转发、主题、导出聊天记录/全部、清空、搜索 -->
+<!-- Chatter 前端 · 09-多选与导出 · 原文件第 5435-5628 行 · 当前线上版本 -->
 /* ================= 多选 ================= */
 let selMode = false, selSet = new Set();
 function paintMulti() {
@@ -37,7 +36,12 @@ function multiDel() {
 }
 function multiFwd() {
   if (!selSet.size) return;
-  const ids = Array.from(selSet);
+  const okTypes = { text: 1, image: 1, voice: 1, sticker: 1, video: 1, file: 1 };
+  const ids = Array.from(selSet).filter(function (id) {
+    const m = S.msgs.find(function (x) { return x.id === id; });
+    return m && okTypes[m.type];
+  });
+  if (!ids.length) { toast('撤回的消息、通话记录不能转发'); exitMulti(); return; }
   const items = S.friends.slice(0, 12).map(function (a) {
     return { label: peerName(a), fn: function () {
       ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
@@ -159,7 +163,14 @@ async function loadStore() {
       const { data, error } = await sb.storage.from('chat-media').list(ME(), { limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } });
       if (error) throw error;
       if (!data || !data.length) break;
-      data.forEach(f => { if (f && f.name && f.id !== null && f.name.indexOf('avatar_') !== 0 && !keep.has(ME() + '/' + f.name)) all.push(f); });
+      data.forEach(f => {
+        if (!f || !f.name || f.id === null) return;
+        // 只处理“聊天里发出去的媒体”：文件名是 <13位时间戳>_<随机>.<扩展名>
+        // 头像 avatar_、背景 bg_、朋友圈封面 cover_、好友背景 fbg_、群图标 g_、朋友圈 moment_、群文件 gf_、表情 sticker_ 一律不碰
+        if (!/^\d{12,}_[a-z0-9]{4,10}\.[a-z0-9]{1,8}$/i.test(f.name)) return;
+        if (f.name.indexOf('avatar_') === 0 || keep.has(ME() + '/' + f.name)) return;
+        all.push(f);
+      });
       if (data.length < 100) break;
     }
     stFiles = all; stRenderInfo();
