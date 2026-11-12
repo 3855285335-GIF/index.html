@@ -1,0 +1,183 @@
+<!-- Chatter 前端 · 09-多选与导出 · 原文件第 5347-5528 行 -->
+<!-- 这一段负责：多选转发、主题、导出聊天记录/全部、清空、搜索 -->
+/* ================= 多选 ================= */
+let selMode = false, selSet = new Set();
+function paintMulti() {
+  try {
+    const bar = $('multi-bar'); if (!bar) return;
+    $('multi-count').textContent = '已选 ' + selSet.size + ' 条';
+    bar.classList.toggle('active', selMode && selSet.size > 0);
+  } catch (e) {}
+}
+function startMulti(id) {
+  selMode = true; selSet = new Set(); document.body.classList.add('multi');
+  if (id) { selSet.add(id); const el = msgElOf(id); if (el) el.classList.add('sel'); }
+  paintMulti();
+}
+function toggleSel(id) {
+  if (!id) return;
+  const el = msgElOf(id);
+  if (selSet.has(id)) { selSet.delete(id); if (el) el.classList.remove('sel'); }
+  else { selSet.add(id); if (el) el.classList.add('sel'); }
+  paintMulti();
+}
+function exitMulti() {
+  selSet.forEach(function (id) { const el = msgElOf(id); if (el) el.classList.remove('sel'); });
+  selSet = new Set(); selMode = false; document.body.classList.remove('multi'); paintMulti();
+}
+function multiDel() {
+  const n = selSet.size; if (!n) return;
+  selSet.forEach(function (id) {
+    hidden.add(id); S.out.delete(id);
+    const el = msgElOf(id); if (el) el.remove();
+  });
+  saveHidden(); exitMulti();
+  if (!$('chat-messages').querySelector('.msg')) chatRender(true);
+  toast('已删除 ' + n + ' 条（仅在你这边）');
+}
+function multiFwd() {
+  if (!selSet.size) return;
+  const ids = Array.from(selSet);
+  const items = S.friends.slice(0, 12).map(function (a) {
+    return { label: peerName(a), fn: function () {
+      ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
+      toast('已转发 ' + ids.length + ' 条'); exitMulti();
+    } };
+  });
+  items.push({ label: '取消', danger: true, fn: function () {} });
+  openActs('转发给', items);
+}
+document.addEventListener('click', function (e) {
+  if (!selMode) return;
+  const el = e.target && e.target.closest ? e.target.closest('.msg') : null;
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  toggleSel(el.getAttribute('data-id'));
+}, true);
+/* ================= 主题切换 / 导出聊天记录 ================= */
+function applyTheme() {
+  const t = LS.get('ch2theme', 'auto');
+  try {
+    if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', t);
+    const b = $('btn-theme');
+    if (b) b.textContent = '🎨 主题：' + (t === 'auto' ? '跟随系统' : (t === 'dark' ? '深色' : '浅色'));
+  } catch (e) {}
+}
+function cycleTheme() {
+  const order = ['auto', 'light', 'dark'];
+  const cur = LS.get('ch2theme', 'auto');
+  const next = order[(order.indexOf(cur) + 1) % 3] || 'auto';
+  LS.set('ch2theme', next); applyTheme();
+}
+applyTheme();
+function exportChat() {
+  if (!S.conv) { toast('先打开一个聊天再导出'); return; }
+  const other = peerName(peerOf(S.conv, ME()));
+  const kind = { image: '图片', video: '视频', voice: '语音', file: '文件', sticker: '表情', call: '通话', recalled: '撤回' };
+  const out = ['Chatter 聊天记录', '对话：' + other, '导出时间：' + new Date().toLocaleString(), '--------------------------------'];
+  S.msgs.filter(function (m) { return m && m._st !== 'sending'; }).forEach(function (m) {
+    const who = m.from_acc === ME() ? '我' : other;
+    const t = m.type === 'text' ? parseQ(m.body).text : ('[' + (kind[m.type] || m.type) + ']');
+    out.push('[' + new Date(m.created_at).toLocaleString() + '] ' + who + '：' + t);
+  });
+  try {
+    const blob = new Blob([out.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'chat-' + other + '-' + Date.now() + '.txt';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 3000);
+    toast('已导出 ' + (out.length - 4) + ' 条');
+  } catch (e) { logErr('export', e); toast('导出失败'); }
+}
+/* ================= 清空聊天记录 / 搜索 ================= */
+function clearConv(conv) {
+  const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
+  if (S.conv === conv) S.msgs.forEach(m => { t = Math.max(t, Date.parse(m.created_at) || 0); });
+  if (!t) t = now();
+  setClr(conv, t);
+  if (c) c.unread = 0;
+  if (S.conv === conv) { S.hasMore = false; chatRender(true); }
+  markReadSoon(conv); sched('list'); sched('title'); saveCache(); toast('已清空（仅在你这边，对方不受影响）');
+}
+function confirmClear(conv, isList) {
+  openActs(isList ? '删除这个会话？聊天记录会在你这边清空，对方不受影响，对方再发消息时会重新出现。' : '清空这个聊天的全部记录？只在你这边清空，对方不受影响。', [{ label: isList ? '删除会话' : '清空聊天记录', danger: true, fn: () => clearConv(conv) }, { label: '取消', fn: null }]);
+}
+let csT = 0, csSeq = 0;
+function openSearch() { $('chat-search').classList.add('active'); $('cs-input').value = ''; $('cs-list').innerHTML = '<div class="cs-empty">输入关键字，搜索这个聊天里的文字消息</div>'; setTimeout(() => $('cs-input').focus(), 60); }
+function closeSearch() { $('chat-search').classList.remove('active'); $('cs-input').blur(); }
+function hl(text, q) {
+  const i = text.toLowerCase().indexOf(q.toLowerCase()); if (i < 0) return esc(text.slice(0, 80));
+  const a = Math.max(0, i - 14), b = Math.min(text.length, i + q.length + 40);
+  return (a > 0 ? '…' : '') + esc(text.slice(a, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length, b)) + (b < text.length ? '…' : '');
+}
+async function runChatSearch(q) {
+  q = (q || '').trim(); const seq = ++csSeq, conv = S.conv;
+  if (!q) { $('cs-list').innerHTML = '<div class="cs-empty">输入关键字，搜索这个聊天里的文字消息</div>'; return; }
+  $('cs-list').innerHTML = '<div class="cs-empty">搜索中…</div>';
+  let rows = [];
+  try {
+    const pat = '%' + q.replace(/[\\%_]/g, c => '\\' + c) + '%';
+    const { data, error } = await sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,created_at').eq('conv_key', conv).eq('type', 'text').ilike('body', pat).order('created_at', { ascending: false }).limit(80);
+    if (error) throw error; rows = (data || []).map(rowToMsg);
+  } catch (e) { logErr('search-chat', e); rows = S.msgs.filter(m => m.type === 'text'); }
+  if (seq !== csSeq || S.conv !== conv) return;
+  const low = q.toLowerCase();
+  const hit = rows.filter(m => !isHidden(m) && parseQ(m.body).text.toLowerCase().indexOf(low) >= 0).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 50);
+  $('cs-list').innerHTML = hit.length ? hit.map(m => '<div class="cs-item" data-id="' + esc(m.id) + '"><div class="cs-meta">' + esc(m.from_acc === ME() ? '我' : peerName(m.from_acc)) + ' · ' + esc(new Date(m.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })) + '</div><div class="cs-text">' + hl(parseQ(m.body).text, q) + '</div></div>').join('') : '<div class="cs-empty">没有找到相关消息</div>';
+}
+async function gotoMsg(id) {
+  closeSearch();
+  for (let i = 0; i < 40 && !msgElOf(id) && S.hasMore && S.conv; i++) { await loadOlder(); }
+  if (msgElOf(id)) jumpTo(id); else toast('这条消息太久远，没能定位到');
+}
+
+/* ================= 存储空间（清理自己发送的图片/语音）================= */
+let stFiles = null, stArm = null;
+const fmtMB = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
+const fileTs = f => { const t = Date.parse(f.created_at || f.updated_at || ''); if (t > 0) return t; const m = /^(\d{12,})_/.exec(f.name || ''); return m ? +m[1] : 0; };
+function stCutoff(days) { return days ? now() - days * 86400000 : Infinity; }
+function stPick(days) { const c = stCutoff(days); return (stFiles || []).filter(f => fileTs(f) < c); }
+function stRenderInfo() {
+  const all = stFiles || [], size = all.reduce((a, f) => a + ((f.metadata && f.metadata.size) || 0), 0);
+  const tot = $('store-total');
+  if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">已用 ' + fmtDec(S.stUsed) + '</div><div class="st-bar' + (r >= 0.9 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
+  else tot.style.display = 'none';
+  $('store-info').textContent = all.length ? '你发过的图片、语音、视频一共 ' + all.length + ' 个，约 ' + fmtMB(size) + '。文字几乎不占空间；图片发送时会自动压缩。这里的清理只删你自己发出去的文件，不会影响别人。' : '你还没发过图片、语音或视频。文字几乎不占空间，图片会自动压缩，不用特意清理。';
+  [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
+}
+async function loadStore() {
+  $('store-box').style.display = 'block'; $('store-info').textContent = '统计中…'; stArm = null;
+  checkStorage(true).then(() => { if (stFiles) stRenderInfo(); });
+  try {
+    if (S.v6 !== false) await loadStickers(true);
+    if (S.v6 !== false && !stkOk) throw new Error('“我的表情”列表没读到，为了不误删正在用的表情，先不清理，请稍后再试');
+    const keep = new Set((S.stk || []).map(x => { const m = /\/chat-media\/([^?#]+)/.exec(x.url); return m ? decodeURIComponent(m[1]) : ''; }));
+    const all = [];
+    for (let off = 0; off < 10000; off += 100) {
+      const { data, error } = await sb.storage.from('chat-media').list(ME(), { limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } });
+      if (error) throw error;
+      if (!data || !data.length) break;
+      data.forEach(f => { if (f && f.name && f.id !== null && f.name.indexOf('avatar_') !== 0 && !keep.has(ME() + '/' + f.name)) all.push(f); });
+      if (data.length < 100) break;
+    }
+    stFiles = all; stRenderInfo();
+  } catch (e) { logErr('store', e); stFiles = null; $('store-info').textContent = '读取失败：' + (e && e.message || e) + '。如果提示没有权限，请先在 Supabase 运行 setup-v3.sql。'; ['st-30', 'st-7', 'st-all'].forEach(id => { $(id).disabled = true; }); }
+}
+async function stClean(days, btn) {
+  const list = stPick(days); if (!list.length) return;
+  if (stArm !== btn.id) { stArm = btn.id; btn.textContent = '再点一次确认删除 ' + list.length + ' 个（对方也将看不到这些图片/语音/视频/文件）'; setTimeout(() => { if (stArm === btn.id) { stArm = null; stRenderInfo(); } }, 5000); return; }
+  stArm = null; ['st-30', 'st-7', 'st-all'].forEach(id => { $(id).disabled = true; });
+  let done = 0, fail = 0;
+  try {
+    for (let i = 0; i < list.length; i += 50) {
+      const part = list.slice(i, i + 50).map(f => ME() + '/' + f.name);
+      const { data, error } = await sb.storage.from('chat-media').remove(part);
+      if (error) { fail += part.length; logErr('store-rm', error); } else done += (data ? data.length : part.length);
+      $('store-info').textContent = '清理中… ' + Math.min(i + 50, list.length) + ' / ' + list.length;
+    }
+  } catch (e) { logErr('store-rm', e); }
+  toast(fail ? '已清理 ' + done + ' 个，' + fail + ' 个失败（可能没有权限，请运行 setup-v3.sql）' : '已清理 ' + done + ' 个文件');
+  await loadStore();
+}
