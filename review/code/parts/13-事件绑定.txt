@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 13-事件绑定 · 原文件第 6601-7199 行 -->
-<!-- 这一段负责：所有 onclick/事件绑定（查：空元素、重复绑定、未清理监听） -->
+<!-- Chatter 前端 · 13-事件绑定 · 原文件第 6714-7344 行 · 当前线上版本 -->
 /* ================= 事件绑定 ================= */
 let viewportApply = null;
 function bindViewport() {
@@ -19,9 +18,34 @@ function bindViewport() {
   };
   viewportApply = apply;
   const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
+  // 从后台回来：iOS 有时会保留“键盘打开时的高度”，聊天页只占半屏、输入栏悬在中间
+  const resumeFix = () => {
+    try {
+      const root = document.documentElement;
+      if (!desktop.matches) {
+        root.style.setProperty('--vvh', window.innerHeight + 'px');
+        root.style.setProperty('--vvt', '0px');
+      }
+      document.body.classList.remove('kb');
+    } catch (e) {}
+    resync();
+    setTimeout(function () {
+      try {
+        if (document.hidden || desktop.matches) return;
+        const v = window.visualViewport;
+        if (v && v.height < window.innerHeight * 0.7) {
+          const root = document.documentElement;
+          root.style.setProperty('--vvh', window.innerHeight + 'px');
+          root.style.setProperty('--vvt', '0px');
+          document.body.classList.remove('kb');
+        }
+        if (S.conv) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
+      } catch (e) {}
+    }, 900);
+  };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) resync(); });
-  window.addEventListener('pageshow', resync); window.addEventListener('focus', resync);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) resumeFix(); });
+  window.addEventListener('pageshow', resumeFix); window.addEventListener('focus', resumeFix);
   apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
@@ -106,7 +130,12 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  window.addEventListener('popstate', () => { if (S.call) { try { history.pushState({ chat: 1 }, ''); } catch (e) {} return; } if (S.conv) { S.hist = false; closeChat(); } });
+  try { if (!history.state || !history.state.app) history.pushState({ app: 1 }, '', location.href); } catch (e) {}
+  window.addEventListener('popstate', () => {
+    if (S.call) { try { history.pushState({ app: 1 }, '', location.href); } catch (e) {} return; }
+    if (S.conv) { S.hist = false; closeChat(); return; }
+    try { history.pushState({ app: 1 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
+  });
   const box = $('chat-messages');
   box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
   box.addEventListener('error', e => {
@@ -128,7 +157,7 @@ function bindUI() {
   box.addEventListener('pointermove', e => { if (vSeekEl) voiceSeek(e, vSeekEl); });
   window.addEventListener('pointerup', () => { vSeekEl = null; });
   box.addEventListener('click', e => {
-    const av = e.target.closest('.msg.theirs .avatar-wrapper'); if (av && av.dataset.acc) { openProfile(av.dataset.acc); return; }
+    const av = e.target.closest('.msg .avatar-wrapper'); if (av && av.dataset.acc) { if (av.dataset.acc === ME()) showSelfCard(''); else openProfile(av.dataset.acc); return; }
     const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
     const v = e.target.closest('.bubble.voice'); if (v) { if (now() - vSeekAt < 600) return; togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
@@ -463,7 +492,7 @@ $('btn-export').onclick = () => {
   openActs('导出哪个聊天？', list);
 };
 $('btn-msearch').onclick = searchMsgs;
-$('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
+$('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;
 $('multi-fwd').onclick = multiFwd;
 $('multi-cancel').onclick = exitMulti;
@@ -515,7 +544,7 @@ $('gi-members').onclick = function (e) {
   const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
   const acc = it.getAttribute('data-acc'); if (!acc) return;
   const gid = gidOf(giKey);
-  if (acc === ME()) { openGroupSettings(gid); return; }
+  if (acc === ME()) { showSelfCard(gid); return; }
   const my = grpRoleOf(gid, ME()), target = grpRoleOf(gid, acc);
   const can = my === 'owner' || my === 'admin';
   if (!can) { openProfile(acc); return; }
@@ -529,6 +558,8 @@ $('gi-members').onclick = function (e) {
   items.push({ label: '取消', fn: null });
   openActs(peerName(acc), items);
 };
+if ($('me-avatar')) $('me-avatar').onclick = function () { showSelfCard(''); };
+if (document.querySelector('.me-card')) document.querySelector('.me-card').addEventListener('click', function (e) { if (e.target.closest('button')) return; showSelfCard(''); });
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
