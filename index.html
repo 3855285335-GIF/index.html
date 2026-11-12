@@ -2797,6 +2797,7 @@ async function openConv(key, peer) {
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
+  try { document.body.classList.remove('kb'); if (viewportApply) viewportApply(); } catch (e) {}
   if (!S.hist) { try { history.pushState({ chat: 1 }, ''); S.hist = true; } catch (e) {} }
   $('emoji-panel').classList.remove('active'); hideSuggest();
   grpChatMode();
@@ -6729,9 +6730,34 @@ function bindViewport() {
   };
   viewportApply = apply;
   const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
+  // 从后台回来：iOS 有时会保留“键盘打开时的高度”，聊天页只占半屏、输入栏悬在中间
+  const resumeFix = () => {
+    try {
+      const root = document.documentElement;
+      if (!desktop.matches) {
+        root.style.setProperty('--vvh', window.innerHeight + 'px');
+        root.style.setProperty('--vvt', '0px');
+      }
+      document.body.classList.remove('kb');
+    } catch (e) {}
+    resync();
+    setTimeout(function () {
+      try {
+        if (document.hidden || desktop.matches) return;
+        const v = window.visualViewport;
+        if (v && v.height < window.innerHeight * 0.7) {
+          const root = document.documentElement;
+          root.style.setProperty('--vvh', window.innerHeight + 'px');
+          root.style.setProperty('--vvt', '0px');
+          document.body.classList.remove('kb');
+        }
+        if (S.conv) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
+      } catch (e) {}
+    }, 900);
+  };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) resync(); });
-  window.addEventListener('pageshow', resync); window.addEventListener('focus', resync);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) resumeFix(); });
+  window.addEventListener('pageshow', resumeFix); window.addEventListener('focus', resumeFix);
   apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
