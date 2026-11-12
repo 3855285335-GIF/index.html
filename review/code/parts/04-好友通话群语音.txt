@@ -1,0 +1,795 @@
+<!-- Chatter 前端 · 04-好友通话群语音 · 原文件第 3003-3796 行 -->
+<!-- 这一段负责：好友关系、1对1 通话信令、群语音 4 人、说话检测 -->
+/* ================= 好友 ================= */
+let searchT = 0;
+async function runSearch(q) {
+  const el = $('search-results'); q = (q || '').trim();
+  if (!q) { el.innerHTML = ''; return; }
+  const safe = q.replace(/[,%_\\()[\]*]/g, ''); if (!safe) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="empty">搜索中…</div>';
+  const acc = safe.toLowerCase(), sel = 'account_id,nickname,avatar_url,signature';
+  const [ex, fz] = await Promise.all([
+    sb.from('profiles').select(sel).eq('account_id', acc).neq('account_id', ME()).maybeSingle(),
+    sb.from('profiles').select(sel).or('account_id.ilike.%' + safe + '%,nickname.ilike.%' + safe + '%').neq('account_id', ME()).limit(20)
+  ]);
+  if ($('search-input').value.trim() !== q) return;
+  if (fz.error) { el.innerHTML = '<div class="empty">搜索失败：' + esc(fz.error.message) + '</div>'; return; }
+  const rows = [];
+  if (!ex.error && ex.data) rows.push(ex.data);
+  const rank = p => p.account_id === acc ? 0 : String(p.account_id).indexOf(acc) === 0 ? 1 : String(p.nickname || '').toLowerCase() === acc ? 2 : String(p.nickname || '').toLowerCase().indexOf(acc) === 0 ? 3 : 4;
+  (fz.data || []).slice().sort((a, b) => rank(a) - rank(b)).forEach(p => { if (!rows.some(x => x.account_id === p.account_id)) rows.push(p); });
+  const data = rows.slice(0, 20);
+  if (!data.length) { el.innerHTML = '<div class="empty">没有找到匹配用户</div>'; return; }
+  data.forEach(p => { S.profiles[p.account_id] = Object.assign({}, S.profiles[p.account_id] || {}, p); });
+  el.innerHTML = data.map(p => '<div class="search-result">' + avatarHTML(p.nickname, p.avatar_url, isOnline(p.account_id), p.account_id) +
+    '<div class="name"><div class="name-main">' + esc(p.nickname) + (p.account_id === acc ? '<span class="exact-tag">账号</span>' : '') + '</div><div class="name-sub">@' + esc(p.account_id) + '</div></div>' +
+    '<div class="row-actions">' + (S.friends.includes(p.account_id) ? '<button class="btn-primary act-chat" data-acc="' + esc(p.account_id) + '">聊天</button>' : '<button class="btn-primary act-add" data-acc="' + esc(p.account_id) + '">加好友</button>') + '</div></div>').join('');
+}
+async function addFriend(btn) {
+  btn.disabled = true;
+  const { data, error } = await sb.rpc('send_friend_request', { p_to: btn.dataset.acc });
+  if (error) { btn.disabled = false; toast('发送失败：' + error.message); return; }
+  if (data === 'ok' || data === 'exists') { btn.textContent = '已发送'; if (data === 'exists') toast('请求已发送过，等待对方处理'); else firePush('req', btn.dataset.acc); }
+  else if (data === 'friends' || data === 'accepted') { btn.textContent = '已是好友'; resync(); }
+  else { btn.disabled = false; toast('无法发送（' + data + '）'); }
+}
+async function acceptRequest(id) {
+  const { error } = await sb.rpc('accept_friend_request', { p_req_id: String(id) });
+  if (error) { toast('接受失败：' + error.message); return; }
+  S.requests = S.requests.filter(r => String(r.id) !== String(id)); sched('reqs'); resync();
+}
+async function declineRequest(id) {
+  S.requests = S.requests.filter(r => String(r.id) !== String(id)); sched('reqs');
+  await sb.from('friend_requests').update({ status: 'declined' }).eq('id', id);
+}
+function confirmRemoveFriend(acc) {
+  openActs('删除好友“' + peerName(acc) + '”（@' + acc + '）？\n删除后双方都要重新加好友才能聊天', [{ label: '删除好友', danger: true, fn: () => removeFriend(acc) }, { label: '取消', fn: null }]);
+}
+async function removeFriend(acc) {
+  const { error } = await sb.rpc('remove_friendship', { p_me: ME(), p_peer: acc });
+  if (error) { toast('删除失败：' + error.message); return; }
+  bcast('u:' + acc, 'fr', {});
+  S.friends = S.friends.filter(a => a !== acc); sched('contacts'); resync();
+}
+
+/* ================= 通话 ================= */
+function envProblem() {
+  if (iosAppWebview()) return IOS_APP_MSG;
+  if (!window.isSecureContext) return '通话需要 https 地址（或 localhost）';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return '当前浏览器不支持通话（微信/QQ 等内置浏览器常见），请用 Safari / Chrome 打开';
+  if (typeof RTCPeerConnection === 'undefined') return '当前浏览器不支持 WebRTC 通话';
+  return '';
+}
+let sigSeq = 0;
+const sqOf = () => ME() + ':' + now().toString(36) + (++sigSeq).toString(36);
+function dbSignal(peer, payload, keep) {
+  if (S.noSigDb || !sb) return Promise.resolve(false);
+  if (keep) return restRpc('send_signal', { p_to: peer, p_payload: payload });   // 页面关闭时：用 keepalive 请求，关掉也能发出去
+  return sb.rpc('send_signal', { p_to: peer, p_payload: payload }).then(r => {
+    if (r && r.error) { if (isMissingFn(r.error)) S.noSigDb = true; logErr('send_signal', r.error); return false; }
+    return true;
+  }, e => { logErr('send_signal', e); return false; });
+}
+async function sig(peer, t, data) {
+  const p = Object.assign({ t, from: ME(), sq: sqOf() }, data);
+  const [a, b] = await Promise.all([bcast('u:' + peer, 'sig', p), dbSignal(peer, p)]);
+  return a || b;
+}
+function restRpc(fn, body) {   // 直接发 HTTP（带 keepalive），用于页面关闭的那一刻
+  if (!S.token) return Promise.resolve(false);
+  try {
+    return fetch(API_URL + '/rest/v1/rpc/' + fn, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + S.token }, body: JSON.stringify(body || {}) })
+      .then(r => r.ok, () => false);
+  } catch (e) { return Promise.resolve(false); }
+}
+let lastPr = null;
+function announcePresence(on, keep) {   // 在线状态变化了才发：上线 / 下线各通知好友一次
+  if (!S.me || !S.token || lastPr === on) return;
+  lastPr = on;
+  const p = { t: 'pr', from: ME(), on: on ? 1 : 0, n: now(), sq: sqOf() };
+  S.friends.forEach(a => { bcast('u:' + a, 'pr', p, keep); dbSignal(a, p, keep); });
+}
+const prLast = {}, prAt = {};
+function onPresence(p) {
+  if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || sigDup(p)) return;
+  const n = +p.n || 0; if (n && prLast[p.from] && n <= prLast[p.from]) return;   // 两条路到达顺序可能颠倒：只认更新的
+  prLast[p.from] = n; prAt[p.from] = { on: !!p.on, t: now() };
+  if (p.on) S.fbOnline.add(p.from); else { S.fbOnline.delete(p.from); S.online.delete(p.from); }
+  sched('list'); sched('contacts'); sched('title');
+}
+const sigSeen = new Set();
+function sigDup(p) {
+  if (!p || typeof p.sq !== 'string') return false;
+  if (sigSeen.has(p.sq)) return true;
+  sigSeen.add(p.sq); if (sigSeen.size > 600) { const a = Array.from(sigSeen).slice(-300); sigSeen.clear(); a.forEach(x => sigSeen.add(x)); }
+  return false;
+}
+const QUAL = { hd1080: { w: 1920, h: 1080, fps: 30, br: 4000000, name: '超清' }, hd: { w: 1280, h: 720, fps: 30, br: 2500000, name: '清晰' }, sd: { w: 854, h: 480, fps: 30, br: 1000000, name: '流畅' } };
+function loadQ() { const q = LS.get('callq', 'hd'); return QUAL[q] ? q : 'hd'; }
+function vcons(call, facing) {
+  const q = QUAL[call.q] || QUAL.hd;
+  return { facingMode: { ideal: facing || call.facing || 'user' }, width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps, max: 30 } };
+}
+function mkCall(peer, video, caller, id) {
+  return { id: id || uuid(), peer, video, caller, pc: null, local: null, remote: null, connected: false, startedAt: 0, candBuf: [], candT: 0, timers: [], dcT: 0, clock: 0, muted: false, camOff: false, ended: false, facing: 'user', q: loadQ(), statsT: 0, prevStats: null, flipping: false };
+}
+function ctimer(call, fn, ms) { const t = setTimeout(fn, ms); call.timers.push(t); return t; }
+function clearTimers(call) { call.timers.forEach(clearTimeout); call.timers = []; }
+function setCallStatus(t) { $('call-status').textContent = t; }
+let wl = null;
+async function wakeOn() {
+  if (!navigator.wakeLock || wl) return;
+  try {
+    const l = await navigator.wakeLock.request('screen');
+    if (!S.call) { try { l.release(); } catch (e) {} return; }
+    wl = l; if (l.addEventListener) l.addEventListener('release', () => { if (wl === l) wl = null; });
+  } catch (e) { logErr('wakeLock', e); }
+}
+function wakeOff() { const l = wl; wl = null; try { if (l) l.release(); } catch (e) {} }
+function showCallUI(call, status) {
+  wakeOn();
+  clearTimeout(S.callHideT);
+  $('call-name').textContent = peerName(call.peer); setCallStatus(status);
+  $('remote-video').style.display = call.video ? 'block' : 'none';
+  $('local-video').style.display = call.video ? 'block' : 'none';
+  $('btn-cam').style.display = call.video ? '' : 'none';
+  $('btn-mute').classList.remove('off'); $('btn-cam').classList.remove('off'); $('call-tip').style.display = 'none';
+  $('call-avatar').innerHTML = avatarHTML(nickOf(call.peer), avatarOf(call.peer), false, call.peer);
+  $('call-ui').classList.remove('connected', 'swap'); $('call-ui').classList.toggle('video', !!call.video); $('call-stats').classList.remove('show'); $('call-sig').className = 'l4';
+  $('call-ui').classList.add('active');
+}
+function hideCallUI() {
+  SFX.ringStop();
+  $('call-ui').classList.remove('active', 'connected', 'video', 'swap'); $('call-stats').classList.remove('show');
+  $('remote-video').srcObject = null; $('local-video').srcObject = null; $('remote-audio').srcObject = null; $('remote-audio')._key = '';
+}
+function playEl(el) { try { const p = el.play(); if (p && p.catch) p.catch(() => { $('call-tip').style.display = 'block'; }); } catch (e) {} }
+/* 声音只由 remote-audio 播放（它只装对方的声音轨道，轨道一变就换一个新的流，iPhone 才会跟着更新）；
+   画面元素 remote-video 一直静音，避免两个元素同时放同一路声音（iPhone 上会出问题） */
+function attachRemote(call) {
+  if (!call.remote) return;
+  const a = $('remote-audio'), at = call.remote.getAudioTracks(), key = at.map(t => t.id).join(',');
+  if (at.length && a._key !== key) { a.srcObject = new MediaStream(at); a._key = key; }
+  a.muted = false; a.volume = 1; if (at.length) playEl(a);
+  if (call.video) { const v = $('remote-video'); v.muted = true; if (v.srcObject !== call.remote) v.srcObject = call.remote; playEl(v); }
+}
+async function getMedia(call) {
+  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const fail = e => e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'NotFoundError' && false);
+  if (call.video) {
+    try { return await gum({ audio, video: vcons(call) }, 30000); }
+    catch (e) {
+      if (fail(e)) throw e;
+      try { return await gum({ audio, video: { facingMode: 'user' } }, 30000); } catch (e2) { if (fail(e2)) throw e2; }
+    }
+    try {
+      const s = await gum({ audio }, 30000); call.video = false;
+      $('remote-video').style.display = 'none'; $('local-video').style.display = 'none'; $('btn-cam').style.display = 'none'; $('call-ui').classList.remove('video');
+      toast('摄像头不可用，已切换为语音通话'); return s;
+    } catch (e3) { throw e3; }
+  }
+  return await gum({ audio, video: false }, 30000);
+}
+function vSender(call) { return call.pc && call.pc.getSenders().find(x => x.track && x.track.kind === 'video'); }
+const relaySave = () => LS.get('ch2relaysave2', false) === true;   // 默认关：走中转也不降画质，想省流量由用户自己打开
+const saving = call => !!(call && call.relay && relaySave());
+function aSender(call) { return call.pc && call.pc.getSenders().find(x => x.track && x.track.kind === 'audio'); }
+async function applyAudioParams(call) {
+  const want = saving(call) ? 24000 : 0;
+  if ((call._aBr || 0) === want) return;            // 没有变化就不碰声音发送设置（默认一次都不会改）
+  const sd = aSender(call); if (!sd || !sd.getParameters || !sd.setParameters) return;
+  try {
+    const pr = sd.getParameters();
+    if (!pr.encodings || !pr.encodings.length) return;
+    if (want) pr.encodings[0].maxBitrate = want; else delete pr.encodings[0].maxBitrate;
+    await sd.setParameters(pr); call._aBr = want;
+  } catch (e) { logErr('setParameters-a', e); }
+}
+async function applyCallParams(call) { await applyAudioParams(call); await applyVideoParams(call); }
+async function applyVideoParams(call) {
+  if (!call.video || !call.pc) return;
+  const q = QUAL[call.q] || QUAL.hd;
+  const vt = call.local && call.local.getVideoTracks()[0];
+  try { if (vt && 'contentHint' in vt) vt.contentHint = call.q === 'sd' ? 'motion' : 'detail'; } catch (e) {}
+  const sd = vSender(call); if (!sd || !sd.getParameters || !sd.setParameters) return;
+  try {
+    const pr = sd.getParameters();
+    if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}];
+    if (saving(call)) {                                         // 走中转：约 300kbps、分辨率减半，节省中转额度
+      pr.encodings[0].maxBitrate = 300000; pr.encodings[0].scaleResolutionDownBy = 2; pr.encodings[0].maxFramerate = Math.min(q.fps, 24);
+      try { pr.degradationPreference = 'balanced'; } catch (e) {}
+    } else {                                                    // 直连：按画质设置，不限
+      pr.encodings[0].maxBitrate = q.br; pr.encodings[0].scaleResolutionDownBy = 1; pr.encodings[0].maxFramerate = q.fps;
+      try { pr.degradationPreference = call.q === 'sd' ? 'balanced' : 'maintain-resolution'; } catch (e) {}
+    }
+    await sd.setParameters(pr);
+  } catch (e) { logErr('setParameters', e); }
+}
+async function setQuality(call, key) {
+  if (!QUAL[key]) return;
+  call.q = key; LS.set('callq', key); $('btn-q').textContent = '画质：' + QUAL[key].name;
+  const vt = call.local && call.local.getVideoTracks()[0], q = QUAL[key];
+  if (vt && vt.applyConstraints) { try { await vt.applyConstraints({ width: { ideal: q.w }, height: { ideal: q.h }, frameRate: { ideal: q.fps, max: 30 } }); } catch (e) { logErr('applyConstraints', e); } }
+  await applyVideoParams(call);
+}
+async function flipCam(call) {
+  if (!call || call.flipping || !call.video || call.ended || !call.local) return;
+  const old = call.local.getVideoTracks()[0]; if (!old) return;
+  call.flipping = true;
+  const prevFacing = call.facing, next = prevFacing === 'user' ? 'environment' : 'user';
+  const wasOff = call.camOff;
+  try { old.stop(); } catch (e) {}                 // iOS 不允许同时打开两个摄像头：先关旧的
+  let nt = null, used = next;
+  try { nt = (await gum({ video: vcons(call, next) }, 15000)).getVideoTracks()[0]; }
+  catch (e) {
+    logErr('flipCam', e);
+    try { nt = (await gum({ video: vcons(call, prevFacing) }, 15000)).getVideoTracks()[0]; used = prevFacing; toast('无法切换摄像头，已恢复原摄像头'); } catch (e2) { logErr('flipCam-restore', e2); }
+  }
+  if (call.ended || S.call !== call) { if (nt) try { nt.stop(); } catch (e) {} call.flipping = false; return; }
+  if (!nt) { call.flipping = false; toast('摄像头出错，已关闭视频'); call.camOff = true; $('btn-cam').classList.add('off'); return; }
+  try {
+    nt.enabled = !wasOff;
+    const sd = vSender(call) || (call.pc && call.pc.getSenders().find(x => !x.track && x.dtmf === undefined));
+    if (sd) await sd.replaceTrack(nt);
+    try { call.local.removeTrack(old); } catch (e) {}
+    call.local.addTrack(nt);
+    call.facing = used;
+    const lv = $('local-video'); lv.srcObject = call.local; playEl(lv);
+    lv.classList.toggle('mirror', used === 'user');
+    await applyVideoParams(call);
+  } catch (e) { logErr('flipCam-replace', e); toast('切换失败，请再试一次'); }
+  call.flipping = false;
+}
+function sigLevel(loss, rtt, br) {
+  if (rtt == null && loss == null) return 4;
+  let l = 4;
+  if (loss != null) { if (loss > 8) l = Math.min(l, 1); else if (loss > 4) l = Math.min(l, 2); else if (loss > 1.5) l = Math.min(l, 3); }
+  if (rtt != null) { if (rtt > 600) l = Math.min(l, 1); else if (rtt > 350) l = Math.min(l, 2); else if (rtt > 180) l = Math.min(l, 3); }
+  return l;
+}
+async function pollStats(call) {
+  if (!call.pc || call.ended || S.call !== call || !call.connected) return;
+  let rep; try { rep = await call.pc.getStats(); } catch (e) { return; }
+  const now0 = Date.now(), cur = { t: now0, rx: 0, tx: 0, lost: 0, rcv: 0 };
+  let inV = null, outV = null, pair = null, byId = {};
+  rep.forEach(r => { byId[r.id] = r; });
+  rep.forEach(r => {
+    if (r.type === 'inbound-rtp') { cur.rx += r.bytesReceived || 0; cur.lost += r.packetsLost || 0; cur.rcv += r.packetsReceived || 0; if (r.kind === 'video') inV = r; }
+    else if (r.type === 'outbound-rtp') { cur.tx += r.bytesSent || 0; if (r.kind === 'video') outV = r; }
+    else if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded' && (!pair || (r.bytesReceived || 0) + (r.bytesSent || 0) > (pair.bytesReceived || 0) + (pair.bytesSent || 0))) pair = r;
+  });
+  rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId && byId[r.selectedCandidatePairId]) pair = byId[r.selectedCandidatePairId]; });
+  const pv = call.prevStats; call.prevStats = cur;
+  let rxK = null, txK = null, lossP = null;
+  if (pv && cur.t > pv.t) {
+    const dt = (cur.t - pv.t) / 1000;
+    rxK = Math.max(0, (cur.rx - pv.rx) * 8 / dt / 1000); txK = Math.max(0, (cur.tx - pv.tx) * 8 / dt / 1000);
+    const dl = Math.max(0, cur.lost - pv.lost), dr = Math.max(0, cur.rcv - pv.rcv);
+    lossP = dl + dr > 0 ? dl * 100 / (dl + dr) : 0;
+  }
+  const rtt = pair && pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null;
+  let route = '';
+  if (pair) {
+    const lc = byId[pair.localCandidateId], rc = byId[pair.remoteCandidateId];
+    route = (lc && lc.candidateType === 'relay') || (rc && rc.candidateType === 'relay') ? '中转' : '直连';
+  }
+  if (route && now0 - (call.relayChk || 0) >= 4000) {         // 每 4 秒复查一次是否走中转
+    call.relayChk = now0;
+    const relay = route === '中转';
+    if (relay !== !!call.relay) {
+      call.relay = relay; applyCallParams(call);
+      if (relay && relaySave() && !call.relayTold) { call.relayTold = true; toast('正在走中转服务器：已自动降低码率，节省中转流量'); }
+    }
+  }
+  call.stat = { rxK, txK, lossP, rtt, route, rxRes: inV && inV.frameWidth ? inV.frameWidth + '×' + inV.frameHeight : '', rxFps: inV && inV.framesPerSecond != null ? Math.round(inV.framesPerSecond) : null, txRes: outV && outV.frameWidth ? outV.frameWidth + '×' + outV.frameHeight : '', txFps: outV && outV.framesPerSecond != null ? Math.round(outV.framesPerSecond) : null, limit: outV && outV.qualityLimitationReason && outV.qualityLimitationReason !== 'none' ? outV.qualityLimitationReason : '' };
+  const lv = pv ? sigLevel(lossP, rtt) : 4;
+  const sg = $('call-sig'); sg.className = 'l' + lv;
+  if ($('call-stats').classList.contains('show')) renderStats(call);
+}
+function renderStats(call) {
+  const x = call.stat; if (!x) { $('call-stats').textContent = '统计中…'; return; }
+  const k = v => v == null ? '-' : v >= 1000 ? (v / 1000).toFixed(1) + ' Mbps' : Math.round(v) + ' kbps';
+  const lim = { bandwidth: '带宽不足', cpu: '设备性能不足', other: '受限' };
+  let t = '';
+  if (call.video) t += '收 ' + (x.rxRes || '-') + ' · ' + (x.rxFps == null ? '-' : x.rxFps) + 'fps · ' + k(x.rxK) + '\n发 ' + (x.txRes || '-') + ' · ' + (x.txFps == null ? '-' : x.txFps) + 'fps · ' + k(x.txK) + (x.limit ? '（' + (lim[x.limit] || x.limit) + '）' : '') + '\n';
+  else t += '收 ' + k(x.rxK) + ' · 发 ' + k(x.txK) + '\n';
+  t += '延迟 ' + (x.rtt == null ? '-' : x.rtt + 'ms') + ' · 丢包 ' + (x.lossP == null ? '-' : x.lossP.toFixed(1) + '%') + ' · ' + (x.route || '-');
+  if (saving(call)) t += '\n中转省流量中：视频约 300kbps、分辨率减半，语音约 24kbps';
+  else if (call.relay) t += '\n走中转：保持你选的画质（会用中转额度；想省流量可在“我 → 中转省流量”打开）';
+  const el = $('call-stats'); el.textContent = t; el.style.whiteSpace = 'pre-line';
+}
+/* ---- 谁在讲话：Web Audio 分析音量，超过阈值就亮起来 ---- */
+const SPK = { ctx: null };
+function spkCtx() {
+  try {
+    if (!SPK.ctx) SPK.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (SPK.ctx.state === 'suspended') SPK.ctx.resume();
+    return SPK.ctx;
+  } catch (e) { return null; }
+}
+function spkMeter(stream) {
+  try {
+    if (!stream || !stream.getAudioTracks().length) return null;
+    const a = spkCtx(); if (!a) return null;
+    const src = a.createMediaStreamSource(stream);
+    const an = a.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .65;
+    src.connect(an);
+    return { an: an, buf: new Uint8Array(an.frequencyBinCount), src: src };
+  } catch (e) { return null; }
+}
+function spkLevel(m) {
+  if (!m) return 0;
+  m.an.getByteFrequencyData(m.buf);
+  let s = 0; for (let i = 0; i < m.buf.length; i++) s += m.buf[i];
+  return s / m.buf.length;
+}
+function spkStop(m) { try { if (m && m.src) m.src.disconnect(); } catch (e) {} }
+function startCallSpeak(call) {
+  if (!call || call.spkT) return;
+  call.spkT = setInterval(function () {
+    if (S.call !== call || call.ended) { clearInterval(call.spkT); call.spkT = 0; return; }
+    if (!call.spkR && call.remote && call.remote.getAudioTracks().length) call.spkR = spkMeter(call.remote);
+    if (!call.spkL && call.local) call.spkL = spkMeter(call.local);
+    const el = $('call-speak'); if (!el) return;
+    const r = spkLevel(call.spkR), l = spkLevel(call.spkL);
+    const t = r > 14 ? '对方正在讲话' : (l > 16 ? '你在讲话' : '');
+    if (el.textContent !== t) el.textContent = t;
+    el.classList.toggle('on', !!t);
+  }, 180);
+}
+function makePC(call) {
+  const pc = new RTCPeerConnection({ iceServers: iceServers(), bundlePolicy: 'max-bundle' });
+  call.pc = pc;
+  pc.onicecandidate = e => { if (e.candidate) queueCand(call, e.candidate.toJSON ? e.candidate.toJSON() : e.candidate); else flushCand(call); };
+  pc.ontrack = e => {
+    const s = e.streams && e.streams[0];
+    if (s) call.remote = s;
+    else { if (!call.remote) call.remote = new MediaStream(); if (e.track && !call.remote.getTracks().some(t => t.id === e.track.id)) call.remote.addTrack(e.track); }
+    if (e.track) e.track.onunmute = () => { if (S.call === call && !call.ended) attachRemote(call); };   // 对方的声音真正开始到达时再播一次
+    attachRemote(call);
+  };
+  pc.onconnectionstatechange = () => onPcState(call);
+  pc.oniceconnectionstatechange = () => onPcState(call);
+  call.local.getTracks().forEach(t => pc.addTrack(t, call.local));
+  if (call.video) { const lv = $('local-video'); lv.srcObject = call.local; lv.classList.toggle('mirror', call.facing === 'user'); playEl(lv); applyVideoParams(call); $('btn-q').textContent = '画质：' + (QUAL[call.q] || QUAL.hd).name; }
+  return pc;
+}
+function queueCand(call, c) { call.candBuf.push(c); if (!call.candT) call.candT = setTimeout(() => flushCand(call), 100); }
+function flushCand(call) {
+  clearTimeout(call.candT); call.candT = 0;
+  if (!call.candBuf.length || call.ended) return;
+  const c = call.candBuf; call.candBuf = []; sig(call.peer, 'ice', { id: call.id, c });
+}
+async function flushPendingIce(call) {
+  const list = S.pendingIce[call.id]; delete S.pendingIce[call.id];
+  if (!list || !call.pc) return;
+  for (const c of list) { try { await call.pc.addIceCandidate(c); } catch (e) {} }
+}
+function onPcState(call) {
+  if (call.ended || S.call !== call || !call.pc) return;
+  let st = call.pc.connectionState; if (!st || st === 'new') st = call.pc.iceConnectionState; if (st === 'completed') st = 'connected';
+  if (st === 'connected') {
+    clearTimeout(call.dcT);
+    if (!call.connected) {
+      call.connected = true; call.startedAt = now(); clearTimers(call);
+      SFX.backStop(); SFX.connect(); SFX.hold(true); $('call-ui').classList.add('connected'); attachRemote(call);
+      startCallSpeak(call);   // “对方正在讲话”
+      const tick = () => setCallStatus(fmtDur(Math.floor((now() - call.startedAt) / 1000)));
+      tick(); call.clock = setInterval(tick, 500);
+      applyCallParams(call); clearInterval(call.statsT); call.statsT = setInterval(() => pollStats(call), 2000); setTimeout(() => pollStats(call), 600);
+    }
+  } else if (st === 'disconnected') {
+    if (call.connected) setCallStatus('网络不稳定，重连中…');
+    clearTimeout(call.dcT);
+    call.dcT = setTimeout(() => {
+      if (S.call !== call || !call.pc) return;
+      const s2 = call.pc.connectionState || call.pc.iceConnectionState;
+      if (s2 === 'disconnected' || s2 === 'failed') endCall('网络中断', true);
+    }, 8000);
+  } else if (st === 'failed') {
+    endCall(call.connected ? '网络中断' : '连接失败：网络受限（可能需要配置 TURN 服务器）', true);
+  }
+}
+async function startCall(video) {
+  if (S.call || S.incoming || !S.peer) return;
+  if (GC.on) { toast('你在群语音里，先退出再打单聊电话'); return; }
+  if (isGroupKey(S.conv)) { gcStart(); return; }
+  const pr = envProblem(); if (pr) { toast(pr); return; }
+  if (PERM.mic === 'denied' || (video && PERM.cam === 'denied')) { callPermGuide(video); return; }
+  if (!S.rt.user && S.noSigDb) { toast('实时通道连不上，且还没有运行 setup-v4.sql，暂时不能通话（我的 → 环境诊断）'); return; }
+  const call = mkCall(S.peer, !!video, true); S.call = call;
+  showCallUI(call, '正在呼叫…'); SFX.backStart();
+  try {
+    call.local = await getMedia(call); refreshPerm(); if (S.call !== call) { stopStream(call.local); return; }
+    const pc = makePC(call);
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    const ok = await sig(call.peer, 'invite', { id: call.id, video: call.video, sdp: { type: offer.type, sdp: offer.sdp } });
+    if (!ok) throw new Error('信令发送失败，请检查网络');
+    firePush('call', call.peer, call.id);   // 对方 App 关着：推送“xx 邀请你语音通话”
+    ctimer(call, () => { if (S.call === call && !call.connected) endCall('对方未接听', true); }, 45000);
+  } catch (e) { logErr('startCall', e); if (S.call === call) endCall('无法发起通话：' + micError(e), false); }
+}
+function onInvite(p) {
+  if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
+  if (GC.on) { sig(p.from, 'busy', { id: p.id }); return; }   // 群语音里：直接回忙，不响铃
+  if (S.incoming && S.incoming.id === p.id) return;
+  if (S.call && S.call.id === p.id) return;
+  if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
+  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
+  $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
+  $('incoming-ui').classList.add('active');
+  try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
+  closeNotes(t => t === 'c:' + p.from);
+  if (document.hidden) localNote(peerName(p.from), p.video ? '📹 邀请你视频通话' : '📞 邀请你语音通话', 'c:' + p.from, './#call=' + p.from, true);
+  SFX.ringStart();
+  clearTimeout(S.incTimer); S.incTimer = setTimeout(() => { if (S.incoming && S.incoming.id === p.id) declineCall(); }, 40000);
+}
+function clearIncoming() { SFX.ringStop(); clearTimeout(S.incTimer); S.incoming = null; $('incoming-ui').classList.remove('active'); }
+/* 通话权限：先查状态，被拒绝时给可操作的指引，而不是一句“权限不足” */
+async function mediaPerm() {
+  const out = { mic: 'unknown', cam: 'unknown' };
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return out;
+    const m = await navigator.permissions.query({ name: 'microphone' });
+    out.mic = m.state;
+    const q = await navigator.permissions.query({ name: 'camera' });
+    out.cam = q.state;
+  } catch (e) {}
+  return out;
+}
+function callPermGuide(video) {
+  const need = video ? '麦克风和摄像头' : '麦克风';
+  openActs('浏览器禁止了' + need, [
+    { label: '① 点地址栏左边的锁或图标', fn: function () {} },
+    { label: '② 把' + need + '改成“允许”', fn: function () {} },
+    { label: '③ 回来让对方再打一次', fn: function () {} },
+    { label: '重新请求一次权限', fn: function () { requestCallPerm(video); } },
+    { label: '关闭', danger: true, fn: function () {} }
+  ]);
+}
+const PERM = { mic: 'unknown', cam: 'unknown' };
+async function refreshPerm() {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    PERM.mic = (await navigator.permissions.query({ name: 'microphone' })).state;
+    PERM.cam = (await navigator.permissions.query({ name: 'camera' })).state;
+  } catch (e) {}
+}
+refreshPerm();
+document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshPerm(); });async function requestCallPerm(video) {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!video });
+    stopStream(s); toast('权限已获取，可以正常通话了');
+  } catch (e) { toast('还是不行：' + micError(e)); }
+}
+function declineCall() {
+  const inc = S.incoming; if (!inc) return;
+  clearIncoming(); delete S.pendingIce[inc.id]; sig(inc.from, 'reject', { id: inc.id });
+}
+async function acceptCall() {
+  const inc = S.incoming; if (!inc) return;
+  SFX.ringStop();
+  const pr = envProblem();
+  if (pr) { toast(pr); declineCall(); return; }
+  if (PERM.mic === 'denied' || (inc.video && PERM.cam === 'denied')) { callPermGuide(inc.video); return; }
+  clearIncoming();
+  const call = mkCall(inc.from, inc.video, false, inc.id); S.call = call;
+  showCallUI(call, '连接中…');
+  try {
+    call.local = await getMedia(call); refreshPerm(); if (S.call !== call) { stopStream(call.local); return; }
+    const pc = makePC(call);
+    await pc.setRemoteDescription(inc.sdp);
+    await flushPendingIce(call);
+    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+    const ok = await sig(call.peer, 'accept', { id: call.id, sdp: { type: ans.type, sdp: ans.sdp } });
+    if (!ok) throw new Error('信令发送失败，请检查网络');
+    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时：网络受限（可能需要配置 TURN 服务器）', true); }, 25000);
+  } catch (e) {
+    logErr('acceptCall', e);
+    if (S.call === call) {
+      endCall('接听失败：' + micError(e), true);
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) setTimeout(function () { callPermGuide(call.video); }, 400);
+    }
+  }
+}
+async function onAccept(p) {
+  const call = S.call;
+  if (!call || call.id !== p.id || !call.caller || !call.pc || !p.sdp || call.pc.signalingState !== 'have-local-offer') return;
+  try {
+    clearTimers(call); setCallStatus('连接中…');
+    await call.pc.setRemoteDescription(p.sdp);
+    await flushPendingIce(call);
+    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时：网络受限（可能需要配置 TURN 服务器）', true); }, 25000);
+  } catch (e) { logErr('onAccept', e); if (S.call === call) endCall('连接失败', true); }
+}
+async function onIce(p) {
+  const list = Array.isArray(p.c) ? p.c : [];
+  const call = S.call;
+  if (call && call.id === p.id && call.pc && call.pc.remoteDescription) {
+    for (const c of list) { try { await call.pc.addIceCandidate(c); } catch (e) {} }
+  } else { (S.pendingIce[p.id] = S.pendingIce[p.id] || []).push.apply(S.pendingIce[p.id], list); }
+}
+function onSig(p) {
+  if (!p || typeof p !== 'object' || typeof p.from !== 'string' || typeof p.id !== 'string') return;
+  if (GC.on && p.cid && p.cid === GC.cid && typeof p.t === 'string' && p.t.indexOf('g') === 0) { gcOnSig(p); return; }   // 群语音：成员不一定互为好友，不能按好友过滤
+  if (!S.friends.includes(p.from)) return;
+  if (sigDup(p)) return;
+  switch (p.t) {
+    case 'invite': return onInvite(p);
+    case 'accept': return onAccept(p);
+    case 'ice': return onIce(p);
+    case 'reject': case 'busy': { const c = S.call; if (c && c.id === p.id) endCall(p.t === 'busy' ? '对方忙线中' : '对方已拒绝', false); return; }
+    case 'end': {
+      const c = S.call;
+      if (c && c.id === p.id) endCall(c.connected ? '通话已结束' : '对方已取消', false);
+      else if (S.incoming && S.incoming.id === p.id) { clearIncoming(); toast('对方已取消通话'); }
+      delete S.pendingIce[p.id]; return;
+    }
+  }
+}
+function sendCallLog(call, dur) {
+  const conv = convKeyOf(ME(), call.peer);
+  const m = { id: uuid(), conv, from_acc: ME(), to_acc: call.peer, type: 'call', body: call.video ? 'video' : 'audio', dur, created_at: new Date().toISOString(), _st: 'sending' };
+  S.out.set(m.id, m);
+  if (S.conv === conv) { S.msgs.push(m); chatAppend(m, true); }
+  touchConv(conv, '[通话]', m.created_at, false);
+  deliver(m);
+}
+function endCall(reason, notify) {
+  const call = S.call;
+  if (!call) { hideCallUI(); return; }
+  S.call = null; call.ended = true; wakeOff(); SFX.backStop(); SFX.ringStop(); SFX.hold(false); SFX.hangup();
+  clearTimers(call); clearTimeout(call.dcT); clearTimeout(call.candT); clearInterval(call.clock); clearInterval(call.statsT); clearInterval(call.spkT); spkStop(call.spkR); spkStop(call.spkL);
+  const dur = call.connected && call.startedAt ? Math.floor((now() - call.startedAt) / 1000) : 0;
+  if (notify) sig(call.peer, 'end', { id: call.id });
+  try { if (call.pc) { call.pc.onicecandidate = null; call.pc.ontrack = null; call.pc.onconnectionstatechange = null; call.pc.oniceconnectionstatechange = null; call.pc.close(); } } catch (e) {}
+  stopStream(call.local); stopStream(call.remote);
+  delete S.pendingIce[call.id];
+  if (call.caller) sendCallLog(call, dur);
+  if (call.caller && !call.connected) firePush('miss', call.peer, call.id);   // 推送过来电的：把通知改成“未接来电”（没推送过的数据库会跳过）
+  if (reason) { setCallStatus(reason); clearTimeout(S.callHideT); S.callHideT = setTimeout(() => { if (!S.call) hideCallUI(); }, 2200); }
+  else hideCallUI();
+}
+
+/* ================= 群语音（4 人以内，前台） ================= */
+// 声音走 WebRTC mesh：每个人和其余人各连一条，服务器只记“谁在房间里”，不碰声音。
+// 限制：手机锁屏/切后台会断；一个房间最多 4 人。
+const GC = { on: false, gid: '', cid: '', local: null, peers: {}, roster: [], muted: false, t: 0, tipT: 0, meters: {}, speaking: {}, speakT: 0 };
+const GC_MAX = 4;
+function gcErr(e) {
+  const m = String((e && (e.message || e)) || '');
+  if (/最多 4 人/.test(m)) return '群语音最多 4 人，现在满了';
+  if (/不在这个群/.test(m)) return '你已经不在这个群里了';
+  if (/未登录/.test(m)) return '登录状态掉了，重新登录再试';
+  if (/does not exist|PGRST202|schema cache|Could not find/i.test(m)) return '数据库还没更新，请先在后台执行 sql/group-call-v1.sql';
+  if (/row-level security|42501/i.test(m)) return '没有权限（数据库策略拦截）';
+  return m || '请重试';
+}
+function gcSupported() {
+  if (typeof RTCPeerConnection === 'undefined') { toast('这个浏览器不支持群语音'); return false; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('这个浏览器拿不到麦克风'); return false; }
+  return true;
+}
+function gcSig(peer, t, data) {
+  return sig(peer, t, Object.assign({ id: GC.cid, cid: GC.cid, gid: GC.gid }, data || {}));
+}
+function gcAudio(acc) {
+  let a = document.getElementById('gc-a-' + acc);
+  if (!a) {
+    a = document.createElement('audio'); a.id = 'gc-a-' + acc; a.autoplay = true; a.setAttribute('playsinline', ''); a.style.display = 'none';
+    document.body.appendChild(a);
+  }
+  return a;
+}
+function gcClosePeer(acc) {
+  const st = GC.peers[acc]; if (!st) return;
+  st.closed = true; delete GC.peers[acc];
+  if (GC.meters[acc]) { spkStop(GC.meters[acc]); delete GC.meters[acc]; }
+  delete GC.speaking[acc];
+  try { st.pc.onicecandidate = null; st.pc.ontrack = null; st.pc.onconnectionstatechange = null; st.pc.close(); } catch (e) {}
+  const a = document.getElementById('gc-a-' + acc); if (a) { try { a.srcObject = null; a.parentNode.removeChild(a); } catch (e) {} }
+  if (GC.on) gcRender();
+}
+function gcNewPeer(acc) {
+  const pc = new RTCPeerConnection({ iceServers: iceServers(), bundlePolicy: 'max-bundle' });
+  const st = { acc: acc, pc: pc, closed: false, retry: 0 };
+  GC.peers[acc] = st;
+  GC.local.getTracks().forEach(function (t) { pc.addTrack(t, GC.local); });
+  pc.onicecandidate = function (e) {
+    if (!e.candidate || st.closed) return;
+    gcSig(acc, 'gice', { c: [e.candidate.toJSON ? e.candidate.toJSON() : e.candidate] });
+  };
+  pc.ontrack = function (e) {
+    if (st.closed) return;
+    const a = gcAudio(acc);
+    const s = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+    if (a.srcObject !== s) a.srcObject = s;
+    try { a.play(); } catch (err) {}
+    if (e.track) e.track.onunmute = function () { try { a.play(); } catch (err) {} };
+    if (!GC.meters[acc]) GC.meters[acc] = spkMeter(s);   // 分析对方的音量：谁在讲话
+  };
+  pc.onconnectionstatechange = function () {
+    if (st.closed) return;
+    const s2 = pc.connectionState;
+    if (s2 === 'failed' || s2 === 'closed') {
+      clearTimeout(st.retry);
+      st.retry = setTimeout(function () { if (GC.on && GC.peers[acc] === st) gcClosePeer(acc); }, 3000);   // 下一轮 tick 会重连
+    }
+    if (GC.on) gcRender();
+  };
+  return st;
+}
+async function gcOffer(acc) {
+  if (!GC.on || !GC.local || GC.peers[acc]) return;
+  try {
+    const st = gcNewPeer(acc);
+    const off = await st.pc.createOffer();
+    await st.pc.setLocalDescription(off);
+    await gcSig(acc, 'goffer', { sdp: { type: off.type, sdp: off.sdp } });
+    clearTimeout(st.retry);
+    st.retry = setTimeout(function () {   // 10 秒还没连上：丢掉，下一轮重来
+      if (GC.on && GC.peers[acc] === st && st.pc.connectionState !== 'connected') gcClosePeer(acc);
+    }, 10000);
+  } catch (e) { logErr('gcOffer', e); gcClosePeer(acc); }
+}
+async function gcOnSig(p) {
+  if (!GC.on || !p) return;
+  const acc = p.from;
+  if (!acc || acc === ME()) return;
+  try {
+    if (p.t === 'goffer') {
+      if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
+      const old = GC.peers[acc];
+      if (old && (old.pc.connectionState === 'connected' || old.pc.signalingState !== 'stable')) return;
+      if (old) gcClosePeer(acc);
+      const st = gcNewPeer(acc);
+      await st.pc.setRemoteDescription(p.sdp);
+      const ans = await st.pc.createAnswer();
+      await st.pc.setLocalDescription(ans);
+      await gcSig(acc, 'gans', { sdp: { type: ans.type, sdp: ans.sdp } });
+    } else if (p.t === 'gans') {
+      const st = GC.peers[acc];
+      if (st && p.sdp && st.pc.signalingState === 'have-local-offer') await st.pc.setRemoteDescription(p.sdp);
+    } else if (p.t === 'gice') {
+      const st = GC.peers[acc];
+      const list = Array.isArray(p.c) ? p.c : [];
+      if (st) for (let i = 0; i < list.length; i++) { try { await st.pc.addIceCandidate(list[i]); } catch (e) {} }
+    } else if (p.t === 'gbye') {
+      gcClosePeer(acc);
+    }
+  } catch (e) { logErr('gcSig', e); }
+}
+function gcSpeakTick() {
+  if (!GC.on) return;
+  const mine = ME();
+  Object.keys(GC.meters).forEach(function (k) {
+    const on = spkLevel(GC.meters[k]) > 14;
+    const acc = k === '__me' ? mine : k;
+    if (!!GC.speaking[acc] !== on) gcMarkSpeaking(acc, on);
+  });
+}
+function gcMarkSpeaking(acc, on) {
+  if (!acc) return;
+  if (on) GC.speaking[acc] = true; else delete GC.speaking[acc];
+  const tile = document.querySelector('#gc-grid .gcp[data-acc="' + acc + '"]');
+  if (!tile) return;
+  tile.classList.toggle('speaking', on);
+  let lab = tile.querySelector('.gcv');
+  if (on) { if (!lab) { lab = document.createElement('div'); lab.className = 'gcv'; lab.textContent = '正在讲话'; tile.appendChild(lab); } }
+  else if (lab) lab.remove();
+}
+function gcSyncPeers() {
+  if (!GC.on) return;
+  const mine = ME() || '';
+  const live = {};
+  GC.roster.forEach(function (m) { if (m && m.acc && m.acc !== mine) live[m.acc] = 1; });
+  Object.keys(GC.peers).forEach(function (acc) { if (!live[acc]) gcClosePeer(acc); });
+  Object.keys(live).forEach(function (acc) { if (!GC.peers[acc] && mine && mine < acc) gcOffer(acc); });   // 账号小的发起，避免两边同时发 offer
+}
+async function gcTick() {
+  if (!GC.on || !sb) return;
+  const cid = GC.cid, gid = GC.gid;
+  try {
+    const r = await Promise.all([
+      sb.rpc('group_call_touch', { p_cid: cid }),
+      sb.rpc('group_call_state', { p_gid: gid })
+    ]);
+    if (!GC.on || GC.cid !== cid) return;
+    const rs = r[1] || {};
+    if (rs.error) throw rs.error;
+    const st = rs.data && typeof rs.data === 'object' ? rs.data : null;
+    if (!st || !Array.isArray(st.members) || !st.members.length) { gcEnd('群语音已结束'); return; }
+    if (!st.members.some(function (m) { return m.acc === ME(); })) { gcEnd('你已不在这个语音里'); return; }
+    if (st.id !== cid) { gcEnd('群语音已经换了房间'); return; }
+    const before = (GC.roster || []).map(function (m) { return m.acc; });
+    GC.roster = st.members;
+    if (before.length) {
+      st.members.forEach(function (m) { if (m.acc !== ME() && before.indexOf(m.acc) < 0) SFX.join(); });
+      before.forEach(function (a) { if (a !== ME() && !st.members.some(function (m) { return m.acc === a; })) SFX.leave(); });
+    }
+    gcRender();
+    gcSyncPeers();
+  } catch (e) { logErr('gcTick', e); }
+}
+async function gcStart() {
+  if (!isGroupKey(S.conv)) return;
+  if (GC.on) { gcShow(); return; }
+  if (S.call || S.incoming) { toast('先结束当前通话，再进群语音'); return; }
+  if (!gcSupported()) return;
+  if (PERM.mic === 'denied') { callPermGuide(false); return; }
+  const gid = gidOf(S.conv);
+  let stream = null, cid = '';
+  try { stream = await gum({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }, 30000); }
+  catch (e) { toast('拿不到麦克风：' + micError(e)); return; }
+  try {
+    const r = await sb.rpc('group_call_join', { p_gid: gid });
+    if (r.error) throw r.error;
+    cid = r.data;
+  } catch (e) { stopStream(stream); toast('进不去群语音：' + gcErr(e)); return; }
+  refreshPerm();
+  GC.on = true; GC.gid = gid; GC.cid = cid; GC.local = stream; GC.peers = {}; GC.roster = []; GC.muted = false;
+  GC.meters = {}; GC.speaking = {}; GC.meters['__me'] = spkMeter(stream);
+  clearInterval(GC.speakT); GC.speakT = setInterval(gcSpeakTick, 180);
+  gcShow(); gcRender();
+  SFX.join();
+  clearInterval(GC.t); GC.t = setInterval(gcTick, 2500);
+  gcTick(); setTimeout(gcTick, 600);
+}
+function gcEnd(reason) {
+  if (!GC.on) { gcHide(); return; }
+  const cid = GC.cid;
+  clearInterval(GC.speakT); GC.speakT = 0;
+  Object.keys(GC.meters).forEach(function (k) { spkStop(GC.meters[k]); });
+  GC.meters = {}; GC.speaking = {};
+  Object.keys(GC.peers).forEach(function (acc) { try { gcSig(acc, 'gbye', {}); } catch (e) {} gcClosePeer(acc); });
+  stopStream(GC.local);
+  clearInterval(GC.t); GC.t = 0;
+  GC.on = false; GC.gid = ''; GC.cid = ''; GC.local = null; GC.peers = {}; GC.roster = []; GC.muted = false;
+  gcHide();
+  if (cid && sb) { try { sb.rpc('group_call_leave', { p_cid: cid }).then(function () {}, function () {}); } catch (e) {} }
+  if (reason) toast(reason);
+}
+function gcToggleMute() {
+  if (!GC.on) return;
+  GC.muted = !GC.muted;
+  try { (GC.local.getAudioTracks() || []).forEach(function (t) { t.enabled = !GC.muted; }); } catch (e) {}
+  if (sb && GC.cid) { try { sb.rpc('group_call_mute', { p_cid: GC.cid, p_muted: GC.muted }).then(function () {}, function () {}); } catch (e) {} }
+  gcRender();
+}
+function gcShow() { const el = $('gc-ui'); if (el) el.classList.add('active'); gcRender(); }
+function gcHide() { const el = $('gc-ui'); if (el) el.classList.remove('active'); }
+function gcRender() {
+  if (!GC.on) return;
+  const el = $('gc-grid'); if (!el) return;
+  const mine = ME();
+  const others = GC.roster.filter(function (m) { return m.acc !== mine; });
+  const meRow = GC.roster.filter(function (m) { return m.acc === mine; });
+  const ms = meRow.concat(others);
+  el.classList.toggle('n2', ms.length <= 2);
+  el.innerHTML = ms.map(function (m) {
+    const isMe = m.acc === mine, name = isMe ? '我' : peerName(m.acc);
+    const st = GC.peers[m.acc];
+    const conn = isMe ? '' : (st && st.pc.connectionState === 'connected' ? '' : '<div class="gcs">连接中…</div>');
+    return '<div class="gcp' + (isMe ? ' me' : '') + (GC.speaking[m.acc] ? ' speaking' : '') + '" data-acc="' + esc(m.acc) + '">' + avatarHTML(isMe ? '我' : nickOf(m.acc), avatarOf(m.acc), false, m.acc) +
+      '<div class="gcn">' + esc(name) + '</div>' + (GC.speaking[m.acc] ? '<div class="gcv">正在讲话</div>' : '') + (m.muted ? '<div class="gcm">🔇 已静音</div>' : '') + conn + '</div>';
+  }).join('');
+  const sub = $('gc-sub'); if (sub) { const nm = grpName('g:' + GC.gid); sub.textContent = (nm && nm !== '群聊' ? nm + ' · ' : '') + GC.roster.length + ' 人 · ' + (GC.muted ? '你已静音' : '麦克风开着') + (GC.roster.length >= GC_MAX ? ' · 已满' : ''); }
+  const mb = $('gc-mute'); if (mb) { mb.textContent = GC.muted ? '取消静音' : '静音'; mb.classList.toggle('off', GC.muted); }
+}
+async function gcTipPoll() {
+  if (!sb || GC.on || !isGroupKey(S.conv)) { gcTipHide(); return; }
+  const gid = gidOf(S.conv);
+  try {
+    const { data, error } = await sb.rpc('group_call_state', { p_gid: gid });
+    if (error) { gcTipHide(); return; }
+    if (!isGroupKey(S.conv) || gidOf(S.conv) !== gid) return;
+    const st = data && typeof data === 'object' ? data : null;
+    if (!st || !Array.isArray(st.members) || !st.members.length) { gcTipHide(); return; }
+    const n = st.members.length;
+    const inIt = st.members.some(function (m) { return m.acc === ME(); });
+    const el = $('gc-tip');
+    el.innerHTML = '<span class="gc-dot"></span><b>语音中 · ' + n + ' 人</b><span>' + (inIt ? '回到语音' : '加入') + '</span>';
+    el.classList.add('show');
+  } catch (e) { gcTipHide(); }
+}
+function gcTipHide() { const el = $('gc-tip'); if (el) { el.classList.remove('show'); el.innerHTML = ''; } }
