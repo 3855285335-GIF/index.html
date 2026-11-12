@@ -213,6 +213,8 @@
   .ie-sizes { display: flex; gap: 8px; }
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  .friend-item .name { min-width: 0; }
+  .friend-item .name-main, .friend-item .name-sub { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; overflow-wrap: anywhere; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
   .ie-stks { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; max-height: 96px; overflow-y: auto; }
   .ie-stk { font-size: 22px; padding: 3px 6px; border-radius: 10px; background: var(--surface2); line-height: 1.25; }
@@ -1720,7 +1722,11 @@ function renderContacts() {
   const el = $('friend-list');
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
-  else el.innerHTML = S.friends.map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
+  else el.innerHTML = S.friends.slice().sort(function (a, b) {
+    const ta = (S.frAt && S.frAt[a]) || 0, tb = (S.frAt && S.frAt[b]) || 0;
+    if (ta !== tb) return tb - ta;                       // 新加的好友排最上面
+    return String(peerName(a)).localeCompare(String(peerName(b)), 'zh');
+  }).map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
     '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
     '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>').join('');
   renderGroupContacts();
@@ -1857,6 +1863,18 @@ function upsertConvRow(r) {
   else if (!S.profiles[n.peer_acc]) fetchProfile(n.peer_acc);
   sched('list'); saveCache();
 }
+async function syncMutes() {
+  if (!sb || !S.uid) return;
+  try {
+    const r = await sb.from('profiles').select('mutes').eq('id', S.uid).maybeSingle();
+    if (r.data && r.data.mutes && typeof r.data.mutes === 'object') {
+      pmLoad();
+      mutes = Object.assign({}, r.data.mutes, mutes);
+      LS.set('ch2mute:' + (S.uid || ''), mutes);
+      sched('list'); sched('title');
+    }
+  } catch (e) {}
+}
 let selfConvMade = false;
 async function ensureSelfConv() {
   if (!sb || !S.me || selfConvMade) return;
@@ -1883,6 +1901,7 @@ function applyBoot(b) {
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
+  setTimeout(function () { syncMutes(); }, 900);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -4733,6 +4752,23 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   try { loadGroupFiles(gid); } catch (e) {}
 }
 let giMembers = [];
+function showSelfCard(gid) {
+  const items = [
+    { label: '昵称：' + nickOf(ME()), fn: null },
+    { label: '账号：@' + ME(), fn: null }
+  ];
+  if (S.me && S.me.signature) items.push({ label: '签名：' + S.me.signature, fn: null });
+  if (gid) {
+    const m = (GRP.members && GRP.members[gid] || []).find(function (x) { return x.account_id === ME(); });
+    const role = m ? (m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '成员') : '成员';
+    const t = (m && m.title && m.title_on) ? m.title : '';
+    items.push({ label: '本群身份：' + role + (t ? ' · ' + t : ''), fn: null });
+  }
+  items.push({ label: '修改昵称', fn: function () { setTimeout(editNick, 30); } });
+  items.push({ label: '修改个性签名', fn: function () { setTimeout(editSign, 30); } });
+  items.push({ label: '关闭', fn: null });
+  openActs('我的资料', items);
+}
 function giMemberHTML(m) {
   const acc = m.account_id, isMe = acc === ME();
   const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
@@ -6083,7 +6119,7 @@ function pmLoad() { if (pmUid !== S.uid) { pins = LS.get('ch2pin:' + (S.uid || '
 const isPinned = k => { pmLoad(); return !!pins[k]; };
 const isMuted = k => { pmLoad(); return !!mutes[k]; };
 function togglePin(k) { pmLoad(); if (pins[k]) delete pins[k]; else pins[k] = now(); LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); toast(pins[k] ? '已置顶' : '已取消置顶'); }
-function toggleMute(k) { pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1; LS.set('ch2mute:' + (S.uid || ''), mutes); sched('list'); sched('title'); toast(mutes[k] ? '已开启消息免打扰：不响铃、不计入未读总数' : '已关闭消息免打扰'); }
+function toggleMute(k) { pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1; LS.set('ch2mute:' + (S.uid || ''), mutes); try { if (sb && S.uid) sb.from('profiles').update({ mutes: mutes }).eq('id', S.uid); } catch (e) {} sched('list'); sched('title'); toast(mutes[k] ? '已开启消息免打扰：不响铃、不弹通知、不计入未读总数' : '已关闭消息免打扰'); }
 function convActs(it) {
   const k = it.dataset.key, gp = isGroupKey(k);
   const items = [
@@ -6137,10 +6173,11 @@ function loadRemarks() {
   rmkAt = now();
   rmkLoading = (async () => {
     try {
-      const { data, error } = await sb.from('friendships').select('friend_acc,remark').eq('owner_acc', ME());
+      const { data, error } = await sb.from('friendships').select('friend_acc,remark,created_at').eq('owner_acc', ME());
       if (error) { if (isMissingFn(error) || /remark/.test(error.message || '')) S.v7 = false; else logErr('remarks', error); return; }
-      const old = S.remarks || {}, next = {};
-      (data || []).forEach(r => { if (r.remark) next[r.friend_acc] = { r: r.remark }; });
+      const old = S.remarks || {}, next = {}, at = {};
+      (data || []).forEach(r => { if (r.remark) next[r.friend_acc] = { r: r.remark }; if (r.created_at) at[r.friend_acc] = Date.parse(r.created_at) || 0; });
+      S.frAt = at;
       for (const a in old) {   // 这台手机上先存着、还没同步的备注：现在传上去
         if (!old[a].p) continue;
         next[a] = old[a];
@@ -7151,7 +7188,7 @@ $('gi-members').onclick = function (e) {
   const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
   const acc = it.getAttribute('data-acc'); if (!acc) return;
   const gid = gidOf(giKey);
-  if (acc === ME()) { openGroupSettings(gid); return; }
+  if (acc === ME()) { showSelfCard(gid); return; }
   const my = grpRoleOf(gid, ME()), target = grpRoleOf(gid, acc);
   const can = my === 'owner' || my === 'admin';
   if (!can) { openProfile(acc); return; }
@@ -7165,6 +7202,8 @@ $('gi-members').onclick = function (e) {
   items.push({ label: '取消', fn: null });
   openActs(peerName(acc), items);
 };
+if ($('me-avatar')) $('me-avatar').onclick = function () { showSelfCard(''); };
+if (document.querySelector('.me-card')) document.querySelector('.me-card').addEventListener('click', function (e) { if (e.target.closest('button')) return; showSelfCard(''); });
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
