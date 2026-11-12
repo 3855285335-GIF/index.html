@@ -803,15 +803,13 @@
 /* 依赖库加载：先读本地缓存（二次打开零网络）；没有缓存则同时请求多个来源，谁先到用谁，并缓存下来。
    来源包含 esm.sh（上一版就是用它，你的网络能通），失败原因会记录并显示在登录框下面。 */
 (function () {
-  var VER = '2.45.4', KEY = 'ch2lib:' + VER, ERR = window.__libErr = [];
+  var VER = '2.45.4', KEY = 'ch2lib3:' + VER, ERR = window.__libErr = [];
   var TXT = [
+    'https://3855285335-gif.github.io/index.html/vendor/supabase-' + VER + '.js',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
     'https://fastly.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
-    'https://gcore.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
     'https://unpkg.com/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
-    'https://registry.npmmirror.com/@supabase/supabase-js/' + VER + '/files/dist/umd/supabase.js',
-    'https://cdn.bootcdn.net/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js'
+    'https://registry.npmmirror.com/@supabase/supabase-js/' + VER + '/files/dist/umd/supabase.js'
   ];
   var ESM = [
     'https://esm.sh/@supabase/supabase-js@' + VER + '?bundle',
@@ -2092,19 +2090,18 @@ function onDbMsg(row, kind) {
   if (kind === 'ins') { if (m.from_acc !== ME()) onIncoming(m); }
   else if (S.conv === m.conv) upsertMsg(m);
 }
-function onFastMsg(p) {
+async function onFastMsg(p) {
   try {
     if (!p || typeof p !== 'object') return;
     const me = ME();
     if (p.to !== me || typeof p.from !== 'string' || !S.friends.includes(p.from)) return;
     if (typeof p.id !== 'string' || p.conv !== convKeyOf(p.from, p.to)) return;
-    if (['text', 'image', 'voice', 'sticker', 'video', 'file'].indexOf(p.type) < 0) return;
-    let body = typeof p.body === 'string' ? p.body : '';
-    if (p.type === 'text') body = body.slice(0, TEXT_MAX);
-    else if (p.type === 'sticker') { if (!validStk(body)) return; }
-    else if (p.type === 'file') { const f = parseFile(body); if (!f || !isStoreUrl(f.u) || body.length > 1000) return; }
-    else if (body.indexOf(SUPABASE_URL + '/storage/') !== 0) return;   // 图片/语音/视频只接受本项目存储的地址
-    onIncoming({ id: p.id, conv: p.conv, from_acc: p.from, to_acc: me, type: p.type, body, dur: p.dur | 0 || null, created_at: stampAfterClr(p.conv), _rx: now() });
+    // 快通道谁都能往别人的频道发东西：只把它当“有新消息”的信号，内容以数据库为准，防止冒充好友
+    const { data, error } = await sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,dur,created_at,mentions').eq('id', p.id).maybeSingle();
+    if (error || !data) return;
+    const m = rowToMsg(data);
+    if (m.from_acc !== p.from || m.conv !== p.conv) return;
+    onIncoming(m);
   } catch (e) { logErr('fast', e); }
 }
 function onFastRecall(p) {
@@ -2189,13 +2186,14 @@ async function deliver(m, silent) {
       } catch (e) {}
     }
     saveMsgsSoon();
-    if (!gp) pushAfterSend(m);
+    pushAfterSend(m);
   } catch (e) {
     logErr('send', e);
     SFX.error();
     const em = String((e && (e.message || '')) || '') + ' ' + String((e && (e.statusCode || e.status)) || '');
     const noType = /invalid message type/i.test(em), tooBig = /maximum allowed size|exceeded|too large|413/i.test(em);
-    if (noType) S.v6 = false;
+    if (noType && m.type !== 'recalled') S.v6 = false;
+    if (m.type === 'recalled') { m._fatal = true; }
     m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' });
     if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
   }
@@ -2773,8 +2771,20 @@ async function openConv(key, peer) {
   S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
   chatRender(true);                                // 缓存先显示，网络结果再补
   try {
-    const rows = await fetchMsgs(key);
+    let rows = await fetchMsgs(key);
     if (S.conv !== key) return;
+    // 离开后对方又发了很多条：缓存和最新一页之间会有缺口，往上翻也会跳过。这里先补齐（最多 4 页）
+    if (cachedMsgs.length && rows.length >= PAGE) {
+      const have = new Set(cachedMsgs.map(m => m.id));
+      let guard = 0;
+      while (guard < 4 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
+        const older = await fetchMsgs(key, rows[0].created_at);
+        if (!older.length) break;
+        rows = older.concat(rows);
+        guard++;
+      }
+      if (S.conv !== key) return;
+    }
     rows.forEach(r => S.seen.add(r.id));
     const map = new Map(); rows.forEach(r => map.set(r.id, r));
     S.msgs.forEach(m => { if (!map.has(m.id) && !isHidden(m)) map.set(m.id, m); });   // 刚发出去、还没进这次查询结果的消息不能丢
@@ -2784,7 +2794,7 @@ async function openConv(key, peer) {
   } catch (e) { logErr('open', e); if (!S.msgs.length) $('chat-messages').innerHTML = '<div class="empty">加载失败，请检查网络后重新打开</div>'; }
 }
 function closeChat() {
-  recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs();
+  recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs(); exitMulti();
   clearInterval(GRP.chatT); GRP.chatT = 0;
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
@@ -4036,6 +4046,7 @@ function draftSave(conv, text) {
 let fsOk = null, actItems = [], sheetZ = 2700;
 function raiseSheet(sheetId, backdropId) {
   sheetZ += 20;
+  if (sheetZ > 2500) sheetZ = 500;   // 封顶：始终低于通话界面（3000），避免开太多次后菜单盖住来电
   const b = document.getElementById(backdropId), s = document.getElementById(sheetId);
   if (b) b.style.zIndex = sheetZ;
   if (s) s.style.zIndex = sheetZ + 1;
@@ -4964,7 +4975,7 @@ async function grpPoll() {
     if (!GRP.cursor[k]) { const c = convOf(k); GRP.cursor[k] = Date.parse(c && c.last_ts || 0) || (now() - 60000); }
   });
   let since = 0;
-  keys.forEach(function (k) { const v = GRP.cursor[k]; if (!since || v < since) since = v; });
+  keys.forEach(function (k) { const v = GRP.cursor[k]; if (v > since) since = v; });   // 用最新的游标：旧的群消息交给未读数，别把新消息挤出 200 条上限
   try {
     const { data, error } = await sb.from('messages').select('*')
       .in('conv_key', keys).gt('created_at', new Date(since - 5000).toISOString())
@@ -4997,7 +5008,7 @@ async function loadMomentViews(rows) {
       if (!r.error) {
         const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
         const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        if (add.length) sb.from('moment_views').insert(add).then(function () {}, function () {});
+        if (add.length) sb.from('moment_views').upsert(add, { onConflict: 'moment_id,viewer_acc', ignoreDuplicates: true }).then(function () {}, function () {});
       }
     }
     if (mine.length) {
@@ -5192,7 +5203,7 @@ function addMomentFiles(files) {
 }
 async function postMoment() {
   const body = $('moment-text').value.trim();
-  if (!body && !MO.imgs.length) { toast('写点什么，或者选一张图片'); return; }
+  if (!body && !MO.imgs.length && !MO.vid) { toast('写点什么，或者选一张图片/一段视频'); return; }
   if (body.length > 1000) { toast('最多 1000 个字'); return; }
   const btn = $('moment-post'); if (btn.disabled) return; btn.disabled = true;
   toast('正在发表…');
@@ -5381,7 +5392,12 @@ function multiDel() {
 }
 function multiFwd() {
   if (!selSet.size) return;
-  const ids = Array.from(selSet);
+  const okTypes = { text: 1, image: 1, voice: 1, sticker: 1, video: 1, file: 1 };
+  const ids = Array.from(selSet).filter(function (id) {
+    const m = S.msgs.find(function (x) { return x.id === id; });
+    return m && okTypes[m.type];
+  });
+  if (!ids.length) { toast('撤回的消息、通话记录不能转发'); exitMulti(); return; }
   const items = S.friends.slice(0, 12).map(function (a) {
     return { label: peerName(a), fn: function () {
       ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
@@ -5503,7 +5519,14 @@ async function loadStore() {
       const { data, error } = await sb.storage.from('chat-media').list(ME(), { limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } });
       if (error) throw error;
       if (!data || !data.length) break;
-      data.forEach(f => { if (f && f.name && f.id !== null && f.name.indexOf('avatar_') !== 0 && !keep.has(ME() + '/' + f.name)) all.push(f); });
+      data.forEach(f => {
+        if (!f || !f.name || f.id === null) return;
+        // 只处理“聊天里发出去的媒体”：文件名是 <13位时间戳>_<随机>.<扩展名>
+        // 头像 avatar_、背景 bg_、朋友圈封面 cover_、好友背景 fbg_、群图标 g_、朋友圈 moment_、群文件 gf_、表情 sticker_ 一律不碰
+        if (!/^\d{12,}_[a-z0-9]{4,10}\.[a-z0-9]{1,8}$/i.test(f.name)) return;
+        if (f.name.indexOf('avatar_') === 0 || keep.has(ME() + '/' + f.name)) return;
+        all.push(f);
+      });
       if (data.length < 100) break;
     }
     stFiles = all; stRenderInfo();
@@ -6258,7 +6281,7 @@ function exportHTML(peer, list, truncated) {
   const link = (u, t) => '<a href="' + esc(disp(u)) + '" target="_blank" rel="noopener">' + esc(t) + '</a>';
   const body = m => {
     switch (m.type) {
-      case 'text': { const q = parseQ(m.body); return (q.q ? '<blockquote>' + esc(q.q.slice(0, 120)) + '</blockquote>' : '') + linkify(q.text).replace(/\n/g, '<br>'); }
+      case 'text': { const q = parseQ(m.body); return (q.q ? '<blockquote>' + esc(String(q.q.snip || '').slice(0, 120)) + '</blockquote>' : '') + linkify(q.text).replace(/\n/g, '<br>'); }
       case 'image': return '<a href="' + esc(disp(m.body)) + '" target="_blank" rel="noopener"><img src="' + esc(disp(m.body)) + '" alt="图片" loading="lazy"></a>';
       case 'video': return link(m.body, '[视频' + (m.dur ? ' ' + fmtDur(m.dur) : '') + '] 点开播放');
       case 'voice': return '<audio controls preload="none" src="' + esc(disp(m.body)) + '"></audio> ' + (m.dur ? m.dur + '″' : '');
@@ -7061,7 +7084,7 @@ $('btn-export').onclick = () => {
   openActs('导出哪个聊天？', list);
 };
 $('btn-msearch').onclick = searchMsgs;
-$('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
+$('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;
 $('multi-fwd').onclick = multiFwd;
 $('multi-cancel').onclick = exitMulti;
