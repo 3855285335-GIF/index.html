@@ -480,6 +480,10 @@
   .tstk { --c1: #a594ff; --c2: #6c5ce7; width: 112px; height: 112px; border-radius: 30px; background: linear-gradient(150deg, var(--c1), var(--c2)); color: #fff; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transform: rotate(var(--r, -4deg)); box-shadow: inset 0 -6px 0 rgba(0,0,0,.12), 0 0 0 3px #fff, 0 8px 18px rgba(30,20,70,.22); user-select: none; -webkit-user-select: none; }
   .tstk i { font-style: normal; font-size: 42px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
   .tstk b { font-size: 21px; font-weight: 900; line-height: 1.1; letter-spacing: .5px; padding: 0 6px; text-align: center; text-shadow: 0 2px 0 rgba(0,0,0,.2); }
+  .tstk b.tx { font-size: 30px; line-height: 1.15; padding: 0 8px; }
+  .tstk.sm b.tx { font-size: 15px; padding: 0 4px; }
+  .tstk.l4 b.tx { font-size: 24px; }
+  .tstk.sm.l4 b.tx { font-size: 12.5px; }
   .tstk.l4 b { font-size: 17px; }
   .tstk.dk { color: #5b3800; } .tstk.dk b { text-shadow: 0 1px 0 rgba(255,255,255,.45); }
   .tstk.sm { width: 60px; height: 60px; border-radius: 17px; gap: 1px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12), 0 0 0 2px #fff, 0 3px 8px rgba(30,20,70,.18); }
@@ -671,7 +675,7 @@
   .st-bar i { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
   .st-bar.warn i { background: var(--danger); }
   #chat-title { cursor: pointer; }
-  #chat-title > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chat-title > span:first-child { white-space: normal; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; word-break: break-all; }
   #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #msg-menu { max-height: 86vh; overflow-y: auto; }
   #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
@@ -914,8 +918,25 @@
     <div class="sp-word">Chatter</div>
     <div class="sp-sub">絮 语 · 随 时 说 点 什 么</div>
     <div class="sp-line"></div>
+    <div id="sp-slow" style="display:none;margin-top:20px;text-align:center">
+      <div style="font-size:12.5px;opacity:.75;margin-bottom:10px" id="sp-slow-msg">加载有点慢，或者脚本没启动</div>
+      <button type="button" onclick="location.replace(location.pathname+'?v='+Date.now())" style="padding:9px 16px;border-radius:12px;border:0;background:#7c5cff;color:#fff;font-size:13px">重新加载</button>
+    </div>
   </div>
 </div>
+<script>
+  setTimeout(function () {
+    var s = document.getElementById('splash');
+    if (!s || getComputedStyle(s).display === 'none') return;
+    var b = document.getElementById('sp-slow'); if (b) b.style.display = 'block';
+  }, 12000);
+  window.addEventListener('error', function (ev) {
+    var b = document.getElementById('sp-slow'); if (!b) return;
+    b.style.display = 'block';
+    var m = document.getElementById('sp-slow-msg');
+    if (m && ev && ev.message) m.textContent = '脚本报错：' + String(ev.message).slice(0, 120);
+  }, true);
+</script>
 
 <div class="app-container">
   <div id="auth-view" class="view">
@@ -5655,7 +5676,7 @@ const TMAP = {}; TSTK.forEach((t, i) => { t.i = i; TMAP[t[0]] = t; });
 const validStk = b => typeof b === 'string' && (/^e:[^\s]{1,16}$/u.test(b) || (/^t:[a-z0-9]{1,8}$/.test(b) && !!TMAP[b.slice(2)]) || isStoreUrl(b));
 function tstkHTML(t, small) {
   const c = PAL[t[3]] || PAL.violet;
-  return '<span class="tstk' + (small ? ' sm' : '') + (c[2] ? ' dk' : '') + (Array.from(t[1]).length >= 4 ? ' l4' : '') + '" style="--c1:' + c[0] + ';--c2:' + c[1] + ';--r:' + (t.i % 2 ? '3deg' : '-4deg') + '"><i>' + t[2] + '</i><b>' + esc(t[1]) + '</b></span>';
+  return '<span class="tstk' + (small ? ' sm' : '') + (c[2] ? ' dk' : '') + (Array.from(t[1]).length >= 4 ? ' l4' : '') + '" style="--c1:' + c[0] + ';--c2:' + c[1] + ';--r:' + (t.i % 2 ? '3deg' : '-4deg') + '"><b class="tx">' + esc(t[1]) + '</b></span>';
 }
 function stkInner(body, small) {
   body = String(body || '');
@@ -6120,7 +6141,19 @@ function pmLoad() { if (pmUid !== S.uid) { pins = LS.get('ch2pin:' + (S.uid || '
 const isPinned = k => { pmLoad(); return !!pins[k]; };
 const isMuted = k => { pmLoad(); return !!mutes[k]; };
 function togglePin(k) { pmLoad(); if (pins[k]) delete pins[k]; else pins[k] = now(); LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); toast(pins[k] ? '已置顶' : '已取消置顶'); }
-function toggleMute(k) { pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1; LS.set('ch2mute:' + (S.uid || ''), mutes); try { if (sb && S.uid) sb.from('profiles').update({ mutes: mutes }).eq('id', S.uid); } catch (e) {} sched('list'); sched('title'); toast(mutes[k] ? '已开启消息免打扰：不响铃、不弹通知、不计入未读总数' : '已关闭消息免打扰'); }
+function toggleMute(k) {
+  pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1;
+  LS.set('ch2mute:' + (S.uid || ''), mutes);
+  if (mutes[k]) {
+    try {
+      const tag = isGroupKey(k) ? 'g:' + gidOf(k) : 'm:' + peerOf(k, ME());
+      swReg().then(function (r) { return r && r.getNotifications ? r.getNotifications() : []; }).then(function (list) { (list || []).forEach(function (n) { if ((n.tag || '') === tag) n.close(); }); }, function () {});
+    } catch (e) {}
+  }
+  try { if (sb && S.uid) sb.from('profiles').update({ mutes: mutes }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {}
+  sched('list'); sched('title');
+  toast(mutes[k] ? '已开启消息免打扰：不响铃、不弹通知、不计入未读总数' : '已关闭消息免打扰');
+}
 function convActs(it) {
   const k = it.dataset.key, gp = isGroupKey(k);
   const items = [
@@ -7296,7 +7329,7 @@ function boot() {
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 boot();
 })();
 
