@@ -1,0 +1,600 @@
+<!-- Chatter 前端 · 13-事件绑定 · 原文件第 6601-7199 行 -->
+<!-- 这一段负责：所有 onclick/事件绑定（查：空元素、重复绑定、未清理监听） -->
+/* ================= 事件绑定 ================= */
+let viewportApply = null;
+function bindViewport() {
+  const vv = window.visualViewport; if (!vv) return;
+  const desktop = window.matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)');
+  const apply = () => {
+    const root = document.documentElement;
+    // 只有真正的鼠标桌面才切成双栏；平板/触屏即使宽度够，也按手机的可视区处理。
+    if (desktop.matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
+    if (!vv.height) return;
+    // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
+    root.style.setProperty('--vvh', vv.height + 'px');
+    root.style.setProperty('--vvt', Math.max(0, vv.offsetTop || 0) + 'px');
+    const kb = (window.innerHeight - vv.height > 100) || (vv.height < (window.screen.height || 0) * 0.68);
+    document.body.classList.toggle('kb', kb);
+    if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
+  };
+  viewportApply = apply;
+  const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
+  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) resync(); });
+  window.addEventListener('pageshow', resync); window.addEventListener('focus', resync);
+  apply();
+}
+/* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
+const isNetErr = e => { if (!e) return false; if (e.status === 0 || e.name === 'AuthRetryableFetchError') return true; return /Failed to fetch|Load failed|NetworkError|fetch failed|Network request failed/i.test(String(e.message || e)); };
+const NET_MSG = '❌ 连不上服务器：这台手机现在访问不到 Supabase（网络拦截或不稳定），不是账号密码的问题。请再试一次，或换个网络（Wi-Fi / 流量）、换个浏览器';
+function bindUI() {
+  /* 登录 / 注册 */
+  $('tab-login').onclick = () => { $('tab-login').classList.add('active'); $('tab-register').classList.remove('active'); $('login-form').style.display = ''; $('register-form').style.display = 'none'; msgAuth(''); };
+  $('tab-register').onclick = () => { $('tab-register').classList.add('active'); $('tab-login').classList.remove('active'); $('login-form').style.display = 'none'; $('register-form').style.display = ''; msgAuth(''); };
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]'), acc = $('login-acc').value.trim().toLowerCase(), pass = $('login-pass').value;
+    if (!acc || !pass) return;
+    btn.disabled = true; msgAuth('登录中…');
+    try {
+      await ready;
+      let { error } = await sb.auth.signInWithPassword({ email: acc + '@chatter.local', password: pass });
+      if (error && isNetErr(error)) { msgAuth(NET_MSG); return; }
+      if (error) { const r2 = await sb.auth.signInWithPassword({ email: acc + '@gmail.com', password: pass }); error = r2.error; if (error && isNetErr(error)) { msgAuth(NET_MSG); return; } }
+      msgAuth(error ? '❌ 账号或密码错误' : '');
+    } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 登录失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
+  });
+  $('register-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]'), acc = $('reg-acc').value.trim().toLowerCase(), pass = $('reg-pass').value, name = $('reg-name').value.trim();
+    if (!/^[a-z0-9_-]{3,20}$/.test(acc)) { msgAuth('❌ 账号只能用英文/数字/_/-，3-20 位'); return; }
+    if (pass.length < 6) { msgAuth('❌ 密码至少 6 位'); return; }
+    if (!name) { msgAuth('❌ 请输入昵称'); return; }
+    btn.disabled = true; msgAuth('注册中…');
+    try {
+      await ready;
+      const ex = await sb.rpc('account_exists', { p_acc: acc });
+      if (ex.error) { msgAuth(isNetErr(ex.error) ? NET_MSG : '❌ 检查账号失败：' + ex.error.message + (isMissingFn(ex.error) ? '（后端还没建好：请在 Supabase 运行 1-setup.sql）' : '')); return; }
+      if (ex.data) { msgAuth('❌ 账号已存在'); return; }
+      const { data: up, error } = await sb.auth.signUp({ email: acc + '@chatter.local', password: pass, options: { data: { account_id: acc, nickname: name } } });
+      if (error) { msgAuth(isNetErr(error) ? NET_MSG : '❌ ' + error.message); return; }
+      if (!up || !up.user) { msgAuth('❌ 注册失败'); return; }
+      msgAuth(up.session ? '' : '⚠️ 请到邮箱确认后再登录（或在 Supabase 关闭邮箱确认）');
+    } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 注册失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
+  });
+
+  /* 顶部导航 */
+  document.querySelectorAll('.app-nav button').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.app-nav button').forEach(b => b.classList.remove('active')); btn.classList.add('active');
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      $('tab-' + btn.dataset.tab).classList.add('active');
+      if (btn.dataset.tab === 'me') renderEnv();
+      if (btn.dataset.tab === 'requests') grpInvitesLoad(true);
+      if (btn.dataset.tab === 'moments') { momentNotifyCheck(); paintMomentsHead(); applyMomentCover(); loadMyCover(); momentsLoad(true); setTimeout(markMomentsSeen, 1500); }
+    };
+  });
+  setInterval(() => { try { if (!document.hidden && $('tab-me').classList.contains('active')) renderEnv(); } catch (e) {} }, 1500);   // 诊断页自动刷新：实时通道连上后会自己变绿
+  let lpT = 0, lpFired = 0;
+  const cl = $('conv-list');
+  cl.addEventListener('click', e => { if (now() - lpFired < 700) return; const it = e.target.closest('.conv-item'); if (it) openConv(it.dataset.key, it.dataset.peer); });
+  const lpOpen = it => { lpFired = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} convActs(it); };
+  cl.addEventListener('contextmenu', e => { const it = e.target.closest('.conv-item'); if (!it) return; e.preventDefault(); lpOpen(it); });
+  cl.addEventListener('touchstart', e => { const it = e.target.closest('.conv-item'); if (!it) return; clearTimeout(lpT); lpT = setTimeout(() => lpOpen(it), 600); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => cl.addEventListener(ev, () => clearTimeout(lpT), { passive: true }));
+  $('friend-list').addEventListener('click', e => {
+    const it = e.target.closest('.friend-item'); if (!it) return; const acc = it.dataset.acc;
+    if (e.target.closest('.act-chat')) openConv(convKeyOf(ME(), acc), acc); else openProfile(acc);
+  });
+  $('request-list').addEventListener('click', e => {
+    const it = e.target.closest('.req-item'); if (!it) return;
+    if (it.dataset.gi) {
+      if (e.target.closest('.act-gi-ok')) grpInviteAccept(it.dataset.id);
+      else if (e.target.closest('.act-gi-no')) grpInviteDecline(it.dataset.id);
+      return;
+    }
+    if (e.target.closest('.act-accept')) acceptRequest(it.dataset.id); else if (e.target.closest('.act-decline')) declineRequest(it.dataset.id);
+  });
+  $('search-results').addEventListener('click', e => {
+    const c = e.target.closest('.act-chat'), a = e.target.closest('.act-add');
+    if (c) openConv(convKeyOf(ME(), c.dataset.acc), c.dataset.acc); else if (a) addFriend(a);
+  });
+  const si = $('search-input');
+  si.addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(() => runSearch(si.value).catch(e => logErr('search', e)), 280); });
+  si.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchT); runSearch(si.value).catch(x => logErr('search', x)); } });
+  $('search-btn').onclick = () => { clearTimeout(searchT); runSearch(si.value).catch(x => logErr('search', x)); };
+
+  /* 聊天窗口 */
+  $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
+  window.addEventListener('popstate', () => { if (S.call) { try { history.pushState({ chat: 1 }, ''); } catch (e) {} return; } if (S.conv) { S.hist = false; closeChat(); } });
+  const box = $('chat-messages');
+  box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
+  box.addEventListener('error', e => {
+    const el = e.target; if (!el || !el.closest) return;
+    if (el.tagName === 'VIDEO' && el.closest('.bubble.video')) { const u = el.getAttribute('src') || ''; if (/^blob:/.test(u)) return; el.closest('.bubble.video').innerHTML = '<div class="vfail">视频无法在这里播放<small>可能已被清理，或这个浏览器不支持这种格式；可以长按“保存到手机”再看</small></div>'; return; }
+    if (el.tagName === 'IMG' && el.closest('.bubble.sticker')) { el.outerHTML = '<span class="stk-bad">表情已失效</span>'; return; }
+    if (el.tagName === 'IMG' && el.classList.contains('vposter')) { const vb = el.closest('.bubble.video'), u = vb && vb.dataset.v; if (u) el.outerHTML = '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>'; return; }
+    const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
+    const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
+    const holder = im.parentNode; if (!holder) return;
+    holder.innerHTML = '<div class="imgfail" data-src="' + esc(u.replace(/[?&]r=\d+$/, '')) + '">图片无法显示<small>可能已被清理，点一下重试</small></div>';
+  }, true);
+  box.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG' && S.stick) box.scrollTop = box.scrollHeight; }, true);
+  box.addEventListener('loadedmetadata', e => { if (e.target && e.target.tagName === 'VIDEO' && S.stick) box.scrollTop = box.scrollHeight; }, true);
+  box.addEventListener('pointerdown', e => {
+    const b = e.target.closest('.bubble.voice'); if (!b || !audioEl || !playingId) return;
+    vSeekAt = now(); vSeekEl = b; voiceSeek(e, b);
+  });
+  box.addEventListener('pointermove', e => { if (vSeekEl) voiceSeek(e, vSeekEl); });
+  window.addEventListener('pointerup', () => { vSeekEl = null; });
+  box.addEventListener('click', e => {
+    const av = e.target.closest('.msg.theirs .avatar-wrapper'); if (av && av.dataset.acc) { openProfile(av.dataset.acc); return; }
+    const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
+    const v = e.target.closest('.bubble.voice'); if (v) { if (now() - vSeekAt < 600) return; togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
+    const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
+    const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; const holder = bad.parentNode; holder.innerHTML = '<img src="' + esc(u + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now()) + '" alt="" decoding="async">'; return; }
+    const im = e.target.closest('.bubble.img img'); if (im) { openLightbox(im.closest('.msg').dataset.id); return; }
+    const vb = e.target.closest('.bubble.video'); if (vb && !vb.classList.contains('playing')) { const u = vb.dataset.v || ''; if (!u || /^blob:/.test(u) || vb.querySelector('.vup') || vb.querySelector('.vfail')) return; vb.classList.add('playing'); vb.innerHTML = '<video src="' + esc(u) + '" controls autoplay playsinline webkit-playsinline></video>'; const pv = vb.querySelector('video'); try { const pp = pv.play(); if (pp && pp.catch) pp.catch(() => {}); } catch (x) {} return; }
+    const fb = e.target.closest('.bubble.file'); if (fb) { const u = fb.dataset.u || ''; if (u && !/^blob:/.test(u)) { try { window.open(disp(u), '_blank', 'noopener'); } catch (x) {} } return; }
+    const sk = e.target.closest('.bubble.sticker img'); if (sk) {
+      const m = S.msgs.find(x => x.id === sk.closest('.msg').dataset.id); if (!m || m._st || !isStoreUrl(m.body)) return;
+      const have = (S.stk || []).some(x => x.url === m.body);
+      openActs('表情', [{ label: have ? '已在“我的表情”里' : '添加到我的表情', fn: have ? null : () => addToStickers(m) }, { label: '保存到手机', fn: () => saveMsg(m) }, { label: '取消', fn: null }]);
+    }
+  });
+  let pressT = 0;
+  const mineBubble = e => e.target.closest && e.target.closest('.msg .bubble');
+  box.addEventListener('contextmenu', e => { const b = mineBubble(e); if (!b) return; e.preventDefault(); showMsgMenu(b.closest('.msg').dataset.id); });
+  box.addEventListener('touchstart', e => { const b = mineBubble(e); if (!b) return; clearTimeout(pressT); pressT = setTimeout(() => { showMsgMenu(b.closest('.msg').dataset.id); try { if (navigator.vibrate) navigator.vibrate(40); } catch (x) {} }, 550); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => box.addEventListener(ev, () => clearTimeout(pressT), { passive: true }));
+  bindLightbox();
+  const rsBtn = $('btn-relaysave');
+  const paintRS = () => { if (rsBtn) rsBtn.textContent = relaySave() ? '中转省流量：开' : '中转省流量：关'; };
+  paintRS();
+  if (rsBtn) rsBtn.onclick = () => {
+    LS.set('ch2relaysave2', !relaySave()); paintRS();
+    toast(relaySave() ? '已开启：通话走中转时降低码率省流量（直连时不受影响）' : '已关闭：走中转时保持你选的画质');
+    if (S.call && S.call.connected) applyCallParams(S.call);
+  };
+  $('btn-nick').onclick = editNick; $('btn-pass').onclick = editPass;
+  $('btn-avatar').onclick = () => $('avatar-input').click();
+  $('avatar-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; setAvatar(f).catch(x => { logErr('avatar', x); toast('头像上传失败：' + ((x && x.message) || '请重试')); }); };
+  $('friend-bg-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setFriendBg(f).catch(x => { logErr('fbg', x); toast('专属背景上传失败：' + ((x && x.message) || '请重试')); }); };
+  $('cover-input').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setPersonalCover(f).catch(x => { logErr('cover', x); toast('封面上传失败：' + ((x && x.message) || '请重试')); }); };
+  $('fs-ok').onclick = () => { if (fsOk) fsOk(); }; $('fs-cancel').onclick = closeForm; $('form-backdrop').onclick = closeForm;
+  $('form-sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && fsOk && !$('fs-ok').disabled) { e.preventDefault(); fsOk(); } });
+  $('as-items').onclick = e => { const b = e.target.closest('button[data-i]'); if (!b) return; const it = actItems[+b.dataset.i]; closeActs(); if (it && it.fn) it.fn(); };
+  $('act-backdrop').onclick = () => { if (now() - actOpenAt > 350) closeActs(); };
+  $('btn-more').onclick = () => {
+    if (!S.conv) return; const key = S.conv;
+    if (isGroupKey(key)) {
+      openActs('群聊选项', [
+        { label: '群信息', fn: () => setTimeout(() => grpInfo(key), 50) },
+        { label: '发送文件', fn: () => $('doc-input').click() },
+        { label: '聊天记录', fn: () => setTimeout(() => openActs('聊天记录', [
+          { label: '搜索聊天记录', fn: openSearch },
+          { label: '导出聊天记录', fn: () => exportChat(key) },
+          { label: '取消', fn: null }
+        ]), 50) },
+        { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) },
+        { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) },
+        { label: '取消', fn: null }
+      ]);
+      return;
+    }
+    openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
+  };
+  $('cs-close').onclick = closeSearch;
+  $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
+  $('cs-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); clearTimeout(csT); runChatSearch($('cs-input').value); } });
+  $('cs-list').addEventListener('click', e => { const it = e.target.closest('.cs-item'); if (it) gotoMsg(it.dataset.id); });
+  $('btn-store').onclick = () => { if ($('store-box').style.display === 'block') { $('store-box').style.display = 'none'; return; } loadStore(); };
+  [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { $(id).onclick = () => stClean(d, $(id)); });
+  $('msg-menu-backdrop').onclick = () => { if (now() - menuOpenAt > 350) closeMenu(); };
+  $('msg-menu-recall').onclick = doRecall;
+  $('msg-menu-reply').onclick = () => menuAction('reply'); $('msg-menu-copy').onclick = () => menuAction('copy'); $('msg-menu-del').onclick = () => menuAction('del');
+  $('msg-menu-cancel').onclick = closeMenu;
+  $('msg-menu-fwd').onclick = () => menuAction('fwd'); $('msg-menu-stk').onclick = () => menuAction('stk'); $('msg-menu-save').onclick = () => menuAction('save');
+  $('reply-x').onclick = clearReply;
+
+  /* 输入栏 */
+  const input = $('chat-input'), sendBtn = $('btn-send');
+  sendBtn.addEventListener('mousedown', e => e.preventDefault());                   // 点发送不收起键盘
+  sendBtn.addEventListener('touchstart', e => { e.preventDefault(); }, { passive: false });
+  sendBtn.addEventListener('touchend', e => { e.preventDefault(); sendText(); }, { passive: false });
+  sendBtn.addEventListener('click', e => { e.preventDefault(); sendText(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } });
+  input.addEventListener('focus', () => $('emoji-panel').classList.remove('active'));
+  input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); mentionInput(); });
+  $('mention-pop').onclick = function (e) { const b = e.target.closest('.mp-item'); if (!b) return; pickMention(b.dataset.acc, b.dataset.name); };
+  input.addEventListener('blur', function () { setTimeout(closeMention, 150); });
+  let audioMode = false;
+  $('btn-audio-toggle').onclick = () => {
+    audioMode = !audioMode; input.style.display = audioMode ? 'none' : 'block'; $('btn-audio').style.display = audioMode ? 'block' : 'none';
+    $('btn-audio-toggle').classList.toggle('audio-mode', audioMode);
+  };
+  $('btn-emoji').onclick = openEp;
+  epTabNow = ['emoji', 'lib', 'mine'].indexOf(LS.get('ch2eptab', 'emoji')) >= 0 ? LS.get('ch2eptab', 'emoji') : 'emoji';
+  const ep = $('emoji-panel'); let stkLpT = 0, stkLpAt = 0;
+  ep.addEventListener('click', e => {
+    if (now() - stkLpAt < 700) return;
+    const tab = e.target.closest('.ep-tabs button'); if (tab) { epTab(tab.dataset.ep); return; }
+    const em = e.target.closest('#ep-emoji span[data-e]'); if (em) { input.value += em.dataset.e; draftSave(S.conv, input.value); return; }
+    if (e.target.closest('#stk-mg')) { stkManage = true; stkSel.clear(); renderEp(); return; }
+    if (e.target.closest('#stk-done')) { stkManage = false; stkSel.clear(); renderEp(); return; }
+    if (e.target.closest('#stk-all')) { if (stkSel.size >= (S.stk || []).length) stkSel.clear(); else (S.stk || []).forEach(s => stkSel.add(s.id)); renderEp(); return; }
+    if (e.target.closest('#stk-del-sel')) { stkDelSel(); return; }
+    const mgIt = e.target.closest('#ep-mine .stk-m');
+    if (stkManage && mgIt) { const id = mgIt.dataset.sid; if (stkSel.has(id)) stkSel.delete(id); else stkSel.add(id); renderEp(); return; }
+    if (e.target.closest('.stk-add')) { if (S.v6 === false) { toast(NEED_V6); return; } if ((S.stk || []).length >= STK_LIMIT) { toast('“我的表情”最多 ' + STK_LIMIT + ' 个，先删掉一些再加'); return; } $('stk-input').click(); return; }
+    const it = e.target.closest('[data-b]'); if (it) sendSticker(it.dataset.b);
+  });
+  const stkLp = it => { if (stkManage) return; stkLpAt = now(); try { if (navigator.vibrate) navigator.vibrate(30); } catch (x) {} stkActs(it.dataset.sid); };
+  ep.addEventListener('contextmenu', e => { const it = e.target.closest('.stk-m'); if (!it) return; e.preventDefault(); stkLp(it); });
+  ep.addEventListener('touchstart', e => { const it = e.target.closest('.stk-m'); if (!it) return; clearTimeout(stkLpT); stkLpT = setTimeout(() => stkLp(it), 550); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => ep.addEventListener(ev, () => clearTimeout(stkLpT), { passive: true }));
+  let epT = 0; const es = $('ep-search');
+  es.addEventListener('input', () => { clearTimeout(epT); epT = setTimeout(renderEp, 150); });
+  es.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); clearTimeout(epT); renderEp(); es.blur(); } });
+  $('stk-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; addStickerFiles(fs).catch(x => { logErr('stk-add', x); toast('添加失败'); }); };
+  /* 联想表情：点一下发送；按下时不让输入框失去焦点（键盘不收起） */
+  const sg = $('stk-suggest'); let sgEl = null;
+  sg.addEventListener('touchstart', e => { sgEl = e.target.closest('[data-b]'); e.preventDefault(); }, { passive: false });
+  sg.addEventListener('touchend', e => { e.preventDefault(); const t = e.changedTouches[0], el = t && document.elementFromPoint(t.clientX, t.clientY); const it = el && el.closest && el.closest('#stk-suggest [data-b]'); if (it && it === sgEl) sendSuggest(it.dataset.b); sgEl = null; }, { passive: false });
+  sg.addEventListener('mousedown', e => e.preventDefault());
+  sg.addEventListener('click', e => { const it = e.target.closest('[data-b]'); if (it) sendSuggest(it.dataset.b); });
+  $('chat-title').addEventListener('click', () => { if (!S.peer) return; if (isGroupKey(S.peer)) grpInfo(S.peer); else openProfile(S.peer); });
+  $('pf-backdrop').onclick = () => { if (now() - pfOpenAt > 350) closeProfile(); };
+  $('pf-close').onclick = closeProfile;
+  $('pf-chat').onclick = () => { const a = pfAcc; closeProfile(); if (a && S.peer !== a) openConv(convKeyOf(ME(), a), a); };
+  $('pf-voice').onclick = () => pfCall(false); $('pf-video').onclick = () => pfCall(true);
+  $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
+  $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };
+  $('btn-img').onclick = () => $('file-input').click();
+  $('voice-speed').onclick = cycleSpeed; paintSpeed();
+  $('file-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('img', x); toast('发送失败'); }); };
+  $('doc-input').onchange = e => { const fs = Array.from(e.target.files || []); e.target.value = ''; sendFiles(fs).catch(x => { logErr('doc', x); toast('发送失败'); }); };
+
+  /* 按住说话 */
+  const ab = $('btn-audio'); let down = false;
+  const gy = e => (e.touches && e.touches[0]) ? e.touches[0].clientY : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : e.clientY;
+  const onMove = e => { if (!down) return; if (e.cancelable) e.preventDefault(); recMove(gy(e)); };
+  const onUp = e => { if (!down) return; down = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); if (e.cancelable) e.preventDefault(); recEnd(e.type === 'touchcancel'); };
+  const onDown = e => { e.preventDefault(); if (down) return; down = true; if (!e.touches) { window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); } recStart(gy(e)); };
+  ab.addEventListener('touchstart', onDown, { passive: false }); ab.addEventListener('touchmove', onMove, { passive: false });
+  ab.addEventListener('touchend', onUp, { passive: false }); ab.addEventListener('touchcancel', onUp, { passive: false });
+  ab.addEventListener('mousedown', onDown); ab.addEventListener('contextmenu', e => e.preventDefault());
+
+  /* 通话 */
+  $('btn-voice-call').onclick = () => (isGroupKey(S.conv) ? gcStart() : startCall(false));
+  $('btn-video-call').onclick = () => startCall(true);
+  $('gc-mute').onclick = gcToggleMute;
+  $('gc-leave').onclick = () => gcEnd('已退出群语音');
+  $('gc-tip').onclick = () => (GC.on ? gcShow() : gcStart());
+  $('btn-hangup').onclick = e => { e.stopPropagation(); endCall('', true); };
+  $('btn-answer').onclick = () => acceptCall();
+  $('btn-decline').onclick = () => declineCall();
+  $('btn-mute').onclick = e => { e.stopPropagation(); const c = S.call; if (!c || !c.local) return; c.muted = !c.muted; c.local.getAudioTracks().forEach(t => { t.enabled = !c.muted; }); $('btn-mute').classList.toggle('off', c.muted); };
+  $('btn-flip').onclick = e => { e.stopPropagation(); flipCam(S.call); };
+  $('btn-q').onclick = e => { e.stopPropagation(); const c = S.call; if (!c) return; if (saving(c)) { toast('现在走中转服务器，已限制为省流量画质；可在“我 → 中转省流量”关闭'); return; } const order = ['hd', 'hd1080', 'sd']; setQuality(c, order[(order.indexOf(c.q) + 1) % 3]); toast('画质：' + QUAL[c.q].name + '（对方看到的画面）'); };
+  $('btn-info').onclick = e => { e.stopPropagation(); const el = $('call-stats'); el.classList.toggle('show'); if (el.classList.contains('show') && S.call) renderStats(S.call); };
+  $('local-video').onclick = () => { const u = $('call-ui'); if (!u.classList.contains('swap')) u.classList.add('swap'); };
+  $('remote-video').onclick = () => { const u = $('call-ui'); if (u.classList.contains('swap')) u.classList.remove('swap'); };
+  $('btn-cam').onclick = e => { e.stopPropagation(); const c = S.call; if (!c || !c.local) return; c.camOff = !c.camOff; c.local.getVideoTracks().forEach(t => { t.enabled = !c.camOff; }); $('btn-cam').classList.toggle('off', c.camOff); };
+  $('call-ui').onclick = () => { $('call-tip').style.display = 'none'; playEl($('remote-audio')); if (S.call && S.call.video) playEl($('remote-video')); };
+
+  /* 我 */
+  const sndBtn = $('btn-sound'), paintSnd = () => { sndBtn.textContent = SFX.isOn() ? '🔔 音效：开' : '🔕 音效：关'; };
+  paintSnd(); sndBtn.onclick = () => { SFX.setOn(!SFX.isOn()); paintSnd(); };
+  const paintImgQ = () => { const b = $('btn-imgq'); if (b) b.textContent = imgOrig() ? '🖼 图片：原图' : '🖼 图片：压缩'; };
+  paintImgQ();
+  const imgqBtn = $('btn-imgq');
+  if (imgqBtn) imgqBtn.onclick = () => {
+    LS.set('ch2imgq', imgOrig() ? 'auto' : 'orig'); paintImgQ();
+    toast(imgOrig() ? '以后发图片用原图：更清晰，但更占空间' : '以后发图片自动压缩：省空间，日常够清晰');
+  };
+  const paintIe = () => { const b = $('btn-imgedit'); if (b) b.textContent = imgEditOn() ? '✂️ 发送前编辑：开' : '✂️ 发送前编辑：关'; };
+  paintIe();
+  const ieBtn = $('btn-imgedit');
+  if (ieBtn) ieBtn.onclick = () => {
+    LS.set('ch2imgedit', !imgEditOn()); paintIe();
+    toast(imgEditOn() ? '发图片前会先让你编辑（旋转/裁剪/画笔/文字）' : '发图片直接发送，不再弹出编辑');
+  };
+  const sfxDemo = $('btn-sfx-demo');
+  if (sfxDemo) sfxDemo.onclick = function () {
+    SFX.join(); setTimeout(function () { SFX.like(); }, 450);
+    setTimeout(function () { SFX.approve(); }, 950); setTimeout(function () { SFX.hangup(); }, 1800);
+    toast('这就是新加的进房 / 点赞 / 同意 / 结束音');
+  };
+  $('btn-theme').onclick = cycleTheme;
+  /* 朋友圈 */
+  $('moment-new').onclick = openMomentCompose;
+  $('mo-cover-btn').onclick = function () { const i = $('cover-input'); i.value = ''; i.click(); };
+  $('moment-cancel').onclick = closeMomentCompose;
+  $('moment-backdrop').onclick = closeMomentCompose;
+  $('moment-post').onclick = postMoment;
+  $('moment-more').onclick = function () { momentsLoad(false); };
+  $('moment-add-img').onclick = function () { $('moment-file').click(); };
+  $('moment-add-video').onclick = function () { const i = $('moment-video-file'); i.value = ''; i.click(); };
+  $('moment-video-file').onchange = function (e) { const f = (e.target.files || [])[0]; e.target.value = ''; addMomentVideo(f); };
+  $('moment-vis').onclick = openVisPicker;
+  $('vis-backdrop').onclick = closeVis;
+  $('vis-all').onclick = function () { MO.vis = null; paintVisLabel(); closeVis(); };
+  $('vis-ok').onclick = function () { MO.vis = visSel.length ? visSel.slice() : null; paintVisLabel(); closeVis(); };
+  document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) {
+    b.onclick = function () { if (b.dataset.t === 'rot') { ieRotate(); return; } ieSetTool(b.dataset.t); };
+  });
+  document.querySelectorAll('#imgedit-sheet .ie-colors').forEach(function (box) {
+    box.onclick = function (e) {
+      const b = e.target.closest('.ie-sw'); if (!b) return;
+      IE.color = b.dataset.c; paintIeColors();
+    };
+  });
+  $('ie-sizes').onclick = function (e) {
+    const b = e.target.closest('button[data-s]'); if (!b) return;
+    IE.size = +b.dataset.s;
+    document.querySelectorAll('#ie-sizes button').forEach(function (x) { x.classList.toggle('on', x === b); });
+  };
+  $('ie-wrap').addEventListener('pointerdown', ieDown);
+  $('ie-wrap').addEventListener('pointermove', ieMove);
+  window.addEventListener('pointerup', ieUp);
+  window.addEventListener('resize', function () { if ($('imgedit-sheet').classList.contains('active')) ieLayout(); });
+  $('ie-crop-apply').onclick = ieCropApply;
+  $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
+  $('ie-undo').onclick = ieUndo;
+  $('ie-cancel').onclick = ieClose;
+$('vpv-cancel').onclick = function () { closeVideoPreview(null); };
+$('vpv-backdrop').onclick = function () { if (!VPV.busy) closeVideoPreview(null); };
+$('vpv-send').onclick = function () { vpvSendNow(); };
+$('vpv-pcancel').onclick = function () { vpvCancelEncode(); };
+$('vpv-compress').onclick = function () {
+  VPV.compress = !VPV.compress;
+  this.classList.toggle('on', VPV.compress);
+  this.textContent = '压缩：' + (VPV.compress ? '开' : '关');
+  vpvPaintRange();
+};
+$('vpv-cover').onclick = function () {
+  const v = $('vpv-video'); const w = v.videoWidth, h = v.videoHeight;
+  if (!w || !h) { toast('视频还没加载好'); return; }
+  const k = Math.min(1, 720 / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  try { c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); } catch (e) { toast('这一帧取不到，换个时间再试'); return; }
+  c.toBlob(function (b) { if (!b) { toast('取封面失败'); return; } VPV.cover = b; toast('封面已换成当前画面'); }, 'image/jpeg', 0.82);
+};
+const vpvSlide = function (which) {
+  const d = VPV.dur || 0;
+  if (d <= 0) return;
+  if (which === 'start') {
+    let v = Math.min(+$('vpv-start').value / 1000 * d, VPV.end - 0.3);
+    VPV.start = Math.max(0, v);
+    $('vpv-start').value = Math.round(VPV.start / d * 1000);
+    try { $('vpv-video').currentTime = VPV.start; } catch (e) {}
+  } else {
+    let v = Math.max(+$('vpv-end').value / 1000 * d, VPV.start + 0.3);
+    VPV.end = Math.min(d, v);
+    $('vpv-end').value = Math.round(VPV.end / d * 1000);
+    try { $('vpv-video').currentTime = Math.max(0, VPV.end - 0.05); } catch (e) {}
+  }
+  vpvPaintRange();
+};
+$('vpv-start').addEventListener('input', function () { vpvSlide('start'); });
+$('vpv-end').addEventListener('input', function () { vpvSlide('end'); });
+$('ie-panel-mosaic').addEventListener('click', function (e) {
+  const b = e.target.closest('[data-s]'); if (!b) return;
+  IE.mosaicSize = +b.dataset.s;
+  Array.from(this.querySelectorAll('[data-s]')).forEach(function (x) { x.classList.toggle('on', x === b); });
+});
+$('ie-panel-stk').addEventListener('click', function (e) {
+  const s = e.target.closest('#ie-stk-sizes [data-s]');
+  if (s) { IE.stkSize = +s.dataset.s; Array.from($('ie-stk-sizes').children).forEach(function (x) { x.classList.toggle('on', x === s); }); return; }
+  const em = e.target.closest('#ie-stks [data-e]');
+  if (em) { IE.stk = em.dataset.e; Array.from($('ie-stks').children).forEach(function (x) { x.classList.toggle('on', x === em); }); }
+});
+  $('ipv-edit').onclick = async function () {
+    const f = IPV.file; if (!f) return;
+    const edited = await openImgEditor(f);
+    if (!edited) return;
+    IPV.file = edited;
+    try { if (IPV.url) URL.revokeObjectURL(IPV.url); } catch (e) {}
+    IPV.url = URL.createObjectURL(edited);
+    $('ipv-img').src = IPV.url;
+  };
+  $('ipv-orig').onclick = function () { IPV.orig = !IPV.orig; this.classList.toggle('on', IPV.orig); };
+  $('ipv-cancel').onclick = function () { closeImgPreview(false); };
+  $('ipv-backdrop').onclick = function () { closeImgPreview(false); };
+  $('ipv-send').onclick = function () { closeImgPreview(true); };
+  $('imgedit-backdrop').onclick = ieClose;
+  $('ie-ok').onclick = ieFinish;
+  $('moment-file').onchange = function (e) { const fs = Array.from(e.target.files || []); e.target.value = ''; addMomentFiles(fs); };
+  $('moment-imgs').onclick = function (e) {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    const i = +b.dataset.i; if (!(i >= 0)) return;
+    try { URL.revokeObjectURL(MO.urls[i]); } catch (x) {}
+    MO.imgs.splice(i, 1); MO.urls.splice(i, 1); renderMomentEditor();
+  };
+  $('moment-list').onclick = function (e) {
+    const card = e.target.closest('.moment'); if (!card) return;
+    const id = card.dataset.id;
+    const lk = e.target.closest('.mo-liker, .mo-cauthor'); if (lk && lk.dataset.acc) { openProfile(lk.dataset.acc); return; }
+    if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
+    if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
+    if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
+    if (e.target.closest('[data-views]')) { openMomentViews(id); return; }
+    const cm = e.target.closest('.mo-comment');
+    if (cm && cm.dataset.cid) { commentMoment(id, { acc: cm.dataset.acc, cid: cm.dataset.cid }); return; }   // 点评论 = 回复他
+    const im = e.target.closest('.mo-imgs img'); if (im && im.dataset.url) openMomentImage(im.dataset.url);
+  };
+  $('moment-notify').onclick = function (e) {
+    const n = e.target.closest('.mo-notice'); if (!n) return;
+    const id = n.dataset.id, card = document.querySelector('.moment[data-id="' + id + '"]');
+    if (card) card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    else { momentsLoad(true); setTimeout(function () { const c = document.querySelector('.moment[data-id="' + id + '"]'); if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 800); }
+  };
+
+  bindPull(document.querySelector('main'), pullRefresh);
+async function exportAll() {
+  if (!sb || !S.me) return;
+  toast('正在整理…');
+  try {
+    const rows = [];
+    for (let from = 0; ; from += 1000) {
+      const r = await sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,created_at').order('created_at', { ascending: true }).range(from, from + 999);
+      if (r.error) throw r.error;
+      const d = r.data || []; rows.push.apply(rows, d);
+      if (d.length < 1000 || rows.length >= 20000) break;
+    }
+    const out = { app: 'Chatter', account: ME(), exported_at: new Date().toISOString(), count: rows.length, messages: rows };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'chatter-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 5000);
+    toast('已导出 ' + rows.length + ' 条（含图片/语音链接）');
+  } catch (e) { toast('导出失败：' + ((e && e.message) || '请重试')); }
+}
+$('btn-export').onclick = () => {
+  const list = [];
+  if (S.conv) list.push({ label: '📄 导出当前聊天', fn: () => exportChat(S.conv) });
+  list.push({ label: '📦 导出全部聊天（含图片/语音链接）', fn: () => exportAll() });
+  S.convs.filter(c => !convGone(c) && c.convKey !== S.conv).slice(0, 12).forEach(c => list.push({ label: '导出：' + peerName(c.peer_acc), fn: () => exportChat(c.convKey) }));
+  if (!list.length) { toast('还没有聊天记录'); return; }
+  list.push({ label: '取消', fn: null });
+  openActs('导出哪个聊天？', list);
+};
+$('btn-msearch').onclick = searchMsgs;
+$('msg-menu-multi').onclick = function () { closeMenu(); startMulti(menuId); };
+$('multi-del').onclick = multiDel;
+$('multi-fwd').onclick = multiFwd;
+$('multi-cancel').onclick = exitMulti;
+$('btn-groups').onclick = grpNew;
+$('pick-list').onclick = function (e) { const it = e.target.closest ? e.target.closest('.pick-item') : null; if (it) pickToggle(it.getAttribute('data-acc')); };
+$('pick-ok').onclick = function () { const cb = pickCb, sel = Array.from(pickSel); closePick(); if (cb) cb(sel); };
+$('pick-cancel').onclick = closePick;
+$('pick-backdrop').onclick = closePick;
+$('gi-x').onclick = closeGrpInfo;
+$('gi-backdrop').onclick = closeGrpInfo;
+$('gi-invite').onclick = function () { const k = giKey; closeGrpInfo(); if (k) grpInvite(k); };
+$('gi-clear').onclick = function () { const k = giKey; closeGrpInfo(); if (k) confirmClear(k, false); };
+$('gi-leave').onclick = function () { const k = giKey; closeGrpInfo(); if (k) setTimeout(function () { confirmGrpLeave(k); }, 50); };
+$('gi-settings').onclick = function () { if (giKey) openGroupSettings(gidOf(giKey)); };
+$('gi-approve-toggle').onclick = async function () {
+  const k = giKey; if (!k) return;
+  const gid = gidOf(k), on = !$('gi-approve-toggle').classList.contains('on');
+  try {
+    const r = await sb.rpc('set_group_join_approval', { p_gid: gid, p_on: on });
+    if (r.error) throw r.error;
+    const g = grpOf(k); if (g) g.join_approval = on;
+    $('gi-approve-toggle').classList.toggle('on', on);
+    toast(on ? '已打开：新成员需要群主或管理员同意' : '已关闭：被邀请的人可以直接进群');
+  } catch (e) { toast('设置失败：' + grpErr(e)); }
+};
+$('gi-notice').onclick = function (e) { const b = e.target.closest('#gi-note-edit'); if (!b || !giKey) return; editGroupNotice(gidOf(giKey)); };
+$('gi-search').addEventListener('input', function () { renderGiMembers(this.value); });
+$('gi-file-up').onclick = function () { if (!giKey) return; const i = $('gi-file-input'); i.value = ''; i.click(); };
+$('gi-file-input').onchange = function (e) {
+  const f = (e.target.files || [])[0]; e.target.value = '';
+  if (f && giKey) uploadGroupFile(gidOf(giKey), f);
+};
+$('gi-requests').onclick = async function (e) {
+  const row = e.target.closest('.gi-req'); if (!row || !giKey) return;
+  const ok = !!e.target.closest('[data-ok]'), no = !!e.target.closest('[data-no]');
+  if (!ok && !no) return;
+  try {
+    const r = await sb.rpc('group_invite_approve', { p_id: row.dataset.id, p_ok: ok });
+    if (r.error) throw r.error;
+    toast(ok ? '已同意，对方已进群' : '已拒绝');
+    if (ok) SFX.approve();
+    await grpInfo(giKey);
+  } catch (err) { toast('处理失败：' + grpErr(err)); }
+};
+$('gi-av').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) { groupIconGid = gid; $('group-icon-input').click(); } };
+$('gi-name').onclick = function () { if (!giKey) return; const gid = gidOf(giKey); if (grpCanManage(gid)) editGroupName(gid); };
+$('group-icon-input').onchange = function (e) { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!groupIconGid || !f) return; uploadGroupIcon(groupIconGid, f).catch(function (x) { logErr('groupIcon', x); toast('群图标上传失败：' + ((x && x.message) || '请重试')); }); };
+$('gi-members').onclick = function (e) {
+  const it = e.target.closest('.gi-m'); if (!it || !giKey) return;
+  const acc = it.getAttribute('data-acc'); if (!acc) return;
+  const gid = gidOf(giKey);
+  if (acc === ME()) { openGroupSettings(gid); return; }
+  const my = grpRoleOf(gid, ME()), target = grpRoleOf(gid, acc);
+  const can = my === 'owner' || my === 'admin';
+  if (!can) { openProfile(acc); return; }
+  const items = [{ label: '发消息', fn: function () { closeGrpInfo(); openConv(convKeyOf(ME(), acc), acc); } }];
+  if (my === 'owner' && target !== 'owner') items.push({ label: target === 'admin' ? '取消管理员' : '设为管理员', fn: function () { setGroupAdmin(gid, acc, target !== 'admin'); } });
+  if (target !== 'owner') {
+    items.push({ label: '设置头衔', fn: function () { editMemberTitle(gid, acc); } });
+    if (!(my === 'admin' && target === 'admin')) items.push({ label: '禁言', fn: function () { muteMember(gid, acc); } });
+  }
+  if (target !== 'owner' && !(my === 'admin' && target === 'admin')) items.push({ label: '移出群聊', danger: true, fn: function () { setTimeout(function () { confirmGrpKick(gid, acc); }, 30); } });
+  items.push({ label: '取消', fn: null });
+  openActs(peerName(acc), items);
+};
+$('btn-edit-profile').onclick = function () {
+  openActs('编辑个人信息', [
+    { label: '修改头像', fn: function () { $('avatar-input').click(); } },
+    { label: '修改个人页封面', fn: function () { const i = $('cover-input'); i.value = ''; i.click(); } },
+    { label: '修改昵称', fn: function () { editNick(); } },
+    { label: '修改个性签名', fn: function () { editSign(); } },
+    { label: '修改密码', fn: function () { editPass(); } },
+    { label: '取消', fn: null }
+  ]);
+};
+$('btn-copy-id').onclick = function (e) { e.stopPropagation(); const id = ME(); if (id) copyText(id); };
+$('btn-cache').onclick = async function () {
+  let size = '';
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e && e.usage) size = fmtDec(e.usage); } } catch (e) {}
+  openActs('本地缓存' + (size ? '：约 ' + size : ''), [
+    { label: '清理本地消息缓存（服务器记录还在）', danger: true, fn: async function () { await idbClear(); MSG.mem.clear(); toast('本地缓存已清理'); } },
+    { label: '取消', fn: null }
+  ]);
+};
+const gcl = $('grp-contacts');
+if (gcl) {
+  let gT = 0, gLpAt = 0;
+  const gOpen = it => { gLpAt = now(); grpInfo('g:' + it.getAttribute('data-gid')); };
+  gcl.addEventListener('click', e => { const it = e.target.closest('.grp-contact'); if (!it || now() - gLpAt < 700) return; const k = 'g:' + it.getAttribute('data-gid'); openConv(k, k); });
+  gcl.addEventListener('contextmenu', e => { const it = e.target.closest('.grp-contact'); if (!it) return; e.preventDefault(); gOpen(it); });
+  gcl.addEventListener('touchstart', e => { const it = e.target.closest('.grp-contact'); if (!it) return; clearTimeout(gT); gT = setTimeout(() => gOpen(it), 600); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => gcl.addEventListener(ev, () => clearTimeout(gT), { passive: true }));
+}
+$('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LOG.join('\n'); try { navigator.clipboard.writeText(t).then(() => toast('已复制'), () => toast('复制失败')); } catch (e) { toast('复制失败'); } };
+  $('btn-notify').onclick = () => { const b = $('notify-box'); if (b.style.display === 'block') { b.style.display = 'none'; return; } b.style.display = 'block'; paintPush(); if (S.v8 !== true) checkSchema(true).then(paintPush); };
+  $('nt-on').onclick = pushEnableClick;
+  $('nt-off').onclick = () => pushDisable();
+  $('nt-pv').onclick = pushTogglePreview;
+  $('nt-test').onclick = async () => { const j = await firePush('test'); toast(j && j.sent ? '测试通知已发出，几秒内会弹出来（先切到桌面看效果）' : j && j.skip === 'dup' ? '刚发过，10 秒后再试' : j && j.skip === 'nosub' ? '这台手机的登记丢了，请关闭通知再重新开启' : j && j.codes ? '推送服务没接受（回应 ' + j.codes.join('、') + '），请关闭通知再重新开启' : NO_FN); };
+  paintPush();
+  /* 顶部横幅：点一下打开，往上划收起 */
+  const nb = $('nbar'); let nbY = null;
+  nb.addEventListener('click', () => { const o = nbCur; hideNBar(); if (o && o.go) o.go(); });
+  nb.addEventListener('touchstart', e => { nbY = e.touches[0].clientY; clearTimeout(nbT); }, { passive: true });
+  nb.addEventListener('touchmove', e => { if (nbY != null && e.touches[0].clientY - nbY < -18) { nbY = null; hideNBar(); } }, { passive: true });
+  nb.addEventListener('touchend', () => { if (nbY != null && nbCur) nbT = setTimeout(hideNBar, 3000); nbY = null; }, { passive: true });
+  $('btn-logout').onclick = () => {
+    openActs('退出登录？\n会清掉这台手机上的消息缓存，服务器里的记录还在。', [
+      { label: '退出登录', danger: true, fn: async function () {
+        await pushLogout();
+        teardown();
+        try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
+        try { await idbClear(); } catch (e) {}
+        try { if (sb) await sb.auth.signOut(); } catch (e) {}
+        location.reload();
+      } },
+      { label: '取消', fn: null }
+    ]);
+  };
+
+  /* 页面回到前台：立刻校对 */
+  const wake = () => {
+    if (document.hidden || !sb || !S.me) return;
+    if (!S.rt.db || !S.rt.user) startRealtime();
+    if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
+    resyncSoon(); retryFailed();
+    grpLoad(true); grpInvitesLoad(true); grpPoll().catch(() => {});
+    momentNotifyCheck();
+    if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
+  };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  window.addEventListener('pagehide', () => { flushPush(); if (GC.on && GC.cid) restRpc('group_call_leave', { p_cid: GC.cid }); if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
+  window.addEventListener('online', wake); window.addEventListener('focus', wake);
+}
