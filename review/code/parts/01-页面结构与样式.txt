@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 01-页面结构与样式 · 原文件第 1-1250 行 -->
-<!-- 这一段负责：HEAD、全部 CSS、HTML 结构（查：样式覆盖、隐藏元素、aria） -->
+<!-- Chatter 前端 · 01-页面结构与样式 · 原文件第 1-1272 行 · 当前线上版本 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -215,6 +214,8 @@
   .ie-sizes { display: flex; gap: 8px; }
   .ie-sizes button { padding: 6px 10px; border-radius: 10px; background: var(--surface2); font-size: 12px; color: var(--ink); }
   .ie-sizes button.on { background: color-mix(in srgb, var(--accent) 24%, var(--surface2)); color: var(--accent); font-weight: 600; }
+  .friend-item .name { min-width: 0; }
+  .friend-item .name-main, .friend-item .name-sub { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; overflow-wrap: anywhere; }
   .ie-tip { font-size: 11.5px; color: var(--muted); }
   .ie-stks { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; max-height: 96px; overflow-y: auto; }
   .ie-stk { font-size: 22px; padding: 3px 6px; border-radius: 10px; background: var(--surface2); line-height: 1.25; }
@@ -349,7 +350,7 @@
   #chat-title .sub.on i { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
   .call-btns { display: flex; gap: 0; flex-shrink: 0; }
   #chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 14px 12px 8px; display: flex; flex-direction: column; gap: 10px; background-image: var(--doodle); background-size: 180px 180px; }
-  .msg { display: flex; gap: 8px; align-items: flex-end; animation: pop .22s cubic-bezier(.3,1.3,.5,1); }
+  .msg { display: flex; gap: 8px; align-items: flex-start; animation: pop .22s cubic-bezier(.3,1.3,.5,1); }
   @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
   /* 屏幕正中的弹窗本身靠 translate(-50%, -50%) 居中，动画必须带着它，否则动画期间会偏到右下角再跳回中间 */
   @keyframes popc { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
@@ -480,6 +481,10 @@
   .tstk { --c1: #a594ff; --c2: #6c5ce7; width: 112px; height: 112px; border-radius: 30px; background: linear-gradient(150deg, var(--c1), var(--c2)); color: #fff; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transform: rotate(var(--r, -4deg)); box-shadow: inset 0 -6px 0 rgba(0,0,0,.12), 0 0 0 3px #fff, 0 8px 18px rgba(30,20,70,.22); user-select: none; -webkit-user-select: none; }
   .tstk i { font-style: normal; font-size: 42px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
   .tstk b { font-size: 21px; font-weight: 900; line-height: 1.1; letter-spacing: .5px; padding: 0 6px; text-align: center; text-shadow: 0 2px 0 rgba(0,0,0,.2); }
+  .tstk b.tx { font-size: 30px; line-height: 1.15; padding: 0 8px; }
+  .tstk.sm b.tx { font-size: 15px; padding: 0 4px; }
+  .tstk.l4 b.tx { font-size: 24px; }
+  .tstk.sm.l4 b.tx { font-size: 12.5px; }
   .tstk.l4 b { font-size: 17px; }
   .tstk.dk { color: #5b3800; } .tstk.dk b { text-shadow: 0 1px 0 rgba(255,255,255,.45); }
   .tstk.sm { width: 60px; height: 60px; border-radius: 17px; gap: 1px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.12), 0 0 0 2px #fff, 0 3px 8px rgba(30,20,70,.18); }
@@ -500,7 +505,8 @@
   #msg-menu-backdrop.active { display: block; }
   .grp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 14px; }
   .msg-sender { font-size: 11.5px; color: var(--muted); margin: 0 0 3px 4px; line-height: 1.2; max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .msg-sender .msg-tag { color: var(--accent); font-size: 10px; margin-left: 2px; }
+  .msg-sender .msg-tag { color: var(--accent); font-size: 10px; margin-left: 6px; background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 1px 5px; border-radius: 6px; }
+  .msg.grp .avatar-wrapper { margin-top: 20px; }
   .grp-mark { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   #pick-sheet { display: none; flex-direction: column; max-height: 76vh; }
   #pick-sheet.active { display: flex; }
@@ -670,7 +676,7 @@
   .st-bar i { display: block; height: 100%; background: var(--brand); border-radius: 4px; }
   .st-bar.warn i { background: var(--danger); }
   #chat-title { cursor: pointer; }
-  #chat-title > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chat-title > span:first-child { white-space: normal; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; word-break: break-all; }
   #as-items { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #msg-menu { max-height: 86vh; overflow-y: auto; }
   #lightbox #lb-save { top: auto; transform: none; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; margin-left: -46px; width: 92px; height: 40px; font-size: 15px; border-radius: 20px; background: rgba(255,255,255,.2); }
@@ -805,15 +811,13 @@
 /* 依赖库加载：先读本地缓存（二次打开零网络）；没有缓存则同时请求多个来源，谁先到用谁，并缓存下来。
    来源包含 esm.sh（上一版就是用它，你的网络能通），失败原因会记录并显示在登录框下面。 */
 (function () {
-  var VER = '2.45.4', KEY = 'ch2lib:' + VER, ERR = window.__libErr = [];
+  var VER = '2.45.4', KEY = 'ch2lib3:' + VER, ERR = window.__libErr = [];
   var TXT = [
+    'https://3855285335-gif.github.io/index.html/vendor/supabase-' + VER + '.js',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
     'https://fastly.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
-    'https://gcore.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
     'https://unpkg.com/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
-    'https://registry.npmmirror.com/@supabase/supabase-js/' + VER + '/files/dist/umd/supabase.js',
-    'https://cdn.bootcdn.net/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/supabase-js/' + VER + '/umd/supabase.min.js'
+    'https://registry.npmmirror.com/@supabase/supabase-js/' + VER + '/files/dist/umd/supabase.js'
   ];
   var ESM = [
     'https://esm.sh/@supabase/supabase-js@' + VER + '?bundle',
@@ -915,8 +919,25 @@
     <div class="sp-word">Chatter</div>
     <div class="sp-sub">絮 语 · 随 时 说 点 什 么</div>
     <div class="sp-line"></div>
+    <div id="sp-slow" style="display:none;margin-top:20px;text-align:center">
+      <div style="font-size:12.5px;opacity:.75;margin-bottom:10px" id="sp-slow-msg">加载有点慢，或者脚本没启动</div>
+      <button type="button" onclick="location.replace(location.pathname+'?v='+Date.now())" style="padding:9px 16px;border-radius:12px;border:0;background:#7c5cff;color:#fff;font-size:13px">重新加载</button>
+    </div>
   </div>
 </div>
+<script>
+  setTimeout(function () {
+    var s = document.getElementById('splash');
+    if (!s || getComputedStyle(s).display === 'none') return;
+    var b = document.getElementById('sp-slow'); if (b) b.style.display = 'block';
+  }, 12000);
+  window.addEventListener('error', function (ev) {
+    var b = document.getElementById('sp-slow'); if (!b) return;
+    b.style.display = 'block';
+    var m = document.getElementById('sp-slow-msg');
+    if (m && ev && ev.message) m.textContent = '脚本报错：' + String(ev.message).slice(0, 120);
+  }, true);
+</script>
 
 <div class="app-container">
   <div id="auth-view" class="view">
@@ -1049,7 +1070,7 @@
     <div id="emoji-panel">
       <div class="ep-top"><input id="ep-search" type="search" placeholder="搜索表情（比如：笑、猫、加油）" autocomplete="off" enterkeyhint="search"></div>
       <div class="ep-tabs"><button type="button" data-ep="emoji" class="on">😀 表情</button><button type="button" data-ep="lib">🎭 表情库</button><button type="button" data-ep="mine">⭐ 我的</button></div>
-      <div id="ep-emoji" class="ep-pane on"><span>😀</span><span>😂</span><span>🥹</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span></div>
+      <div id="ep-emoji" class="ep-pane on"><span>😀</span><span>😂</span><span>😢</span><span>😍</span><span>😊</span><span>😎</span><span>🥺</span><span>😭</span><span>😡</span><span>👍</span><span>🙏</span><span>❤️</span><span>🎉</span><span>🔥</span><span>✨</span><span>👀</span><span>🤔</span><span>👋</span><span>💔</span><span>🐶</span><span>🍔</span><span>🌙</span></div>
       <div id="ep-lib" class="ep-pane"></div>
       <div id="ep-mine" class="ep-pane"></div>
       <div id="ep-find" class="ep-pane"></div>
