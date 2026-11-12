@@ -1,5 +1,4 @@
--- Chatter 全部 SQL（按执行时间顺序拼接）
--- 注意：这是历史补丁合集，线上最终状态见 schema.md
+-- Chatter 全部 SQL（按文件修改时间排序，含最新安全/免打扰补丁）
 
 -- ============================================================
 -- group-diagnose.sql  (2026-11-08 14:06)
@@ -1700,6 +1699,197 @@ create policy mv_sel on public.moment_views for select to authenticated
     select 1 from public.moments m
      where m.id = moment_views.moment_id and m.author_acc = public.my_acc()
   ));
+
+commit;
+
+
+-- ============================================================
+-- security-v1.sql  (2026-11-12 19:27)
+-- ============================================================
+-- ============================================================
+-- 安全加固 v1（幂等）
+-- 1) 账号 ID 不允许含冒号/空白：防止把账号改成 "g:<群id>" 去读群消息
+-- 2) @所有人 只在服务端放行群主/管理员：前端隐藏不算数
+-- ============================================================
+begin;
+
+-- 1) 账号 ID 白名单
+alter table public.profiles drop constraint if exists profiles_acc_safe;
+alter table public.profiles add constraint profiles_acc_safe check (
+  char_length(account_id) between 1 and 32
+  and account_id !~ '[:[:space:]]'
+);
+
+-- 2) @所有人 服务端校验
+create or replace function public.guard_all_mention() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare gid uuid;
+begin
+  if new.mentions is null or jsonb_typeof(new.mentions) <> 'array' then return new; end if;
+  if not (new.mentions @> '[{"acc":"@all"}]'::jsonb) then return new; end if;
+  if left(coalesce(new.conv_key, ''), 2) <> 'g:' then
+    raise exception 'mention all is only for groups';
+  end if;
+  gid := substring(new.conv_key from 3)::uuid;
+  if not exists (
+    select 1 from public.chat_group_members m
+     where m.group_id = gid and m.account_id = new.from_acc and m.role in ('owner', 'admin')
+  ) then
+    raise exception 'only owner or admin can mention all';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_guard_all_mention on public.messages;
+create trigger trg_guard_all_mention before insert on public.messages
+  for each row execute function public.guard_all_mention();
+
+commit;
+
+
+-- ============================================================
+-- security-v2.sql  (2026-11-12 19:38)
+-- ============================================================
+-- ============================================================
+-- 安全加固 v2（幂等）
+-- 1) peer_read 只认「自己和对方」的真实会话，防止伪造会话行查别人的已读时间
+-- 2) conversations 插入/更新：conv_key 必须由 (owner, peer) 推出来，或是自己所在群的 g:<gid>
+-- ============================================================
+begin;
+
+create or replace function public.peer_read(p_conv text)
+returns timestamptz
+language sql stable security definer set search_path = public as $$
+  select c2.last_read_ts
+    from public.conversations c1
+    join public.conversations c2
+      on c2.conv_key = c1.conv_key and c2.owner_acc = c1.peer_acc
+   where c1.owner_acc = public.my_acc()
+     and c1.conv_key  = p_conv
+     and c1.conv_key  = public.conv_key_of(c1.owner_acc, c1.peer_acc)
+$$;
+
+drop policy if exists conv_insert on public.conversations;
+create policy conv_insert on public.conversations for insert to authenticated
+  with check (
+    owner_acc = public.my_acc()
+    and (
+      conv_key = public.conv_key_of(owner_acc, peer_acc)
+      or (
+        left(conv_key, 2) = 'g:'
+        and conv_key = peer_acc
+        and public.is_group_member(substring(conv_key from 3)::uuid, public.my_acc())
+      )
+    )
+  );
+
+drop policy if exists conv_update on public.conversations;
+create policy conv_update on public.conversations for update to authenticated
+  using (owner_acc = public.my_acc())
+  with check (
+    owner_acc = public.my_acc()
+    and (
+      conv_key = public.conv_key_of(owner_acc, peer_acc)
+      or (
+        left(conv_key, 2) = 'g:'
+        and conv_key = peer_acc
+        and public.is_group_member(substring(conv_key from 3)::uuid, public.my_acc())
+      )
+    )
+  );
+
+commit;
+
+
+-- ============================================================
+-- mute-push-v1.sql  (2026-11-12 20:40)
+-- ============================================================
+-- ============================================================
+-- 免打扰同步 + 推送端拦截（幂等）
+-- profiles.mutes: {"conv_key": 1}
+-- push_job 变成包装层：先查目标用户的 mutes，命中就 skip='muted'
+-- ============================================================
+begin;
+
+alter table public.profiles add column if not exists mutes jsonb not null default '{}'::jsonb;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'push_job'
+  ) then
+    alter function public.push_job(uuid, text, text, text) rename to push_job_base;
+  end if;
+end $$;
+
+create or replace function public.push_job(p_uid uuid, p_kind text, p_ref text, p_to text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text; ck text; muted jsonb;
+begin
+  select account_id, coalesce(mutes, '{}'::jsonb) into me, muted
+    from public.profiles where id = p_uid;
+  if me is null then return jsonb_build_object('skip', 'auth'); end if;
+
+  if p_kind = 'gmsg' then
+    ck := p_to;
+  elsif p_kind in ('msg', 'call', 'miss') then
+    if p_to is null or p_to = '' then ck := null; else ck := public.conv_key_of(me, p_to); end if;
+  else
+    ck := null;
+  end if;
+
+  if ck is not null and (muted ? ck) then
+    return jsonb_build_object('skip', 'muted');
+  end if;
+
+  return public.push_job_base(p_uid, p_kind, p_ref, p_to);
+end $$;
+
+commit;
+
+
+-- ============================================================
+-- mute-push-v2.sql  (2026-11-12 21:27)
+-- ============================================================
+-- ============================================================
+-- 免打扰 v2：按“收件人”的 mutes 判断（v1 错判成了发送者）
+-- 1) push_job 包装层：msg/call/miss 用 p_to（收件人）的 mutes
+-- 2) push_job_base 的 gmsg 查询里排除把该群设为免打扰的成员
+-- ============================================================
+begin;
+
+create or replace function public.push_job(p_uid uuid, p_kind text, p_ref text, p_to text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text; ck text; muted jsonb;
+begin
+  select account_id into me from public.profiles where id = p_uid;
+  if me is null then return jsonb_build_object('skip', 'auth'); end if;
+
+  if p_kind in ('msg', 'call', 'miss') and p_to is not null and p_to <> '' then
+    select coalesce(mutes, '{}'::jsonb) into muted from public.profiles where account_id = p_to;
+    ck := public.conv_key_of(me, p_to);
+    if muted is not null and (muted ? ck) then
+      return jsonb_build_object('skip', 'muted');
+    end if;
+  end if;
+
+  return public.push_job_base(p_uid, p_kind, p_ref, p_to);
+end $$;
+
+do $$
+declare def text; nw text;
+begin
+  select pg_get_functiondef('public.push_job_base(uuid,text,text,text)'::regprocedure) into def;
+  nw := replace(def,
+    'where gm.group_id = gid and s.acc <> me',
+    'where gm.group_id = gid and s.acc <> me
+       and not exists (select 1 from public.profiles pf where pf.account_id = s.acc and pf.mutes ? (''g:'' || gid))');
+  if nw = def then
+    raise exception 'push_job_base gmsg pattern not found';
+  end if;
+  execute nw;
+end $$;
 
 commit;
 
