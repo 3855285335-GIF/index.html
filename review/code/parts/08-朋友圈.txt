@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 08-朋友圈 · 原文件第 4989-5346 行 -->
-<!-- 这一段负责：发布、可见性、点赞评论、访客、封面、视频 -->
+<!-- Chatter 前端 · 08-朋友圈 · 原文件第 5077-5434 行 · 当前线上版本 -->
 /* ================= 朋友圈 ================= */
 const MV = {};
 async function loadMomentViews(rows) {
@@ -11,7 +10,7 @@ async function loadMomentViews(rows) {
       if (!r.error) {
         const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
         const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        if (add.length) sb.from('moment_views').insert(add).then(function () {}, function () {});
+        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function () {}, function () {}); });
       }
     }
     if (mine.length) {
@@ -206,7 +205,7 @@ function addMomentFiles(files) {
 }
 async function postMoment() {
   const body = $('moment-text').value.trim();
-  if (!body && !MO.imgs.length) { toast('写点什么，或者选一张图片'); return; }
+  if (!body && !MO.imgs.length && !MO.vid) { toast('写点什么，或者选一张图片/一段视频'); return; }
   if (body.length > 1000) { toast('最多 1000 个字'); return; }
   const btn = $('moment-post'); if (btn.disabled) return; btn.disabled = true;
   toast('正在发表…');
