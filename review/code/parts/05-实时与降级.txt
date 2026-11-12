@@ -1,0 +1,188 @@
+<!-- Chatter 前端 · 05-实时与降级 · 原文件第 3797-3983 行 -->
+<!-- 这一段负责：Realtime 频道、在线状态、国内模式轮询兜底（查：重连、重复渲染） -->
+/* ================= 实时 / 在线 / 定时同步 ================= */
+function startRealtime() {
+  if (!sb || !S.me) return;
+  const gen = ++S.rtGen, acc = ME();
+  [S.chDb, S.chUser].forEach(c => { if (c) { try { sb.removeChannel(c); } catch (e) {} } });
+  S.rt.db = false; S.rt.user = false;
+  const filt = (table, col) => ({ schema: 'public', table, filter: col + '=eq.' + acc });
+  let first = true;
+  S.chDb = sb.channel('db-' + acc + '-' + gen)
+    .on('postgres_changes', Object.assign({ event: 'INSERT' }, filt('messages', 'to_acc')), p => { try { onDbMsg(p.new, 'ins'); } catch (e) { logErr('db-ins', e); } })
+    .on('postgres_changes', Object.assign({ event: 'UPDATE' }, filt('messages', 'to_acc')), p => { try { onDbMsg(p.new, 'upd'); } catch (e) { logErr('db-upd', e); } })
+    .on('postgres_changes', Object.assign({ event: '*' }, filt('conversations', 'owner_acc')), p => { try { if (p.eventType === 'DELETE') return; upsertConvRow(p.new); } catch (e) { logErr('db-conv', e); } })
+    .on('postgres_changes', Object.assign({ event: '*' }, filt('friend_requests', 'to_acc')), p => {
+      try {
+        const r = p.new; if (!r || !r.id) return;
+        const known = S.reqKnown && S.reqKnown.has(String(r.id)) && S.requests.some(x => String(x.id) === String(r.id));
+        S.requests = S.requests.filter(x => String(x.id) !== String(r.id));
+        if (r.status === 'pending') { S.requests.unshift(r); SFX.notify(); if (!known) noteRequest(r); (S.reqKnown = S.reqKnown || new Set()).add(String(r.id)); }
+        sched('reqs'); saveCache();
+      } catch (e) { logErr('db-req', e); }
+    })
+    .on('postgres_changes', Object.assign({ event: '*' }, filt('friendships', 'owner_acc')), () => resyncSoon())
+    .subscribe((st, err) => {
+      if (gen !== S.rtGen) return;
+      S.rt.db = st === 'SUBSCRIBED';
+      if (st === 'SUBSCRIBED') { if (!first) resyncSoon(); first = false; }
+      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') rtFailLog('rt-db', err || st);
+    });
+  S.chUser = sb.channel('u:' + acc, { config: { private: true } })
+    .on('broadcast', { event: 'm' }, ({ payload }) => onFastMsg(payload))
+    .on('broadcast', { event: 'r' }, ({ payload }) => { try { onFastRecall(payload); } catch (e) { logErr('fast-r', e); } })
+    .on('broadcast', { event: 'ty' }, ({ payload }) => { try { onTyping(payload); } catch (e) { logErr('ty', e); } })
+    .on('broadcast', { event: 'rd' }, ({ payload }) => { try { onReadAck(payload); } catch (e) { logErr('rd', e); } })
+    .on('broadcast', { event: 'rq' }, ({ payload }) => { try { onReadReq(payload); } catch (e) { logErr('rq', e); } })
+    .on('broadcast', { event: 'pr' }, ({ payload }) => { try { onPresence(payload); } catch (e) { logErr('pr', e); } })
+    .on('broadcast', { event: 'fr' }, () => resyncSoon())
+    .on('broadcast', { event: 'sig' }, ({ payload }) => { try { onSig(payload); } catch (e) { logErr('sig', e); } })
+    .subscribe((st, err) => {
+      if (gen !== S.rtGen) return;
+      S.rt.user = st === 'SUBSCRIBED';
+      if (st === 'SUBSCRIBED') showBanner('');
+      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') {
+        rtFailLog('rt-user', err || st);
+        const why = String((err && (err.message || err)) || '');
+        if (st === 'CHANNEL_ERROR' && /unauthori|permission|denied|policy|not allowed/i.test(why)) showBanner('实时通道没有权限：请重新执行最新的 setup.sql（含 realtime.messages 策略）');
+      }
+    });
+}
+const rtFailSeen = {};
+function rtFailLog(tag, e) { if (rtFailSeen[tag]) return; rtFailSeen[tag] = 1; logErr(tag, (e && (e.message || e)) || e); }   // 国内网络会反复失败：只记一次，避免刷屏
+
+/* ================= 国内模式：实时通道连不上时，用普通请求顶替 ================= */
+let fbT = 0, fbRun = 0, msgCursor = 0, lastMsgPoll = 0, lastSigPoll = 0, lastSeenPoll = 0, lastReadPoll = 0;
+const pollTypes = new Map();
+function fbSchedule(ms) { clearTimeout(fbT); fbT = setTimeout(fbLoop, ms); }
+function fbStart() { fbRun++; msgCursor = 0; lastSeenPoll = 0; pollTypes.clear(); fbSchedule(800); }
+function fbStop() { fbRun++; clearTimeout(fbT); }
+function fbKick() { fbRun++; clearTimeout(fbT); fbT = setTimeout(fbLoop, 50); }   // 立刻重启循环（旧的那轮会自己退出）
+async function fbLoop() {
+  const run = fbRun;
+  if (!S.started || !sb || !S.me) return;
+  if (document.hidden) { fbSchedule(3000); return; }
+  let next = 1000;
+  try {
+    const need = !S.rt.db || !S.rt.user;
+    if (need && !S.noInbox) { await pollInbox(); next = 30; }   // 长轮询：服务器一有新内容立刻返回，没有就等 2.5 秒
+    else if (need) {                                            // 没运行 setup-v4.sql：退回普通轮询
+      const t = now();
+      if (!S.rt.user && !S.noSigDb && t - lastSigPoll >= 2000) { lastSigPoll = t; await pollSignals(); }
+      if (!S.rt.db && t - lastMsgPoll >= 2000) { lastMsgPoll = t; await pollMsgs(); }
+    }
+    if (run !== fbRun) return;
+    const t = now();
+    if (!S.rt.user && S.conv && t - lastReadPoll >= 4000) { lastReadPoll = t; fetchPeerRead(S.conv); }
+    if (t - lastSeenPoll >= 40000) { lastSeenPoll = t; heartbeat(true); pollSeen(); if (S.rt.user && !S.noSigDb) { lastSigPoll = t; await pollSignals(); } }
+  } catch (e) { if (e && e.abort) next = 30; else { logErr('fb', (e && e.message) || e); next = 2000; } }   // 卡住被放弃：马上重发；其他错误：等 2 秒
+  if (run !== fbRun) return;
+  fbSchedule(next);
+}
+async function pollInbox() {
+  let base = 0;
+  if (!msgCursor) { S.convs.forEach(c => { base = Math.max(base, Date.parse(c.last_ts || 0) || 0); }); msgCursor = base || (now() - 60000); }
+  const ctl = window.AbortController ? new AbortController() : null, tm = ctl ? setTimeout(() => ctl.abort(), 10000) : 0;   // 国内网络偶尔会让请求卡住：10 秒没回就放弃重发
+  let q = sb.rpc('poll_inbox', { p_since: new Date(msgCursor).toISOString(), p_wait_ms: base ? 0 : 2500 });
+  if (ctl && q && typeof q.abortSignal === 'function') q = q.abortSignal(ctl.signal);
+  let res; try { res = await q; } finally { clearTimeout(tm); }
+  const { data, error } = res || {};
+  if (error) { if (isMissingFn(error)) S.noInbox = true; const er = new Error('poll_inbox ' + (error.message || error.code)); er.abort = /abort/i.test(String(error.message || '')); throw er; }
+  const d = data || {};
+  handleMsgRows(d.msgs || [], base);
+  handleSigRows(d.sigs || []);
+}
+function handleSigRows(rows) {
+  rows.slice().sort((a, b) => a.id - b.id).forEach(r => {
+    const p = Object.assign({}, r.payload || {}, { from: r.from_acc });   // 发信人以服务器记录为准
+    try { if (p.t === 'ty') onTyping(p); else if (p.t === 'pr') onPresence(p); else onSig(p); } catch (e) { logErr('sig-db', e); }
+  });
+}
+function handleMsgRows(rows, base) {
+  rows.forEach(r => {
+    const m = rowToMsg(r); const t = Date.parse(m.created_at) || 0; if (t > msgCursor) msgCursor = t;
+    if (pollTypes.get(m.id) === m.type) return;
+    pollTypes.set(m.id, m.type); if (pollTypes.size > 500) pollTypes.delete(pollTypes.keys().next().value);
+    if (base && t <= base) { S.seen.add(m.id); return; }   // 第一次：会话列表里已有的消息，只登记、不当新消息提醒
+    if (m.type === 'recalled' && S.seen.has(m.id)) { if (S.conv === m.conv) upsertMsg(m); return; }
+    onIncoming(m);
+  });
+}
+async function pollSignals() {
+  const { data, error } = await sb.rpc('take_signals');
+  if (error) { if (isMissingFn(error)) S.noSigDb = true; logErr('take_signals', error); return; }
+  handleSigRows(data || []);
+}
+async function pollMsgs() {
+  let base = 0;
+  if (!msgCursor) { S.convs.forEach(c => { base = Math.max(base, Date.parse(c.last_ts || 0) || 0); }); msgCursor = base || (now() - 60000); }
+  const since = new Date(msgCursor - 15000).toISOString();   // 往回多看 15 秒，防止漏掉同一时刻提交的消息
+  const { data, error } = await sb.from('messages').select('*').eq('to_acc', ME()).gt('created_at', since).order('created_at', { ascending: true }).limit(100);
+  if (error) { logErr('pollMsgs', error); return; }
+  handleMsgRows(data || [], base);
+}
+async function heartbeat(on) {
+  if (S.noPres || !sb || !S.me) return;
+  try { const r = await sb.rpc('heartbeat', { p_online: on !== false }); if (r && r.error && isMissingFn(r.error)) S.noPres = true; } catch (e) {}
+}
+async function pollSeen() {
+  if (S.noPres || !sb || !S.me) return;
+  try {
+    const { data, error } = await sb.rpc('friends_seen');
+    if (error) { if (isMissingFn(error)) S.noPres = true; return; }
+    const n = new Set(); (data || []).forEach(r => { if (r && r.online) n.add(r.account_id); });
+    Object.keys(prAt).forEach(a => { const x = prAt[a]; if (now() - x.t < 10000) { if (x.on) n.add(a); else n.delete(a); } });   // 10 秒内刚收到的上下线推送比数据库更新，以推送为准
+    const same = n.size === S.fbOnline.size && Array.from(n).every(x => S.fbOnline.has(x));
+    if (!same) { S.fbOnline = n; sched('list'); sched('contacts'); sched('title'); }
+  } catch (e) {}
+}
+
+let resyncT = 0;
+function resyncSoon() { clearTimeout(resyncT); resyncT = setTimeout(resync, 300); }
+function setupPresence() {
+  if (!sb || !S.me) return;
+  const gen = ++S.presGen, acc = ME();
+  if (S.presCh) { try { sb.removeChannel(S.presCh); } catch (e) {} }
+  const ch = sb.channel('presence:online', { config: { presence: { key: acc } } }); S.presCh = ch;
+  ch.on('presence', { event: 'sync' }, () => {
+    if (gen !== S.presGen) return;
+    try { S.online = new Set(Object.keys(ch.presenceState() || {})); } catch (e) {}
+    sched('list'); sched('contacts'); sched('title');
+  }).subscribe(async st => { if (gen === S.presGen && st === 'SUBSCRIBED') { try { await ch.track({ t: now() }); } catch (e) {} } });
+}
+function startTimers() {
+  clearInterval(S.tm); let n = 0;
+  S.tm = setInterval(() => {
+    if (document.hidden || !sb || !S.me) return;
+    n++;
+    const lp = !S.noInbox;                                         // 国内模式的长轮询在工作：新消息已经即时到达，补漏校对放慢到 18 秒
+    if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 30 秒校对一次；异常：6 秒（长轮询时 18 秒）
+    if (S.conv && isGroupKey(S.conv)) syncChat();                  // 群消息不在自己的 to_acc 通道里，聊天开着就主动同步
+    else if (!S.rt.db && S.conv && (!lp || n % 3 === 0)) syncChat();
+    if (!S.rt.db || n % 2 === 0) grpPoll();                        // 群消息兜底轮询：实时通道断了 6 秒一次，正常时 12 秒一次
+    if (n % 2 === 0) grpInvitesLoad();                            // 群邀请：12 秒查一次（没开推送也能较快看到）
+    if (n % 2 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化
+    if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
+    retryFailed();
+    if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
+  }, 6000);
+}
+function teardown() {
+  S.started = false;
+  clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer); fbStop(); if (S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } lastPr = null;
+  S.rtGen++; S.presGen++;
+  [S.chDb, S.chUser, S.presCh].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
+  S.chDb = S.chUser = S.presCh = null; S.rt.db = S.rt.user = false;
+  wakeOff(); SFX.stopAll(); SFX.hold(false);
+  if (S.call) { const c = S.call; S.call = null; c.ended = true; clearTimers(c); clearInterval(c.clock); clearInterval(c.statsT); try { c.pc && c.pc.close(); } catch (e) {} stopStream(c.local); stopStream(c.remote); }
+  if (GC.on) gcEnd();   // 退出登录：人先离开语音，别把房间卡住
+  S.incoming = null; hideCallUI(); $('incoming-ui').classList.remove('active');
+  recAbort(); stopAudio();
+  document.body.classList.remove('chat-open');
+  S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
+  S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
+  clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
+  S.gInvites = [];
+  msgCacheClear();
+  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
+}
