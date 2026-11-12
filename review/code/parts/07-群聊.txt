@@ -1,0 +1,634 @@
+<!-- Chatter 前端 · 07-群聊 · 原文件第 4357-4988 行 -->
+<!-- 这一段负责：建群、成员、邀请、审批、公告、群文件、退群解散（查：权限、竞态） -->
+/* ================= 群聊 ================= */
+// 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
+const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
+const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], loadAt: 0 };
+function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
+function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
+function grpErr(e) {
+  const m = String((e && (e.message || e)) || '');
+  if (/row-level security|42501/i.test(m)) return '没有权限（数据库策略拦截）';
+  if (/duplicate|23505/i.test(m)) return '已经有这个群了';
+  if (/invalid input syntax/i.test(m)) return '群 id 格式不对';
+  return m || '请重试';
+}
+function grpCacheSave() { try { LS.set('ch2grp:' + (S.uid || ''), GRP.list.map(function (x) { return { id: x.id, name: x.name, owner_acc: x.owner_acc, avatar_url: x.avatar_url || '', mute_all: !!x.mute_all, join_approval: !!x.join_approval }; })); } catch (e) {} }
+async function grpLoad(force) {
+  if (!sb || !S.me) return;
+  if (!force && now() - GRP.loadAt < 5000) return;
+  GRP.loadAt = now();
+  try {
+    const r = await sb.from('chat_group_members').select('group_id').eq('account_id', ME());
+    if (r.error) throw r.error;
+    const ids = [];
+    (r.data || []).forEach(function (x) { if (x && x.group_id && ids.indexOf(x.group_id) < 0) ids.push(x.group_id); });
+    let list = [];
+    if (ids.length) {
+      const g = await sb.from('chat_groups').select('id,name,owner_acc,avatar_url,mute_all,join_approval,notice,notice_at').in('id', ids);
+      if (g.error) throw g.error;
+      list = g.data || [];
+      try {   // 成员数一次查出来，通讯录里的群聊也显示人数
+        const cm = await sb.from('chat_group_members').select('group_id').in('group_id', ids);
+        if (!cm.error) { const cnt = {}; (cm.data || []).forEach(function (r) { cnt[r.group_id] = (cnt[r.group_id] || 0) + 1; }); list.forEach(function (x) { GRP.count[x.id] = cnt[x.id] || 0; }); }
+      } catch (e) {}
+    }
+    GRP.list = list; grpCacheSave();
+    const set = new Set(ids);
+    const keep = S.convs.filter(function (c) { return !isGroupKey(c.convKey) || set.has(gidOf(c.convKey)); });
+    if (keep.length !== S.convs.length) S.convs = keep;
+    list.forEach(function (x) {
+      const c = convOf('g:' + x.id);
+      if (c && !parseQ(c.last_body).text) fixPreview(c.convKey);
+      if (!GRP.cursor['g:' + x.id]) GRP.cursor['g:' + x.id] = Date.parse(c && c.last_ts || 0) || (now() - 60000);
+    });
+    sched('list');
+    sched('contacts');
+    if (S.conv && isGroupKey(S.conv)) { renderChatTitle(); renderGrpNotice(); grpOpenMeta(S.conv); }
+  } catch (e) { logErr('grpLoad', e); }
+}
+async function grpMembers(gid, force) {
+  if (!gid) return [];
+  if (!force && GRP.members[gid] && now() - (GRP.membersAt[gid] || 0) < 10000) return GRP.members[gid];
+  const r = await sb.from('chat_group_members').select('account_id,role,title,title_on,muted_until').eq('group_id', gid);
+  if (r.error) throw r.error;
+  const ms = r.data || [];
+  GRP.members[gid] = ms; GRP.membersAt[gid] = now(); GRP.count[gid] = ms.length;
+  if (S.conv === 'g:' + gid) { applyMuteState(); if (S.msgs.length) chatRender(S.stick); }
+  sched('contacts');
+  const need = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !S.profiles[a]; });
+  if (need.length) {
+    const p = await sb.from('profiles').select('account_id,nickname,avatar_url').in('account_id', need);
+    if (p && p.data) p.data.forEach(function (x) { S.profiles[x.account_id] = x; });
+    sched('list');
+  }
+  return ms;
+}
+function grpOpenMeta(key) {
+  const gid = gidOf(key); if (!gid) return;
+  grpMembers(gid).then(function () { if (S.conv === key) renderChatTitle(); }, function (e) { logErr('grpMeta', e); });
+}
+function noticeAckKey() { return 'ch2na:' + (S.uid || ''); }
+function noticeAcked(gid, at) { try { const m = LS.get(noticeAckKey(), {}) || {}; return m[gid] && m[gid] === at; } catch (e) { return false; } }
+function ackNotice(gid, at) { try { const m = LS.get(noticeAckKey(), {}) || {}; m[gid] = at; LS.set(noticeAckKey(), m); } catch (e) {} }
+function renderGrpNotice() {
+  const el = $('grp-notice'); if (!el) return;
+  const g = (S.conv && isGroupKey(S.conv)) ? grpOf(S.conv) : null;
+  const t = g && g.notice ? String(g.notice).trim() : '';
+  const at = (g && g.notice_at) || '';
+  if (!t || noticeAcked(g.id, at)) { el.classList.remove('show'); el.innerHTML = ''; el.onclick = null; return; }
+  el.innerHTML = '<span class="gn-text"><b>群公告</b>' + esc(t.replace(/\s+/g, ' ').slice(0, 40)) + '</span><button id="gn-ok" type="button">知道了</button>';
+  el.classList.add('show');
+  el.onclick = function (e) {
+    const ok = e.target.closest('#gn-ok');
+    if (ok) { e.stopPropagation(); ackNotice(g.id, at); el.classList.remove('show'); el.innerHTML = ''; return; }
+    openActs('群公告', [{ label: t, fn: null }, { label: '关闭', fn: null }]);
+  };
+}
+function editGroupNotice(gid) {
+  const g = GRP.list.find(function (x) { return x.id === gid; }) || {};
+  openForm('群公告', [{ ph: '最多 300 字，留空就是删除', max: 300, val: g.notice || '' }], async function (vals) {
+    const v = String((vals && vals[0]) || '').trim();
+    const r = await sb.rpc('set_group_notice', { p_gid: gid, p_text: v });
+    if (r.error) return '保存失败：' + grpErr(r.error);
+    g.notice = v || null; g.notice_at = v ? new Date().toISOString() : null;
+    grpCacheSave(); renderGrpNotice();
+    try { await grpInfo('g:' + gid); } catch (e) {}
+    toast(v ? '群公告已更新' : '群公告已删除');
+    return null;
+  }, '保存');
+}
+function grpChatMode() {
+  const gp = isGroupKey(S.conv);
+  $('btn-voice-call').style.display = '';                    // 群聊里这个按钮就是“群语音”
+  $('btn-voice-call').title = gp ? '群语音（最多 4 人）' : '语音通话';
+  $('btn-video-call').style.display = gp ? 'none' : '';
+  clearInterval(GRP.chatT); GRP.chatT = 0;
+  clearInterval(GRP.muteT); GRP.muteT = 0;
+  clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
+  if (gp) {
+    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) syncChat(); }, 3000);
+    refreshMyMuteState(gidOf(S.conv));
+    GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 2000);
+    GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 3000);
+    setTimeout(function () { if (isGroupKey(S.conv)) gcTipPoll(); }, 500);
+  }
+  applyMuteState();
+}
+/* ---- 群邀请（要对方同意才进群） ---- */
+async function grpInvitesLoad(force) {
+  if (!sb || !S.me) return;
+  if (!force && now() - GRP.invAt < 10000) return;
+  GRP.invAt = now();
+  try {
+    const { data, error } = await sb.rpc('my_group_invites');
+    if (error) { if (isMissingFn(error)) return; throw error; }
+    const arr = Array.isArray(data) ? data : [];
+    const prev = new Set((S.gInvites || []).map(function (x) { return String(x.id); }));
+    const first = !GRP.invLoaded;
+    GRP.invLoaded = true;
+    S.gInvites = arr;
+    sched('reqs');
+    if (!first) arr.forEach(function (x) { if (!prev.has(String(x.id))) noteGroupInvite(x); });
+  } catch (e) { logErr('grpInvites', e); }
+}
+function noteGroupInvite(i) {
+  const name = i.name || '群聊', from = i.from_name || i.from_acc || '好友';
+  const body = from + ' 邀请你加入「' + name + '」';
+  if (document.hidden) { localNote('群邀请', body, 'i:' + i.id, './#inv'); return; }
+  showNBar({ key: 'i:' + i.id, acc: i.group_id, title: '群邀请', body, go: function () { goTab('requests'); grpInvitesLoad(true); } });
+}
+async function grpInviteAccept(id) {
+  if (!id) return;
+  try {
+    const { data, error } = await sb.rpc('group_invite_accept', { p_id: id });
+    if (error) { if (isMissingFn(error)) throw new Error('数据库还没更新：请执行 sql/group-join-approval-v1.sql'); throw error; }
+    const r = (data && typeof data === 'object') ? data : { status: 'joined', group_id: data };
+    await grpInvitesLoad(true);
+    if (r.status === 'waiting') { toast('已申请，等群主或管理员同意'); return; }
+    const gid = String(r.group_id || '');
+    await grpLoad(true);
+    if (gid) openConv('g:' + gid, 'g:' + gid);
+    toast('已加入群聊');
+  } catch (e) { logErr('grpAccept', e); toast('加入失败：' + grpErr(e)); }
+}
+async function grpInviteDecline(id) {
+  if (!id) return;
+  try {
+    const { error } = await sb.rpc('decline_group_invite', { p_id: id });
+    if (error) throw error;
+    S.gInvites = (S.gInvites || []).filter(function (x) { return String(x.id) !== String(id); });
+    sched('reqs'); toast('已拒绝');
+  } catch (e) { logErr('grpDecline', e); toast('操作失败：' + grpErr(e)); }
+}
+async function grpCreate(name, members) {
+  const gid = uuid(), me = ME();
+  try {
+    let r = await sb.from('chat_groups').insert({ id: gid, name: String(name).slice(0, 20), owner_acc: me });
+    if (r.error) throw r.error;
+    r = await sb.from('chat_group_members').insert({ group_id: gid, account_id: me, role: 'owner' });
+    if (r.error) { try { await sb.from('chat_groups').delete().eq('id', gid); } catch (x) {} throw r.error; }
+    GRP.members[gid] = [{ account_id: me, role: 'owner' }];
+    GRP.count[gid] = 1;
+    let ok = 0, fail = 0;
+    for (const a of (members || [])) {
+      if (!a || a === me) continue;
+      const rr = await sb.rpc('invite_to_group', { p_gid: gid, p_acc: a });
+      if (rr.error) { fail++; logErr('grpCreate-invite:' + a, rr.error); }
+      else { ok++; if (rr.data) firePush('ginv', a, rr.data); }
+    }
+    toast(ok ? '群已创建，已邀请 ' + ok + ' 人' + (fail ? '（' + fail + ' 人失败）' : '') : '群已创建');
+    await grpLoad(true);
+    openConv('g:' + gid, 'g:' + gid);
+  } catch (e) { logErr('grpCreate', e); toast('建群失败：' + grpErr(e)); }
+}
+function grpNew() {
+  if (!sb || !S.me) return;
+  if (!S.friends.length) { toast('先在通讯录加好友，再建群'); return; }
+  openForm('新建群聊', [{ ph: '群名称（1-20 字）', max: 20 }], function (v) {
+    const name = String((v && v[0]) || '').trim();
+    if (!name) return '群名称不能为空';
+    setTimeout(function () {
+      openPick('选择要邀请的好友（可多选）', S.friends.slice(0, 100).map(function (a) { return { acc: a, name: peerName(a) }; }), function (picked) { grpCreate(name, picked); });
+    }, 40);
+    return null;
+  }, '下一步');
+}
+async function grpInvite(key) {
+  const k = key || S.conv;
+  if (!isGroupKey(k)) return;
+  const gid = gidOf(k);
+  let ms = [];
+  try { ms = await grpMembers(gid, true); } catch (e) { toast('读取群成员失败：' + grpErr(e)); return; }
+  const has = new Set(ms.map(function (m) { return m.account_id; }));
+  const cand = S.friends.filter(function (a) { return !has.has(a); }).slice(0, 100).map(function (a) { return { acc: a, name: peerName(a) }; });
+  if (!cand.length) { toast('好友都已经在群里了'); return; }
+  openPick('邀请好友进群（可多选）', cand, async function (picked) {
+    if (!picked.length) return;
+    let ok = 0, last = null;
+    for (const a of picked) {
+      const r = await sb.rpc('invite_to_group', { p_gid: gid, p_acc: a });
+      if (r.error) { last = r.error; logErr('grpInvite', r.error); }
+      else { ok++; if (r.data) firePush('ginv', a, r.data); }
+    }
+    delete GRP.members[gid];
+    try { await grpMembers(gid, true); } catch (e) {}
+    toast(ok ? '已邀请 ' + ok + ' 人，等对方同意' : '邀请失败：' + grpErr(last));
+    if (S.conv === k) renderChatTitle();
+    sched('list');
+  });
+}
+let giKey = null;
+function closeGrpInfo() { $('gi-backdrop').classList.remove('active'); $('gi-sheet').classList.remove('active'); giKey = null; }
+/* ---- 群文件 ---- */
+const gfSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round((n || 0) / 1024)) + ' KB';
+function gfURL(path) { try { return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl); } catch (e) { return ''; } }
+async function loadGroupFiles(gid) {
+  const box = $('gi-files'); if (!box || !gid) return;
+  box.innerHTML = '<div class="gi-file-empty">读取中…</div>';
+  try {
+    const r = await sb.from('group_files').select('id,group_id,uploader,name,size,mime,path,created_at').eq('group_id', gid).order('created_at', { ascending: false }).limit(100);
+    if (r.error) { box.innerHTML = '<div class="gi-file-empty">读取失败</div>'; return; }
+    renderGroupFiles(gid, r.data || []);
+  } catch (e) { box.innerHTML = '<div class="gi-file-empty">读取失败</div>'; }
+}
+function renderGroupFiles(gid, list) {
+  const box = $('gi-files'); if (!box) return;
+  if (!list.length) { box.innerHTML = '<div class="gi-file-empty">还没有群文件</div>'; return; }
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const g = GRP.list.find(function (x) { return x.id === gid; });
+  const canAll = (mine && (mine.role === 'owner' || mine.role === 'admin')) || (g && g.owner_acc === ME());
+  box.innerHTML = list.map(function (f) {
+    const ext = (String(f.name || '').split('.').pop() || 'FILE').toUpperCase().slice(0, 4);
+    const canDel = f.uploader === ME() || canAll;
+    return '<div class="gi-file" data-id="' + esc(f.id) + '">' +
+      '<div class="gf-ic">' + esc(ext) + '</div>' +
+      '<div class="gf-main"><div class="gf-name">' + esc(f.name) + '</div><div class="gf-sub">' + gfSize(f.size) + ' · ' + esc(peerName(f.uploader)) + '</div></div>' +
+      '<a class="ie-mini" href="' + esc(gfURL(f.path)) + '" target="_blank" rel="noopener" download>下载</a>' +
+      (canDel ? '<button class="gf-del" type="button">删</button>' : '') + '</div>';
+  }).join('');
+  box.onclick = function (e) {
+    const del = e.target.closest('.gf-del'); if (!del) return;
+    e.preventDefault();
+    deleteGroupFile(gid, del.closest('.gi-file').dataset.id);
+  };
+}
+async function uploadGroupFile(gid, file) {
+  if (!file || !gid) return;
+  if (file.size > 50 * 1048576) { toast('文件最大 50MB'); return; }
+  toast('正在上传 ' + file.name + '…');
+  const ext = (String(file.name || '').match(/\.([a-z0-9]{1,6})$/i) || [])[1] || 'bin';
+  const path = ME() + '/gf_' + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext.toLowerCase();
+  const up = await sb.storage.from('chat-media').upload(path, file, { contentType: file.type || 'application/octet-stream', cacheControl: '31536000' });
+  if (up.error) { logErr('gf-up', up.error); toast('上传失败：' + (up.error.message || '请重试')); return; }
+  const r = await sb.from('group_files').insert({ group_id: gid, uploader: ME(), name: file.name || ('文件.' + ext), size: file.size, mime: file.type || '', path: path });
+  if (r.error) { logErr('gf-ins', r.error); toast('保存失败：' + (r.error.message || '请重试')); return; }
+  toast('已上传到群文件');
+  loadGroupFiles(gid);
+}
+function deleteGroupFile(gid, id) {
+  const box = $('gi-files'); const row = box && box.querySelector('.gi-file[data-id="' + id + '"]');
+  const nm = row && row.querySelector('.gf-name') ? row.querySelector('.gf-name').textContent : '这个文件';
+  openActs('删除“' + nm + '”？\n会从群文件里移除。', [
+    { label: '删除', danger: true, fn: async function () {
+      try {
+        const q = await sb.from('group_files').select('path').eq('id', id).maybeSingle();
+        const path = q && q.data && q.data.path;
+        const d = await sb.from('group_files').delete().eq('id', id);
+        if (d.error) throw d.error;
+        if (path) sb.storage.from('chat-media').remove([path]).catch(function () {});
+        toast('已删除'); loadGroupFiles(gid);
+      } catch (e) { toast('删除失败：' + ((e && e.message) || '请重试')); }
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
+async function grpInfo(key) {
+  const k = key || S.conv;
+  if (!isGroupKey(k)) return;
+  const gid = gidOf(k);
+  const cached = GRP.members[gid] || [];
+  openGrpInfo(k, cached, [], !cached.length);   // 先用缓存/占位打开，网络回来再补，不要等
+  let ms = [];
+  try { ms = await grpMembers(gid, true); } catch (e) { $('gi-sub').textContent = '读取成员失败，点群名重试'; toast('读取群成员失败：' + grpErr(e)); return; }
+  let pend = [];
+  try {
+    const p = await sb.from('group_invites').select('to_acc').eq('group_id', gid).eq('status', 'pending');
+    pend = (p && p.data ? p.data : []).map(function (x) { return peerName(x.to_acc); });
+  } catch (e) {}
+  let reqs = [];
+  try {
+    const r = await sb.rpc('group_join_requests', { p_gid: gid });
+    if (!r.error) reqs = Array.isArray(r.data) ? r.data : [];
+  } catch (e) {}
+  let ja = null;
+  try {
+    const r = await sb.from('chat_groups').select('join_approval').eq('id', gid).maybeSingle();
+    if (r && !r.error && r.data) ja = !!r.data.join_approval;
+    const g = grpOf(k); if (g && ja != null) g.join_approval = ja;
+  } catch (e) {}
+  if (reqs.length) {
+    GRP.reqSeen = GRP.reqSeen || {};
+    if (reqs.length > (GRP.reqSeen[gid] || 0)) SFX.notify();
+    GRP.reqSeen[gid] = reqs.length;
+  }
+  openGrpInfo(k, ms, pend, false, reqs, ja);
+}
+function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
+  raiseSheet('gi-sheet', 'gi-backdrop');
+  giKey = k;
+  const gid = gidOf(k), g = grpOf(k) || {}, owner = g.owner_acc === ME(), name = grpName(k);
+  const mine = (ms || []).find(function (m) { return m.account_id === ME(); });
+  const myRole = mine ? mine.role : (owner ? 'owner' : 'member');
+  const canManage = owner || myRole === 'admin';
+  $('gi-av').innerHTML = avatarHTML(name, g.avatar_url || '', false, k);
+  $('gi-name').textContent = name;
+  const bits = [(ms.length || 0) + ' 人'];
+  if (g.mute_all) bits.push('全员禁言');
+  if (owner) bits.push('我是群主'); else if (myRole === 'admin') bits.push('我是管理员');
+  $('gi-sub').textContent = loading ? '正在读取成员…' : bits.join(' · ');
+  const rank = m => m.role === 'owner' ? 0 : m.role === 'admin' ? 1 : 2;
+  const list = (ms || []).slice().sort(function (a, b) {
+    const d = rank(a) - rank(b); if (d) return d;
+    return String(peerName(a.account_id)).localeCompare(String(peerName(b.account_id)), 'zh');
+  });
+  giMembers = list;
+  const gs = $('gi-search'); if (gs) gs.value = '';
+  renderGiMembers('');
+  $('gi-pending').textContent = pend.length ? '邀请中：' + pend.slice(0, 30).join('、') + (pend.length > 30 ? ' 等 ' + pend.length + ' 人' : '') : '';
+  $('gi-leave').textContent = owner ? '解散群聊' : '退出群聊';
+  $('gi-approve-row').style.display = canManage ? '' : 'none';
+  $('gi-approve-toggle').classList.toggle('on', joinApproval == null ? !!g.join_approval : !!joinApproval);
+  const nt = (g.notice || '').trim();
+  $('gi-notice').innerHTML = '<div class="gi-note-t"><span>群公告</span>' + (canManage ? '<button type="button" id="gi-note-edit">' + (nt ? '修改' : '发布') + '</button>' : '') + '</div>' +
+    '<div class="gi-note-x"' + (nt ? '' : ' style="color:var(--muted)"') + '>' + (nt ? esc(nt) : '还没有群公告') + '</div>';
+  const rq = canManage ? (reqs || []) : [];
+  $('gi-requests').innerHTML = rq.length ? '<div class="section-title">待审批（' + rq.length + '）</div>' + rq.map(function (r) {
+    return '<div class="gi-req" data-id="' + esc(r.id) + '">' + avatarHTML(r.name || r.acc, '', false, r.acc) +
+      '<div class="gi-rn">' + esc(r.name || r.acc) + '</div>' +
+      '<button class="btn-ok" type="button" data-ok="1">同意</button><button class="btn-danger" type="button" data-no="1">拒绝</button></div>';
+  }).join('') : '';
+  $('gi-settings').style.display = (canManage || (mine && mine.title)) ? '' : 'none';
+  $('gi-backdrop').classList.add('active'); $('gi-sheet').classList.add('active');
+  try { loadGroupFiles(gid); } catch (e) {}
+}
+let giMembers = [];
+function giMemberHTML(m) {
+  const acc = m.account_id, isMe = acc === ME();
+  const role = m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : '';
+  const badge = isMe ? (role ? role + ' · 我' : '我') : role;
+  const title = (m.title && m.title_on) ? '<div class="gi-title">' + esc(m.title) + '</div>' : '';
+  const muted = (m.muted_until && Date.parse(m.muted_until) > now()) ? '<div class="gi-muted">禁言中</div>' : '';
+  return '<div class="gi-m" data-acc="' + esc(acc) + '" title="@' + esc(acc) + '">' + avatarHTML(nickOf(acc), avatarOf(acc), false, acc) +
+    '<div class="gi-mn">' + esc(peerName(acc)) + '</div>' + title + muted +
+    (badge ? '<div class="gi-owner">' + badge + '</div>' : '') + '</div>';
+}
+function renderGiMembers(q) {
+  const el = $('gi-members'); if (!el) return;
+  const s = String(q || '').trim().toLowerCase();
+  const list = !s ? giMembers : giMembers.filter(function (m) {
+    return String(peerName(m.account_id)).toLowerCase().indexOf(s) >= 0 || String(m.account_id).toLowerCase().indexOf(s) >= 0;
+  });
+  el.innerHTML = list.length ? list.map(giMemberHTML).join('') : '<div class="gi-empty">没有匹配的成员</div>';
+}
+async function grpKick(gid, acc) {
+  try {
+    const { error } = await sb.rpc('kick_group_member', { p_gid: gid, p_acc: acc });
+    if (error) throw error;
+    delete GRP.members[gid];
+    try { await grpMembers(gid, true); } catch (e) {}
+    grpLoad(true);
+    if (S.conv === 'g:' + gid) renderChatTitle();
+    sched('list'); sched('contacts');
+    await grpInfo('g:' + gid);
+    toast('已移出群聊');
+  } catch (e) { logErr('grpKick', e); toast('移出失败：' + grpErr(e)); }
+}
+function confirmGrpKick(gid, acc) {
+  openActs('把“' + peerName(acc) + '”移出群聊？\n移出后对方要重新被邀请才能进来。', [
+    { label: '移出群聊', danger: true, fn: function () { grpKick(gid, acc); } },
+    { label: '取消', fn: null }
+  ]);
+}
+function confirmGrpLeave(key) {
+  const k = key || S.conv;
+  if (!isGroupKey(k)) return;
+  const owner = (grpOf(k) || {}).owner_acc === ME();
+  openActs((owner ? '解散群聊？' : '退出群聊？') + '\n' +
+    (owner ? '群里的消息、成员和会话都会被删除，不能恢复。' : '退出后不再接收这个群的消息，要重新被邀请才能进来。'), [
+    { label: owner ? '解散群聊' : '退出群聊', danger: true, fn: function () { grpLeave(k); } },
+    { label: '取消', fn: null }
+  ]);
+}
+function groupMemberOf(gid, acc) {
+  return (GRP.members[gid] || []).find(function (m) { return m.account_id === acc; }) || null;
+}
+function grpRoleOf(gid, acc) {
+  const mine = groupMemberOf(gid, acc);
+  return mine ? mine.role : '';
+}
+function grpCanManage(gid) { return (grpOf('g:' + gid) || {}).owner_acc === ME() || grpRoleOf(gid, ME()) === 'admin'; }
+async function afterGroupChange(gid, msg) {
+  delete GRP.members[gid];
+  try { await grpMembers(gid, true); } catch (e) {}
+  try { await grpLoad(true); } catch (e) {}
+  if (S.conv === 'g:' + gid) { renderChatTitle(); applyMuteState(); }
+  sched('list'); sched('contacts');
+  if (giKey === 'g:' + gid) { try { await grpInfo('g:' + gid); } catch (e) {} }
+  if (msg) toast(msg);
+}
+async function setGroupAdmin(gid, acc, on) {
+  try { const { error } = await sb.rpc('set_group_admin', { p_gid: gid, p_acc: acc, p_on: !!on }); if (error) throw error; await afterGroupChange(gid, on ? '已设为管理员' : '已取消管理员'); }
+  catch (e) { logErr('setGroupAdmin', e); toast('操作失败：' + grpErr(e)); }
+}
+function editGroupName(gid) {
+  const g = grpOf('g:' + gid) || {};
+  openForm('修改群名称', [{ ph: '群名称（1-20 字）', val: g.name || '', max: 20 }], async ([v]) => {
+    v = String(v || '').trim(); if (!v) return '群名称不能为空'; if (v.length > 20) return '最多 20 个字';
+    const { error } = await sb.rpc('set_group_name', { p_gid: gid, p_name: v });
+    if (error) return '保存失败：' + grpErr(error);
+    await afterGroupChange(gid, '群名称已修改'); return null;
+  }, '保存');
+}
+async function toggleGroupMuteAll(gid) {
+  const g = grpOf('g:' + gid) || {};
+  try { const { error } = await sb.rpc('set_group_mute_all', { p_gid: gid, p_on: !g.mute_all }); if (error) throw error; await afterGroupChange(gid, g.mute_all ? '已关闭全员禁言' : '已开启全员禁言'); }
+  catch (e) { logErr('muteAll', e); toast('操作失败：' + grpErr(e)); }
+}
+function editMemberTitle(gid, acc) {
+  const m = (GRP.members[gid] || []).find(function (x) { return x.account_id === acc; });
+  openForm('设置头衔（对方可选择不戴）', [{ ph: '例如：摸鱼王（最多 12 字，留空删除）', val: (m && m.title) || '', max: 12 }], async ([v]) => {
+    v = String(v || '').trim(); if (v.length > 12) return '最多 12 个字';
+    const { error } = await sb.rpc('set_member_title', { p_gid: gid, p_acc: acc, p_title: v });
+    if (error) return '保存失败：' + grpErr(error);
+    await afterGroupChange(gid, v ? '头衔已设置' : '头衔已删除'); return null;
+  }, '保存');
+}
+function muteMember(gid, acc) {
+  const m = (GRP.members[gid] || []).find(function (x) { return x.account_id === acc; });
+  const until = m && m.muted_until ? Date.parse(m.muted_until) : 0;
+  const items = [
+    { label: '禁言 10 分钟', fn: () => doMute(gid, acc, 10) },
+    { label: '禁言 1 小时', fn: () => doMute(gid, acc, 60) },
+    { label: '禁言 1 天', fn: () => doMute(gid, acc, 1440) }
+  ];
+  if (until > now()) items.push({ label: '解除禁言', fn: () => doMute(gid, acc, 0) });
+  items.push({ label: '取消', fn: null });
+  openActs('禁言“' + peerName(acc) + '”', items);
+}
+async function doMute(gid, acc, mins) {
+  try { const { error } = await sb.rpc('set_group_member_mute', { p_gid: gid, p_acc: acc, p_minutes: mins }); if (error) throw error; await afterGroupChange(gid, mins ? '已禁言 ' + (mins >= 1440 ? '1 天' : mins + ' 分钟') : '已解除禁言'); }
+  catch (e) { logErr('muteMember', e); toast('操作失败：' + grpErr(e)); }
+}
+async function setMyTitleVisible(gid, on) {
+  try { const { error } = await sb.rpc('set_title_visible', { p_gid: gid, p_visible: !!on }); if (error) throw error; await afterGroupChange(gid, on ? '已戴上头衔' : '已收起头衔'); }
+  catch (e) { logErr('titleVisible', e); toast('操作失败：' + grpErr(e)); }
+}
+function transferOwner(gid) {
+  const ms = (GRP.members[gid] || []).filter(function (m) { return m.account_id !== ME(); });
+  if (!ms.length) { toast('群里还没有别的成员'); return; }
+  const items = ms.map(function (m) {
+    return { label: peerName(m.account_id), fn: function () { confirmTransfer(gid, m.account_id); } };
+  });
+  items.push({ label: '取消', fn: null });
+  openActs('转让群主给谁？', items);
+}
+function confirmTransfer(gid, acc) {
+  openActs('把群主转让给“' + peerName(acc) + '”？\n转让后你会变成管理员，不能再收回；确认要转让吗？', [
+    { label: '确认转让', danger: true, fn: async function () {
+      try { const { error } = await sb.rpc('transfer_group_owner', { p_gid: gid, p_acc: acc }); if (error) throw error; await afterGroupChange(gid, '群主已转让'); }
+      catch (e) { logErr('transfer', e); toast('转让失败：' + grpErr(e)); }
+    } },
+    { label: '取消', fn: null }
+  ]);
+}
+let groupIconGid = null;
+function openGroupSettings(gid) {
+  const g = grpOf('g:' + gid) || {}, owner = g.owner_acc === ME(), can = grpCanManage(gid);
+  const mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const items = [];
+  if (can) {
+    items.push({ label: '更换群图标', fn: function () { groupIconGid = gid; $('group-icon-input').click(); } });
+    items.push({ label: '修改群名称', fn: function () { editGroupName(gid); } });
+    items.push({ label: g.mute_all ? '关闭全员禁言' : '开启全员禁言', fn: function () { toggleGroupMuteAll(gid); } });
+  }
+  if (mine && mine.title) items.push({ label: mine.title_on ? '我的头衔：戴上（点一下收起）' : '我的头衔：已收起（点一下戴上）', fn: function () { setMyTitleVisible(gid, !mine.title_on); } });
+  if (owner) items.push({ label: '转让群主', fn: function () { transferOwner(gid); } });
+  if (!items.length) { toast('这里还没有可设置的'); return; }
+  items.push({ label: '取消', fn: null });
+  openActs('群设置', items);
+}
+async function uploadGroupIcon(gid, file) {
+  if (!file || !/^image\//.test(file.type)) { toast('请选择图片'); return; }
+  toast('正在上传群图标…');
+  const old = (grpOf('g:' + gid) || {}).avatar_url || '';
+  let blob = null;
+  try { blob = await squareJpeg(file, 400); } catch (e) { logErr('groupIcon', e); }
+  if (!blob) blob = file;
+  const path = ME() + '/g_' + gid + '_' + now() + '.jpg';
+  const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
+  if (up.error) throw up.error;
+  const url = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  const { error } = await sb.rpc('set_group_avatar', { p_gid: gid, p_url: url });
+  if (error) throw error;
+  if (old) {
+    const m = /\/chat-media\/([^?]+)/.exec(old);
+    const key = m ? decodeURIComponent(m[1]) : '';
+    if (key && key.indexOf(ME() + '/g_') === 0) sb.storage.from('chat-media').remove([key]).catch(function () {});
+  }
+  await afterGroupChange(gid, '群图标已更新');
+}
+function groupMuteState(gid) {
+  const g = grpOf('g:' + gid) || {}, mine = (GRP.members[gid] || []).find(function (m) { return m.account_id === ME(); });
+  const until = mine && mine.muted_until ? Date.parse(mine.muted_until) : 0;
+  const role = mine ? mine.role : '';
+  const muted = !!mine && (until > now() || (!!g.mute_all && role !== 'owner' && role !== 'admin'));
+  return { muted: muted, all: !!g.mute_all, until: until, role: role };
+}
+async function refreshMyMuteState(gid) {
+  if (!sb || !S.me || !gid) return;
+  try {
+    const [m, g] = await Promise.all([
+      sb.from('chat_group_members').select('role,title,title_on,muted_until').eq('group_id', gid).eq('account_id', ME()).maybeSingle(),
+      sb.from('chat_groups').select('mute_all').eq('id', gid).maybeSingle()
+    ]);
+    if (m.data) {
+      const arr = GRP.members[gid] || [];
+      const i = arr.findIndex(function (x) { return x.account_id === ME(); });
+      const row = Object.assign({ account_id: ME() }, arr[i] || {}, m.data);
+      if (i >= 0) arr[i] = row; else arr.push(row);
+      GRP.members[gid] = arr;
+    }
+    if (g.data) { const gr = grpOf('g:' + gid); if (gr) gr.mute_all = !!g.data.mute_all; }
+    if (S.conv === 'g:' + gid) applyMuteState();
+  } catch (e) { logErr('muteState', e); }
+}
+function applyMuteState() {
+  const tip = $('chat-mute-tip'), bar = $('chat-input-bar'), inp = $('chat-input'), send = $('btn-send');
+  if (!S.conv || !isGroupKey(S.conv)) {
+    if (tip) tip.classList.remove('show');
+    if (bar) bar.classList.remove('muted');
+    if (inp) { inp.disabled = false; inp.placeholder = '说点什么…'; }
+    if (send) send.disabled = false;
+    return;
+  }
+  const st = groupMuteState(gidOf(S.conv));
+  if (!st.muted) {
+    if (bar) bar.classList.remove('muted');
+    if (inp) { inp.disabled = false; inp.placeholder = '说点什么…'; }
+    if (send) send.disabled = false;
+    if (tip) {
+      if (st.all) { tip.textContent = '全员禁言中（群主/管理员仍可发言）'; tip.classList.add('show'); }
+      else tip.classList.remove('show');
+    }
+    return;
+  }
+  const d = new Date(st.until || now());
+  const when = (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  if (tip) { tip.textContent = st.all ? '全员禁言中，只有群主和管理员可以发言' : '你被禁言到 ' + when + '，暂时不能发言'; tip.classList.add('show'); }
+  if (bar) bar.classList.add('muted');
+  if (inp) { inp.disabled = true; inp.placeholder = '你已被禁言'; }
+  if (send) send.disabled = true;
+}
+function canSendHere() {
+  if (!S.conv || !isGroupKey(S.conv)) return true;
+  const st = groupMuteState(gidOf(S.conv));
+  if (!st.muted) return true;
+  toast(st.all ? '全员禁言中，只有群主/管理员可以发言' : '你已被禁言，暂时不能发言');
+  return false;
+}
+async function grpLeave(key) {
+  const k = key || S.conv;
+  if (!isGroupKey(k)) return;
+  const gid = gidOf(k), me = ME();
+  const g = grpOf(k) || {};
+  const owner = g.owner_acc === me;
+  try {
+    if (owner) {
+      const r1 = await sb.from('chat_group_members').delete().eq('group_id', gid);
+      if (r1.error) logErr('grpLeave-members', r1.error);
+      const r2 = await sb.from('chat_groups').delete().eq('id', gid);
+      if (r2.error) logErr('grpLeave-group', r2.error);
+    } else {
+      const r = await sb.from('chat_group_members').delete().eq('group_id', gid).eq('account_id', me);
+      if (r.error) throw r.error;
+    }
+    try { await sb.from('conversations').delete().eq('owner_acc', me).eq('conv_key', k); } catch (e) {}
+    S.convs = S.convs.filter(function (c) { return c.convKey !== k; });
+    GRP.list = GRP.list.filter(function (x) { return x.id !== gid; }); grpCacheSave();
+    delete GRP.members[gid]; delete GRP.count[gid]; delete GRP.cursor[k];
+    if (S.conv === k) closeChat();
+    sched('list'); updateTitle();
+    toast(owner ? '群聊已解散' : '已退出群聊');
+  } catch (e) { logErr('grpLeave', e); toast('操作失败：' + grpErr(e)); }
+}
+async function grpPoll() {
+  if (!sb || !S.me || document.hidden) return;
+  const keys = S.convs.filter(function (c) { return isGroupKey(c.convKey); }).map(function (c) { return c.convKey; }).slice(0, 50);
+  if (!keys.length) return;
+  keys.forEach(function (k) {
+    if (!GRP.cursor[k]) { const c = convOf(k); GRP.cursor[k] = Date.parse(c && c.last_ts || 0) || (now() - 60000); }
+  });
+  let since = 0;
+  keys.forEach(function (k) { const v = GRP.cursor[k]; if (!since || v < since) since = v; });
+  try {
+    const { data, error } = await sb.from('messages').select('*')
+      .in('conv_key', keys).gt('created_at', new Date(since - 5000).toISOString())
+      .order('created_at', { ascending: true }).limit(200);
+    if (error) throw error;
+    let fresh = 0;
+    (data || []).forEach(function (r) {
+      const m = rowToMsg(r), t = Date.parse(m.created_at) || 0;
+      if (GRP.done.has(m.id)) return;
+      GRP.done.add(m.id); if (GRP.done.size > 1600) GRP.done = new Set(Array.from(GRP.done).slice(-800));
+      const cur = GRP.cursor[m.conv] || 0;
+      if (t && t <= cur) return;                          // 打开 App 前就有的消息：不当作新消息
+      if (t > cur) GRP.cursor[m.conv] = t;
+      if (m.from_acc === ME()) { if (S.conv === m.conv && !S.msgs.some(function (x) { return x.id === m.id; })) upsertMsg(m); return; }
+      if (S.conv === m.conv && S.msgs.some(function (x) { return x.id === m.id; })) return;
+      fresh++;
+      onIncoming(m, true);                                // 未读数交给数据库的会话行，避免重复 +1
+    });
+    if (fresh) resyncSoon();
+  } catch (e) { logErr('grpPoll', e); }
+}
