@@ -1,5 +1,4 @@
-<!-- Chatter 前端 · 06-登录与账号 · 原文件第 3984-4356 行 -->
-<!-- 这一段负责：登录/注册/启动、草稿、弹窗、头像昵称密码、聊天背景、错误上报 -->
+<!-- Chatter 前端 · 06-登录与账号 · 原文件第 4054-4427 行 · 当前线上版本 -->
 /* ================= 登录 / 启动 ================= */
 async function start(user) {
   S.started = true; S.uid = user.id;
@@ -55,6 +54,7 @@ function draftSave(conv, text) {
 let fsOk = null, actItems = [], sheetZ = 2700;
 function raiseSheet(sheetId, backdropId) {
   sheetZ += 20;
+  if (sheetZ > 2500) sheetZ = 500;   // 封顶：始终低于通话界面（3000），避免开太多次后菜单盖住来电
   const b = document.getElementById(backdropId), s = document.getElementById(sheetId);
   if (b) b.style.zIndex = sheetZ;
   if (s) s.style.zIndex = sheetZ + 1;
