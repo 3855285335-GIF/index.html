@@ -1,0 +1,30 @@
+<!-- Chatter 前端 · 14-启动 · 原文件第 7200-7227 行 -->
+<!-- 这一段负责：启动流程、定时器、全局初始化 -->
+/* ================= 启动 ================= */
+function boot() {
+  ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
+  ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
+  ready.catch(e => {
+    hideSplash();
+    logErr('lib', e);
+    var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
+  });
+  bindSW(); bindUI(); bindViewport(); setupManifest();
+  try {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'))
+      window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  } catch (e) {}
+  const uid = peekUid();
+  if (uid) {
+    const c = LS.get(ck(uid));
+    if (c && c.me) { S.uid = uid; hydrate(c); }
+    showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
+  } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
+}
+if (window.__TEST__) window.__T = { toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+boot();
+})();
+
+</script>
+</body>
+</html>
