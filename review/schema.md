@@ -1,6 +1,6 @@
-# 线上数据库现状（自动导出，2026-11-12）
+# 线上数据库现状（自动导出，2026-11-13）
 
-Supabase 项目：uaoiqbxptnbrvkzjwguc（Postgres 15）
+项目 uaoiqbxptnbrvkzjwguc
 
 ## 表结构
 ```json
@@ -80,7 +80,7 @@ HTTP 201
   },
   {
     "table_name": "profiles",
-    "columns": "id uuid, account_id text, nickname text, avatar_url text, signature text, created_at timestamp with time zone, bg_url text, moments_seen_at timestamp with time zone, cover_url text"
+    "columns": "id uuid, account_id text, nickname text, avatar_url text, signature text, created_at timestamp with time zone, bg_url text, moments_seen_at timestamp with time zone, cover_url text, mutes jsonb"
   },
   {
     "table_name": "push_keys",
@@ -106,7 +106,7 @@ HTTP 201
 
 ```
 
-## RLS 策略（关键：所有表的行级权限）
+## RLS 策略
 ```json
 HTTP 201
 [
@@ -199,7 +199,7 @@ HTTP 201
     "policyname": "conv_insert",
     "cmd": "INSERT",
     "qual": null,
-    "with_check": "(owner_acc = my_acc())"
+    "with_check": "((owner_acc = my_acc()) AND ((conv_key = conv_key_of(owner_acc, peer_acc)) OR ((\"left\"(conv_key, 2) = 'g:'::text) AND (conv_key = peer_acc) AND is_group_member((SUBSTRING(conv_key FROM 3))::uuid, my_acc()))))"
   },
   {
     "tablename": "conversations",
@@ -213,7 +213,7 @@ HTTP 201
     "policyname": "conv_update",
     "cmd": "UPDATE",
     "qual": "(owner_acc = my_acc())",
-    "with_check": "(owner_acc = my_acc())"
+    "with_check": "((owner_acc = my_acc()) AND ((conv_key = conv_key_of(owner_acc, peer_acc)) OR ((\"left\"(conv_key, 2) = 'g:'::text) AND (conv_key = peer_acc) AND is_group_member((SUBSTRING(conv_key FROM 3))::uuid, my_acc()))))"
   },
   {
     "tablename": "friend_requests",
@@ -443,7 +443,7 @@ HTTP 201
 
 ```
 
-## 函数（含 security definer 标记）
+## 函数
 ```json
 HTTP 201
 [
@@ -553,6 +553,11 @@ HTTP 201
     "security_definer": true
   },
   {
+    "proname": "guard_all_mention",
+    "args": "",
+    "security_definer": true
+  },
+  {
     "proname": "handle_new_user",
     "args": "",
     "security_definer": true
@@ -639,6 +644,11 @@ HTTP 201
   },
   {
     "proname": "push_job",
+    "args": "p_uid uuid, p_kind text, p_ref text, p_to text",
+    "security_definer": true
+  },
+  {
+    "proname": "push_job_base",
     "args": "p_uid uuid, p_kind text, p_ref text, p_to text",
     "security_definer": true
   },
@@ -797,6 +807,12 @@ HTTP 201
     "trigger_name": "trg_group_delete_cleanup",
     "action_timing": "AFTER",
     "event_manipulation": "DELETE"
+  },
+  {
+    "tbl": "messages",
+    "trigger_name": "trg_guard_all_mention",
+    "action_timing": "BEFORE",
+    "event_manipulation": "INSERT"
   },
   {
     "tbl": "messages",
