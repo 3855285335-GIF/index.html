@@ -841,6 +841,7 @@
    来源包含 esm.sh（上一版就是用它，你的网络能通），失败原因会记录并显示在登录框下面。 */
 (function () {
   var VER = '2.45.4', KEY = 'ch2lib3:' + VER, ERR = window.__libErr = [];
+  var isSafariLike = /iP(hone|ad|od)|Macintosh/.test(navigator.userAgent) && !/Chrome|CriOS|Edg|OPR/.test(navigator.userAgent);
   var TXT = [
     'https://3855285335-gif.github.io/index.html/vendor/supabase-' + VER + '.js',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@' + VER + '/dist/umd/supabase.js',
@@ -904,7 +905,7 @@
   var won = false;
   function race() {
     var jobs = [];
-    TXT.forEach(function (u, i) { jobs.push({ u: u, d: i * 120, f: function (x) { return fetchOne(x).then(function (r) { if (won) throw new Error('skip'); run(r.text); return r; }); } }); });
+    if (!isSafariLike) TXT.forEach(function (u, i) { jobs.push({ u: u, d: i * 120, f: function (x) { return fetchOne(x).then(function (r) { if (won) throw new Error('skip'); run(r.text); return r; }); } }); });   // iOS 不内联执行：webpack 的 publicPath 会崩
     TXT.slice(0, 5).forEach(function (u, i) { jobs.push({ u: u, d: 200 + i * 300, f: scriptOne }); });
     ESM.forEach(function (u, i) { jobs.push({ u: u, d: 300 + i * 400, f: importOne }); });
     return new Promise(function (res, rej) {
@@ -921,7 +922,7 @@
     });
   }
   var cached = null; try { cached = localStorage.getItem(KEY); } catch (e) {}
-  if (cached) {
+  if (cached && !isSafariLike) {
     try { run(cached); window.__lib = Promise.resolve(); return; } catch (e) { try { localStorage.removeItem(KEY); } catch (x) {} }
   }
   window.__lib = race().then(function (r) {
