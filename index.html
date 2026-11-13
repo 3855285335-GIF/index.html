@@ -2046,7 +2046,7 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': body = '<div class="bubble img"><img src="' + esc(disp(m.body)) + '" alt="" decoding="async">' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; break;
+    case 'image': { const _b = String(m.body || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(_b) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
@@ -2240,7 +2240,7 @@ async function deliver(m, silent) {
     if (m._blob) {
       const old = m.body, url = await upload(m._blob, m._ext, m._ct, '', '', m._blob.size > 300 * 1024 ? f => upPct(m, f) : null);
       setTimeout(() => checkStorage(), 1500);
-      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : url;
+      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : (m.type === 'image' && m._w && m._h ? url + '#w=' + m._w + '&h=' + m._h : url);
       if (m._poster) {   // 视频封面：和视频同名加 .jpg，传不上也不影响视频本身
         const vp = /\/chat-media\/([^?#]+)/.exec(url);
         if (vp) { try { await upload(m._poster, 'jpg', 'image/jpeg', '', decodeURIComponent(vp[1]) + '.jpg'); } catch (x) { logErr('poster', x); } }
@@ -2742,8 +2742,10 @@ async function sendImageNow(file, orig) {
   if (!file || !S.conv) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
   const out = orig ? file : await compressImage(file);
+  let _w = 0, _h = 0;
+  try { const bm = await createImageBitmap(out); _w = bm.width; _h = bm.height; if (bm.close) bm.close(); } catch (e) {}
   const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
-  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
+  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type, _w: _w, _h: _h }));
 }
 let IPV = { file: null, orig: false, resolve: null, url: '' };
 function openImgPreview(file) {
@@ -5598,26 +5600,6 @@ function cycleTheme() {
   LS.set('ch2theme', next); applyTheme();
 }
 applyTheme();
-function exportChat() {
-  if (!S.conv) { toast('先打开一个聊天再导出'); return; }
-  const other = peerName(peerOf(S.conv, ME()));
-  const kind = { image: '图片', video: '视频', voice: '语音', file: '文件', sticker: '表情', call: '通话', recalled: '撤回' };
-  const out = ['Chatter 聊天记录', '对话：' + other, '导出时间：' + new Date().toLocaleString(), '--------------------------------'];
-  S.msgs.filter(function (m) { return m && m._st !== 'sending'; }).forEach(function (m) {
-    const who = m.from_acc === ME() ? '我' : other;
-    const t = m.type === 'text' ? parseQ(m.body).text : ('[' + (kind[m.type] || m.type) + ']');
-    out.push('[' + new Date(m.created_at).toLocaleString() + '] ' + who + '：' + t);
-  });
-  try {
-    const blob = new Blob([out.join('\r\n')], { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'chat-' + other + '-' + Date.now() + '.txt';
-    document.body.appendChild(a); a.click();
-    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 3000);
-    toast('已导出 ' + (out.length - 4) + ' 条');
-  } catch (e) { logErr('export', e); toast('导出失败'); }
-}
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
@@ -6040,6 +6022,7 @@ function openVideoPreview(file, pr) {
   return new Promise(function (resolve) {
     VPV.file = file; VPV.resolve = resolve; VPV.poster = (pr && pr.poster) || null; VPV.cover = null;
     VPV.compress = false; VPV.busy = false; VPV.rec = null; VPV.start = 0; VPV.end = 0;
+    try { const _ct = !!(document.createElement('video').captureStream); if (!_ct) { ['vpv-start','vpv-end','vpv-compress'].forEach(function (id) { const el = document.getElementById(id); if (el) { el.disabled = true; el.style.opacity = '.35'; } }); toast('这台设备不支持裁剪/压缩，可直接发送原视频'); } } catch (e) {}
     try { if (VPV.url) URL.revokeObjectURL(VPV.url); } catch (e) {}
     VPV.url = URL.createObjectURL(file);
     const v = $('vpv-video'); v.src = VPV.url; try { v.load(); } catch (e) {}
