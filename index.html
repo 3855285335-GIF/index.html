@@ -215,6 +215,7 @@
   .ie-zoom { position: absolute; right: 8px; top: 8px; display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,.45); border-radius: 10px; padding: 3px 6px; z-index: 5; }
   .ie-zoom button { width: 26px; height: 26px; border-radius: 8px; border: 0; background: rgba(255,255,255,.16); color: #fff; font-size: 16px; line-height: 1; }
   .ie-zoom span { color: #fff; font-size: 11px; min-width: 34px; text-align: center; }
+  .abbr { padding: 6px 14px 2px; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .5px; }
   #ie-canvas { max-width: 100%; max-height: 44vh; display: block; border-radius: 8px; }
   #ie-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border-radius: 8px; }
   .ie-hint { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); background: rgba(0,0,0,.55); color: #fff; font-size: 11.5px; padding: 4px 10px; border-radius: 10px; display: none; line-height: 1.4; white-space: nowrap; }
@@ -1778,13 +1779,27 @@ function renderContacts() {
   const el = $('friend-list');
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
-  else el.innerHTML = S.friends.slice().sort(function (a, b) {
-    const ta = (S.frAt && S.frAt[a]) || 0, tb = (S.frAt && S.frAt[b]) || 0;
-    if (ta !== tb) return tb - ta;                       // 新加的好友排最上面
-    return String(peerName(a)).localeCompare(String(peerName(b)), 'zh');
-  }).map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
-    '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
-    '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>').join('');
+  else {
+    const PY = [['A', '阿'], ['B', '八'], ['C', '嚓'], ['D', '搭'], ['E', '蛾'], ['F', '发'], ['G', '噶'], ['H', '哈'], ['J', '击'], ['K', '喀'], ['L', '垃'], ['M', '妈'], ['N', '拿'], ['O', '哦'], ['P', '啪'], ['Q', '期'], ['R', '然'], ['S', '撒'], ['T', '塌'], ['W', '挖'], ['X', '昔'], ['Y', '压'], ['Z', '匝']];
+    const initialOf = function (name) {
+      const s = String(name || '').trim(); if (!s) return '#';
+      const c = s[0];
+      if (/[a-zA-Z]/.test(c)) return c.toUpperCase();
+      if (!/[\u4e00-\u9fa5]/.test(c)) return '#';
+      for (let i = PY.length - 1; i >= 0; i--) { if (s.localeCompare(PY[i][1], 'zh-Hans-CN') >= 0) return PY[i][0]; }
+      return '#';
+    };
+    const sorted = S.friends.slice().sort(function (a, b) { return String(peerName(a)).localeCompare(String(peerName(b)), 'zh-Hans-CN'); });
+    const groups = {}; sorted.forEach(function (a) { const k = initialOf(peerName(a)); (groups[k] = groups[k] || []).push(a); });
+    const order = Object.keys(groups).sort(function (a, b) { return a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b); });
+    el.innerHTML = order.map(function (k) {
+      return '<div class="abbr">' + k + '</div>' + groups[k].map(function (a) {
+        return '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
+          '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
+          '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>';
+      }).join('');
+    }).join('');
+  }
   renderGroupContacts();
 }
 function renderGroupContacts() {
