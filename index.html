@@ -6872,7 +6872,10 @@ function bindViewport() {
   };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) resumeFix(); });
-  window.addEventListener('pageshow', resumeFix); window.addEventListener('focus', resumeFix);
+  window.addEventListener('pageshow', resumeFix);
+  // 回到前台/切回应用时把聊天背景重新贴一次，避免偶发丢失
+  window.addEventListener('pageshow', function () { try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {} });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {} } }); window.addEventListener('focus', resumeFix);
   apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
