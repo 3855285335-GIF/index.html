@@ -16,7 +16,13 @@
     if (v === 'light' || v === 'dark') document.documentElement.setAttribute('data-theme', v);
     var b = localStorage.getItem('ch2bubble');
     if (b) { try { b = JSON.parse(b); } catch (e) {} }
-    var map = { violet: '#6c5ce7', blue: '#3a74f5', green: '#2fa84a', orange: '#ff6f3c', pink: '#ff3d77' };
+    var map = {
+      violet: 'linear-gradient(135deg,#6c5ce7 0%,#8b5cf6 55%,#c94fa8 100%)',
+      blue: 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)',
+      green: 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)',
+      orange: 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)',
+      pink: 'linear-gradient(135deg,#e11d48 0%,#f43f5e 55%,#fb7185 100%)'
+    };
     if (map[b]) document.documentElement.style.setProperty('--mine', map[b]);
   } catch (e) {}
 })();
@@ -1031,7 +1037,7 @@
           <div class="me-sec">
             <div class="section-title">聊天设置</div>
             <div class="btns me-grid">
-              <button id="btn-theme" type="button">🎨 主题：跟随系统</button>
+              <button id="btn-theme" type="button">🎨 主题：跟随系统</button><button id="btn-bubble" type="button">💬 气泡：紫</button>
               <button id="btn-bg" type="button">🖼 聊天背景</button>
               <button id="btn-bg-clear" type="button">↩️ 默认背景</button>
               <button id="btn-sound" type="button">🔔 音效：开</button>
@@ -1977,6 +1983,7 @@ function applyBoot(b) {
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
+  setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -7173,6 +7180,25 @@ function bindUI() {
     toast('这就是新加的进房 / 点赞 / 同意 / 结束音');
   };
   $('btn-theme').onclick = cycleTheme;
+(function () {
+  const b = $('btn-bubble'); if (!b) return;
+  const SK = [['violet', '紫'], ['blue', '蓝'], ['green', '绿'], ['orange', '橙'], ['pink', '粉']];
+  const MAP = {
+    violet: 'linear-gradient(135deg,#6c5ce7 0%,#8b5cf6 55%,#c94fa8 100%)',
+    blue: 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)',
+    green: 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)',
+    orange: 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)',
+    pink: 'linear-gradient(135deg,#e11d48 0%,#f43f5e 55%,#fb7185 100%)'
+  };
+  let i = SK.findIndex(function (x) { return x[0] === (LS.get('ch2bubble', 'violet') || 'violet'); }); if (i < 0) i = 0;
+  b.textContent = '💬 气泡：' + SK[i][1];
+  b.onclick = function () {
+    i = (i + 1) % SK.length; const k = SK[i][0];
+    LS.set('ch2bubble', k);
+    try { document.documentElement.style.setProperty('--mine', MAP[k]); } catch (e) {}
+    b.textContent = '💬 气泡：' + SK[i][1]; toast('气泡颜色：' + SK[i][1]);
+  };
+})();
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;
   $('mo-cover-btn').onclick = function () { const i = $('cover-input'); i.value = ''; i.click(); };
