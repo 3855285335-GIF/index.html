@@ -6970,11 +6970,11 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  try { if (!history.state || !history.state.app) history.pushState({ app: 1 }, '', location.href); } catch (e) {}
+  try { if (!history.state || !history.state.app) { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } } catch (e) {}
   window.addEventListener('popstate', () => {
-    if (S.call) { try { history.pushState({ app: 1 }, '', location.href); } catch (e) {} return; }
+    if (S.call) { try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {} return; }
     if (S.conv) { S.hist = false; closeChat(); return; }
-    try { history.pushState({ app: 1 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
+    try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
   });
   const box = $('chat-messages');
   box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
