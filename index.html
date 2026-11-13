@@ -582,6 +582,8 @@
   .gi-acts .gi-danger { color: #fff; background: var(--danger); }
   #multi-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2600; display: none; align-items: center; gap: 10px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(0,0,0,.12); }
   #multi-bar.active { display: flex; }
+  body.multi #chat-input-bar { display: none; }
+  body.multi #chat-messages { padding-bottom: 74px; }
   #multi-count { flex: 1; font-size: 14px; color: var(--muted); }
   #multi-bar button { padding: 8px 14px; border-radius: 12px; background: var(--surface2); color: var(--ink); font-size: 14px; }
   #multi-del { background: var(--danger) !important; color: #fff !important; }
@@ -6829,7 +6831,7 @@ function bindViewport() {
     document.body.classList.toggle('kb', kb);
     if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
   };
-  viewportApply = apply;
+  viewportApply = apply; window.__vvApply = apply;
   const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
   // 从后台回来：iOS 有时会保留“键盘打开时的高度”，聊天页只占半屏、输入栏悬在中间
   const resumeFix = () => {
@@ -7049,6 +7051,9 @@ function bindUI() {
   sendBtn.addEventListener('touchend', e => { e.preventDefault(); sendText(); }, { passive: false });
   sendBtn.addEventListener('click', e => { e.preventDefault(); sendText(); });
   input.addEventListener('input', chatGrow);
+  // 输入法收起/弹出后重新贴合可视区，避免聊天页停在半屏、下面留白
+  input.addEventListener('focus', function () { [0, 150, 400, 800].forEach(function (ms) { setTimeout(function () { try { if (window.__vvApply) window.__vvApply(); } catch (e) {} }, ms); }); });
+  input.addEventListener('blur', function () { [0, 150, 400, 800].forEach(function (ms) { setTimeout(function () { try { if (window.__vvApply) window.__vvApply(); } catch (e) {} }, ms); }); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } });
   input.addEventListener('focus', () => $('emoji-panel').classList.remove('active'));
   input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); mentionInput(); });
