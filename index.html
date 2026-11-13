@@ -211,6 +211,10 @@
   .vis-empty { padding: 14px 4px; color: var(--muted); font-size: 13px; }
   .ie-stage { display: flex; align-items: center; justify-content: center; padding: 4px; background: #000; border-radius: 14px; margin: 0 12px 8px; min-height: 160px; }
   .ie-wrap { position: relative; display: inline-block; line-height: 0; touch-action: none; max-width: 100%; }
+  .ie-stage { position: relative; overflow: hidden; }
+  .ie-zoom { position: absolute; right: 8px; top: 8px; display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,.45); border-radius: 10px; padding: 3px 6px; z-index: 5; }
+  .ie-zoom button { width: 26px; height: 26px; border-radius: 8px; border: 0; background: rgba(255,255,255,.16); color: #fff; font-size: 16px; line-height: 1; }
+  .ie-zoom span { color: #fff; font-size: 11px; min-width: 34px; text-align: center; }
   #ie-canvas { max-width: 100%; max-height: 44vh; display: block; border-radius: 8px; }
   #ie-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border-radius: 8px; }
   .ie-hint { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); background: rgba(0,0,0,.55); color: #fff; font-size: 11.5px; padding: 4px 10px; border-radius: 10px; display: none; line-height: 1.4; white-space: nowrap; }
@@ -1204,6 +1208,7 @@
       <canvas id="ie-overlay"></canvas>
       <div class="ie-hint" id="ie-hint">拖边角调整</div>
     </div>
+    <div class="ie-zoom"><button id="ie-zoom-out" type="button" aria-label="缩小">−</button><span id="ie-zoom-v">100%</span><button id="ie-zoom-in" type="button" aria-label="放大">＋</button></div>
   </div>
   <div class="ie-tabs">
     <button class="ie-tab on" data-t="crop" type="button">裁剪</button>
@@ -2438,7 +2443,7 @@ function imgEditOn() { try { return LS.get('ch2imgedit', true) !== false; } catc
 function ieCanvas() { return $('ie-canvas'); }
 function ieOverlay() { return $('ie-overlay'); }
 function ieWrap() { return $('ie-wrap'); }
-function ieScale() { const cv = ieCanvas(), w = ieWrap().clientWidth || 1; return cv.width / w; }
+function ieScale() { const cv = ieCanvas(), r = ieWrap().getBoundingClientRect(), w = r.width || 1; return cv.width / w; }
 
 function iePushHist() {
   try {
@@ -2467,11 +2472,22 @@ function ieShowHint() {
 }
 function ieLayout() {
   const cv = ieCanvas(), ov = ieOverlay(), wrap = ieWrap(); if (!cv || !ov || !wrap) return;
-  const w = wrap.clientWidth || 0, h = wrap.clientHeight || 0;
+  const r = wrap.getBoundingClientRect(), w = r.width || 0, h = r.height || 0;
   if (!w || !h) return;
   ov.width = w; ov.height = h;
   ieDrawOverlay();
   ieShowHint();
+}
+let IEZOOM = 1;
+function ieZoomApply() {
+  const w = ieWrap(); if (!w) return;
+  w.style.zoom = IEZOOM;
+  const v = $('ie-zoom-v'); if (v) v.textContent = Math.round(IEZOOM * 100) + '%';
+  ieLayout();
+}
+function ieZoomBy(d) {
+  IEZOOM = Math.max(0.5, Math.min(3, Math.round((IEZOOM + d) * 100) / 100));
+  ieZoomApply();
 }
 function ieHandles(s) {
   return [
@@ -2548,7 +2564,7 @@ function openImgEditor(file) {
       raiseSheet('imgedit-sheet', 'imgedit-backdrop');
       $('imgedit-backdrop').classList.add('active'); $('imgedit-sheet').classList.add('active');
       paintIeColors(); ieSetTool('crop');
-      setTimeout(ieLayout, 40);
+      setTimeout(function () { IEZOOM = 1; ieZoomApply(); }, 40);
     };
     if (window.createImageBitmap) {
       createImageBitmap(file).then(done, function () {
@@ -7175,6 +7191,16 @@ if ($('moment-priv')) { $('moment-priv').onclick = function () { MO.priv = !MO.p
   $('ie-crop-reset').onclick = function () { IE.sel = null; ieDrawOverlay(); ieLayout(); };
   $('ie-undo').onclick = ieUndo;
   $('ie-cancel').onclick = ieClose;
+  if ($('ie-zoom-in')) $('ie-zoom-in').onclick = function () { ieZoomBy(0.25); };
+  if ($('ie-zoom-out')) $('ie-zoom-out').onclick = function () { ieZoomBy(-0.25); };
+  (function () {
+    const st = document.querySelector('.ie-stage');
+    if (!st) return;
+    st.addEventListener('wheel', function (e) {
+      if (!document.getElementById('imgedit-sheet').classList.contains('active')) return;
+      e.preventDefault(); ieZoomBy(e.deltaY < 0 ? 0.25 : -0.25);
+    }, { passive: false });
+  })();
 $('vpv-cancel').onclick = function () { closeVideoPreview(null); };
 $('vpv-backdrop').onclick = function () { if (!VPV.busy) closeVideoPreview(null); };
 $('vpv-send').onclick = function () { vpvSendNow(); };
