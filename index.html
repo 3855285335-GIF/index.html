@@ -446,7 +446,7 @@
   #btn-audio-toggle.audio-mode .i-kbd { display: block; }
   #btn-audio-toggle.audio-mode .i-mic { display: none; }
   #chat-input-wrapper { flex: 1; min-width: 0; height: 42px; margin: 0 4px; }
-  #chat-input { width: 100%; height: 44px; padding: 8px 16px; border-radius: 22px; background: var(--surface); border: 1.5px solid var(--line); font-size: 17px; line-height: 22px; }
+  #chat-input { width: 100%; height: 44px; min-height: 44px; max-height: 132px; padding: 10px 16px; border-radius: 22px; background: var(--surface); border: 1.5px solid var(--line); font-size: 17px; line-height: 22px; resize: none; overflow-y: auto; }
   #btn-audio { display: none; width: 100%; height: 42px; background: var(--surface); border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 21px; text-align: center; line-height: 39px; font-size: 15px; font-weight: 600; color: var(--accent); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: pointer; }
   #btn-audio:active { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
   #btn-send { width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; padding: 0; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(232,80,140,.4); }
@@ -1111,7 +1111,7 @@
       <button id="btn-img" type="button" class="icon-btn" title="发送图片"><svg class="ic" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/></svg></button>
       <button id="btn-audio-toggle" type="button" class="icon-btn" title="切换语音"><svg class="ic i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg><svg class="ic i-kbd" viewBox="0 0 24 24"><rect x="3" y="6.5" width="18" height="11" rx="3"/><path d="M7 10.5h.01M10.5 10.5h.01M14 10.5h.01M17 10.5h.01M8 14h8"/></svg></button>
       <div id="chat-input-wrapper">
-        <input type="text" id="chat-input" placeholder="说点什么…" autocomplete="off" enterkeyhint="send">
+        <textarea id="chat-input" rows="1" placeholder="说点什么…" autocomplete="off" enterkeyhint="send"></textarea>
         <div id="btn-audio" role="button">按住 说话</div>
       </div>
       <button id="btn-send" type="button" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5.5M6 11.5l6-6 6 6"/></svg></button>
@@ -2330,11 +2330,17 @@ function pickMention(acc, name) {
   pendingMentions.push({ acc: acc, name: name });
   closeMention(); try { inp.focus(); } catch (e) {}
 }
+function chatGrow() {
+  const i = $('chat-input'); if (!i) return;
+  i.style.height = 'auto';
+  i.style.height = Math.min(132, Math.max(44, i.scrollHeight)) + 'px';
+}
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
   if (!canSendHere()) return;
   input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
+  requestAnimationFrame(chatGrow);
   let body = v.replace(/\u2063/g, '');
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
@@ -2830,6 +2836,7 @@ async function openConv(key, peer) {
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  requestAnimationFrame(chatGrow);
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
@@ -5963,6 +5970,7 @@ function stkSuggest(v) {
 function hideSuggest() { const el = $('stk-suggest'); if (el.classList.contains('active')) { el.classList.remove('active'); el.innerHTML = ''; } }
 function sendSuggest(b) {
   const input = $('chat-input'); input.value = ''; draftSave(S.conv, ''); hideSuggest(); sendSticker(b);
+  requestAnimationFrame(chatGrow);
 }
 
 /* ---- 发视频 / 发文件（原文件上传，不压缩） ---- */
@@ -7024,6 +7032,7 @@ function bindUI() {
   sendBtn.addEventListener('touchstart', e => { e.preventDefault(); }, { passive: false });
   sendBtn.addEventListener('touchend', e => { e.preventDefault(); sendText(); }, { passive: false });
   sendBtn.addEventListener('click', e => { e.preventDefault(); sendText(); });
+  input.addEventListener('input', chatGrow);
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } });
   input.addEventListener('focus', () => $('emoji-panel').classList.remove('active'));
   input.addEventListener('input', () => { if (input.value) sendTyping(); draftSave(S.conv, input.value); stkSuggest(input.value); mentionInput(); });
