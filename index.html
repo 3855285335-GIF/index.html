@@ -100,7 +100,7 @@
   #splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
   .sp-stage { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; padding: 24px; text-align: center; }
   .sp-art { width: min(56vw, 190px); height: min(56vw, 190px); position: relative; animation: spFloat 4.5s ease-in-out infinite; }
-  .sp-logo { display: block; width: 100%; height: 100%; border-radius: 26%; box-shadow: 0 22px 55px rgba(91,59,216,.42), inset 0 0 0 1px rgba(255,255,255,.08); }
+  .sp-logo { display: block; width: 100%; height: 100%; border-radius: 26%; box-shadow: none; }
   .sp-art::before { content: ""; position: absolute; inset: -16px; border-radius: 50%; border: 1px dashed rgba(255,255,255,.22); animation: spOrbit 30s linear infinite; }
   .sp-spark { position: absolute; width: 5px; height: 5px; background: #fff; transform: rotate(45deg); opacity: .7; animation: spTwinkle 3.2s ease-in-out infinite; }
   .sp-spark.s1 { right: 6%; top: 6%; }
@@ -932,17 +932,11 @@
 </script>
 </head>
 <body>
-
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="logo" viewBox="0 0 512 512"><rect width="512" height="512" rx="115" fill="#5B3BD8"/><g transform="translate(256 256) scale(1.0) translate(-256 -256)">
-<g fill="#fff"><rect x="96" y="120" width="320" height="236" rx="96"/><path d="M158 340 L132 416 L236 350 Z"/></g>
-<circle cx="180" cy="238" r="20" fill="#6C4DF0" fill-opacity=".45"/><circle cx="256" cy="238" r="27" fill="#6C4DF0" fill-opacity=".75"/><circle cx="342" cy="238" r="35" fill="#FF4F8B"/>
-</g></symbol></svg>
-
 <div id="splash" role="status" aria-label="Chatter 正在打开">
   <div class="sp-stage">
     <div class="sp-art">
       <svg class="sp-logo" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="115" fill="#5B3BD8"/><rect x="96" y="120" width="320" height="236" rx="96" fill="#fff"/><path d="M158 340 L132 416 L236 350 Z" fill="#fff"/><circle cx="180" cy="238" r="20" fill="#6C4DF0" fill-opacity=".45"/><circle cx="256" cy="238" r="27" fill="#6C4DF0" fill-opacity=".75"/><circle cx="342" cy="238" r="35" fill="#FF4F8B"/></svg>
-      <i class="sp-spark s1"></i><i class="sp-spark s2"></i>
+      
     </div>
     <div class="sp-word">Chatter</div>
     <div class="sp-sub">絮 语 · 随 时 说 点 什 么</div>
@@ -953,6 +947,12 @@
     </div>
   </div>
 </div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="logo" viewBox="0 0 512 512"><rect width="512" height="512" rx="115" fill="#5B3BD8"/><g transform="translate(256 256) scale(1.0) translate(-256 -256)">
+<g fill="#fff"><rect x="96" y="120" width="320" height="236" rx="96"/><path d="M158 340 L132 416 L236 350 Z"/></g>
+<circle cx="180" cy="238" r="20" fill="#6C4DF0" fill-opacity=".45"/><circle cx="256" cy="238" r="27" fill="#6C4DF0" fill-opacity=".75"/><circle cx="342" cy="238" r="35" fill="#FF4F8B"/>
+</g></symbol></svg>
+
 <script>
   setTimeout(function () {
     var s = document.getElementById('splash');
