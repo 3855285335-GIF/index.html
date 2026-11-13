@@ -850,7 +850,6 @@
   ];
   var ESM = [
     'https://esm.sh/@supabase/supabase-js@' + VER + '?bundle',
-    'https://esm.sh/@supabase/supabase-js@2',
     'https://esm.run/@supabase/supabase-js@' + VER
   ];
   function host(u) { return u.split('/')[2]; }
@@ -2166,7 +2165,7 @@ function onIncoming(m, noInc) {
   const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; });
   if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
+  if (first && m.type !== 'call' && !isMuted(m.conv)) { try { if (now() - (S.lastRecvSfx || 0) > 1200) { S.lastRecvSfx = now(); SFX.recv(open); } } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
@@ -5741,7 +5740,7 @@ const EMO_SRC = [
 ];
 const EMOJI = [];
 EMO_SRC.forEach(([c, s]) => s.split('|').forEach(x => { const p = x.trim().split(/\s+/); if (p[0]) EMOJI.push({ e: p[0], k: p.slice(1), c }); }));
-const BIG = '😂 🤣 😭 🥺 😢 😍 🥰 😘 😎 🤔 😏 🙄 😤 😡 😱 🤯 😴 🥱 😋 🤤 😳 😅 👌 🙈 🤗 🤭 🤫 😇 🤡 💩 👍 👌 🙏 👏 💪 🎉 🔥 💯 ❤️ 💔 🐶 🐱 🐷 🌹 🧋 🎂'.split(' ');
+const BIG = Array.from(new Set('😂 🤣 😭 🥺 😢 😍 🥰 😘 😎 🤔 😏 🙄 😤 😡 😱 🤯 😴 🥱 😋 🤤 😳 😅 👌 🙈 🤗 🤭 🤫 😇 🤡 💩 👍 👌 🙏 👏 💪 🎉 🔥 💯 ❤️ 💔 🐶 🐱 🐷 🌹 🧋 🎂'.split(' ')));
 /* 文字贴纸：自己画的（不用别人的图），发出去只占几个字节 */
 const PAL = { pink: ['#ff8fb4', '#ff3d77'], violet: ['#a594ff', '#6c5ce7'], orange: ['#ffb46b', '#ff6f3c'], teal: ['#4fd8cf', '#159e98'], blue: ['#6cc0ff', '#3a74f5'], green: ['#86dc6e', '#2fa84a'], yellow: ['#ffe27a', '#ffb31f', 1], red: ['#ff7f7f', '#e3364a'], grey: ['#a9b0c2', '#69728a'] };
 const TSTK = [
