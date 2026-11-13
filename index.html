@@ -1984,6 +1984,7 @@ function applyBoot(b) {
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
+  setTimeout(function () { syncPins(); }, 1500);
   setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
@@ -6259,7 +6260,34 @@ let pins = {}, mutes = {}, pmUid = null;
 function pmLoad() { if (pmUid !== S.uid) { pins = LS.get('ch2pin:' + (S.uid || ''), {}) || {}; mutes = LS.get('ch2mute:' + (S.uid || ''), {}) || {}; pmUid = S.uid; } }
 const isPinned = k => { pmLoad(); return !!pins[k]; };
 const isMuted = k => { pmLoad(); return !!mutes[k]; };
-function togglePin(k) { pmLoad(); if (pins[k]) delete pins[k]; else pins[k] = now(); LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); toast(pins[k] ? '已置顶' : '已取消置顶'); }
+function togglePin(k) {
+  pmLoad();
+  const on = !pins[k];
+  if (on) pins[k] = now(); else delete pins[k];
+  LS.set('ch2pin:' + (S.uid || ''), pins);
+  sched('list');
+  try {
+    if (sb && S.uid && isPinned(k) !== undefined) {
+      const patch = { pinned_at: on ? new Date().toISOString() : null };
+      sb.from('conversations').update(patch).eq('owner_acc', ME()).eq('conv_key', k).select('conv_key').then(function (r) {
+        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? null : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
+      }, function () {});
+    }
+  } catch (e) {}
+  toast(on ? '已置顶' : '已取消置顶');
+}
+async function syncPins() {
+  if (!sb || !S.uid) return;
+  try {
+    const r = await sb.from('conversations').select('conv_key,pinned_at').eq('owner_acc', ME());
+    if (r.error) return;
+    const srv = {};
+    (r.data || []).forEach(function (x) { if (x.pinned_at) srv[x.conv_key] = Date.parse(x.pinned_at) || 1; });
+    pmLoad();
+    if (Object.keys(srv).length) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
+    else if (Object.keys(pins).length) { Object.keys(pins).forEach(function (k) { try { sb.from('conversations').update({ pinned_at: new Date(pins[k] || Date.now()).toISOString() }).eq('owner_acc', ME()).eq('conv_key', k).then(function () {}, function () {}); } catch (e) {} }); }
+  } catch (e) {}
+}
 function toggleMute(k) {
   pmLoad();
   const on = !mutes[k];
