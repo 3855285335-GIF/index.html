@@ -364,7 +364,7 @@
   .call-btns { display: flex; gap: 0; flex-shrink: 0; }
   #chat-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 14px 12px 8px; display: flex; flex-direction: column; gap: 10px; background-image: var(--doodle); background-size: 180px 180px; }
   .msg { display: flex; gap: 8px; align-items: flex-start; animation: pop .22s cubic-bezier(.3,1.3,.5,1); }
-  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   /* 屏幕正中的弹窗本身靠 translate(-50%, -50%) 居中，动画必须带着它，否则动画期间会偏到右下角再跳回中间 */
   @keyframes popc { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
   .msg.mine { flex-direction: row-reverse; }
@@ -1151,7 +1151,7 @@
     <textarea id="moment-text" maxlength="1000" placeholder="这一刻的想法…"></textarea>
     <div id="moment-imgs" class="mo-imgs-edit"></div>
     <div id="moment-video-preview" class="mo-video-preview" style="display:none"></div>
-    <div class="mo-tools"><button id="moment-add-img" type="button">＋ 图片</button><button id="moment-add-video" type="button">＋ 视频</button><button id="moment-vis" type="button">谁可以看：全部好友</button><span id="moment-count">0/9</span></div>
+    <div class="mo-tools"><button id="moment-add-img" type="button">＋ 图片</button><button id="moment-add-video" type="button">＋ 视频</button><button id="moment-vis" type="button">谁可以看：全部好友</button><button id="moment-priv" type="button">🔒 仅自己可见：关</button><span id="moment-count">0/9</span></div>
     <input id="moment-file" type="file" accept="image/*" multiple hidden>
     <input id="moment-video-file" type="file" accept="video/*" hidden>
   </div>
@@ -5210,7 +5210,7 @@ function momentCardHTML(m, i) {
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
-      ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '') + '</div>' +
+      ((m.author_acc === ME() && m.visibility === 'private') ? '<div class="mo-vis">🔒 仅自己可见</div>' : ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '')) + '</div>' +
       (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
     (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
     '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
@@ -5308,6 +5308,7 @@ function closeMomentCompose() {
   MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.imgs = []; MO.urls = []; MO.vid = null; MO.vurl = '';
+  MO.priv = false; try { const pb = document.getElementById('moment-priv'); if (pb) pb.textContent = '🔒 仅自己可见：关'; } catch (e) {}
 }
 function renderMomentEditor() {
   $('moment-count').textContent = MO.imgs.length + '/9';
@@ -5350,7 +5351,7 @@ async function postMoment() {
       if (upv.error) throw upv.error;
       videoUrl = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
     }
-    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends', visible_to: MO.vis || null, video: videoUrl || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video').single();
+    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: MO.priv ? 'private' : 'friends', visible_to: MO.priv ? null : (MO.vis || null), video: videoUrl || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video').single();
     if (error) throw error;
     closeMomentCompose(); toast('已发表');
     if (data) { MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments(); }
@@ -6142,7 +6143,7 @@ const stampName = t => { const d = new Date(t || now()); return 'Chatter_' + d.g
 function dlFile(f) {
   const u = URL.createObjectURL(f), a = document.createElement('a');
   a.href = u; a.download = f.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已开始下载');
+  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已下载：' + (f.name || '文件') + '（在浏览器的「下载」文件夹里，Ctrl+J 可查看）');
 }
 function shareFile(f, second) {
   navigator.share({ files: [f] }).catch(e => {
@@ -7138,6 +7139,8 @@ function bindUI() {
   $('moment-add-video').onclick = function () { const i = $('moment-video-file'); i.value = ''; i.click(); };
   $('moment-video-file').onchange = function (e) { const f = (e.target.files || [])[0]; e.target.value = ''; addMomentVideo(f); };
   $('moment-vis').onclick = openVisPicker;
+const paintPriv = function () { const b = $('moment-priv'); if (b) b.textContent = '🔒 仅自己可见：' + (MO.priv ? '开' : '关'); };
+if ($('moment-priv')) { $('moment-priv').onclick = function () { MO.priv = !MO.priv; paintPriv(); }; paintPriv(); }
   $('vis-backdrop').onclick = closeVis;
   $('vis-all').onclick = function () { MO.vis = null; paintVisLabel(); closeVis(); };
   $('vis-ok').onclick = function () { MO.vis = visSel.length ? visSel.slice() : null; paintVisLabel(); closeVis(); };
