@@ -2079,7 +2079,14 @@ function chatReplace(m) {
 }
 function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
-  Object.assign(S.msgs[i], p); chatReplace(S.msgs[i]); return S.msgs[i];
+  const m = S.msgs[i];
+  Object.assign(m, p);
+  // 图片从本地 blob 换成服务器地址：只换 src，不重建节点，避免“先变小再变大”的闪烁
+  if (p.body && m.type === 'image') {
+    const el = msgElOf(id), img = el && el.querySelector('.bubble.img img');
+    if (img && !/^blob:/.test(p.body)) { try { img.src = p.body; } catch (e) {} return m; }
+  }
+  chatReplace(m); return m;
 }
 /* S.msgs[i] 的时间变了或是新来的：如果位置不对，只把这一条挪到正确位置（以前会整页重画，聊天里图片视频多时很卡） */
 function placeMsg(i) {
@@ -5491,13 +5498,24 @@ function multiFwd() {
     return m && okTypes[m.type];
   });
   if (!ids.length) { toast('撤回的消息、通话记录不能转发'); exitMulti(); return; }
-  const items = S.friends.slice(0, 12).map(function (a) {
-    return { label: peerName(a), fn: function () {
+  const items = [];
+  items.push({ label: '发给自己（备忘）', fn: function () {
+    ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, ME()); } catch (e) {} } });
+    toast('已转发 ' + ids.length + ' 条给自己'); exitMulti();
+  } });
+  S.friends.forEach(function (a) {
+    items.push({ label: peerName(a), fn: function () {
       ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
-      toast('已转发 ' + ids.length + ' 条'); exitMulti();
-    } };
+      toast('已转发 ' + ids.length + ' 条给 ' + peerName(a)); exitMulti();
+    } });
   });
-  items.push({ label: '取消', danger: true, fn: function () {} });
+  (GRP.list || []).forEach(function (g) {
+    items.push({ label: '群 · ' + g.name, fn: function () {
+      ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardToGroup(m, g.id); } catch (e) {} } });
+      toast('已转发 ' + ids.length + ' 条到群'); exitMulti();
+    } });
+  });
+  items.push({ label: '取消', danger: true, fn: function () { exitMulti(); } });
   openActs('转发给', items);
 }
 document.addEventListener('click', function (e) {
@@ -6121,7 +6139,16 @@ async function saveToPhone(url, name) {
   } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
   saving2 = false; if (!f) return;
   let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
-  if (can) shareFile(f); else dlFile(f);
+  if (can) { shareFile(f); return; }
+  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
+  if (desk && window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name });
+      const w = await h.createWritable(); await w.write(f); await w.close();
+      toast('已保存：' + name); return;
+    } catch (e) { if (e && e.name === 'AbortError') return; logErr('save-picker', e); }
+  }
+  dlFile(f);
 }
 function saveMsg(m) {
   if (m.type === 'file') { const f = parseFile(m.body); if (f) saveToPhone(f.u, f.n); return; }
@@ -6131,9 +6158,10 @@ function saveMsg(m) {
 
 /* ---- 转发 ---- */
 function openForward(m) {
-  const list = S.friends.map(function (a) { return { label: peerName(a) + (a === S.peer ? '（当前聊天）' : ''), fn: function () { forwardTo(m, a); } }; });
+  const list = [{ label: '发给自己（备忘）', fn: function () { forwardTo(m, ME()); } }];
+  S.friends.forEach(function (a) { list.push({ label: peerName(a) + (a === S.peer ? '（当前聊天）' : ''), fn: function () { forwardTo(m, a); } }); });
   (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardToGroup(m, g.id); } }); });
-  if (!list.length) { toast('还没有可以转发的聊天'); return; }
+  if (list.length <= 1) { toast('还没有可以转发的聊天'); return; }
   list.push({ label: '取消', fn: null });
   openActs('转发给', list);
 }
@@ -7218,6 +7246,7 @@ async function exportAll() {
     toast('已导出 ' + rows.length + ' 条（含图片/语音链接）');
   } catch (e) { toast('导出失败：' + ((e && e.message) || '请重试')); }
 }
+try { if (window.matchMedia('(hover:hover) and (pointer:fine)').matches) { const b = $('msg-menu-save'); if (b) b.textContent = '💾 保存到电脑'; } } catch (e) {}
 $('btn-export').onclick = () => {
   const list = [];
   if (S.conv) list.push({ label: '📄 导出当前聊天', fn: () => exportChat(S.conv) });
@@ -7371,7 +7400,9 @@ function boot() {
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
   ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
   ready.catch(e => {
-    hideSplash();
+hideSplash();
+window.addEventListener('pageshow', function () { try { hideSplash(); } catch (e) {} });
+setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜底：启动图 4 秒内必须消失
     logErr('lib', e);
     var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
   });
