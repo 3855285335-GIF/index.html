@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 07-群聊 · 原文件第 4528-5176 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 07-群聊 · 原文件第 4526-5179 行 · 2026-11-15 线上版 -->
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
@@ -106,7 +106,12 @@ function grpChatMode() {
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
   if (gp) {
-    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) pollConv(S.conv); }, 3000);
+    GRP.chatT = setInterval(function () {
+    if (document.hidden || !isGroupKey(S.conv)) return;
+    const idle = now() - (S.lastIncAt || 0) > 120000;   // 2 分钟没新消息就降到 9 秒一次
+    if (idle && ((GRP.pollSkip = ((GRP.pollSkip || 0) + 1) % 3) !== 0)) return;
+    pollConv(S.conv);
+  }, 3000);
     refreshMyMuteState(gidOf(S.conv));
     GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 20000);
     GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 6000);
