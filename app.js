@@ -682,8 +682,8 @@ function applyBoot(b) {
   setTimeout(function () { syncPins(); }, 1500);
   setTimeout(function () { syncMyBubble(); }, 1800);
   startDbSync();
-  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 60000);   // 全局只注册一次
-  if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 15000);   // 15 秒对一次，秒级体验
+  if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 30000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
