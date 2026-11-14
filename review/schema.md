@@ -1,4 +1,4 @@
-# 线上数据库现状（自动导出，2026-11-13）
+# 线上数据库现状（自动导出，2026-11-14）
 
 项目 uaoiqbxptnbrvkzjwguc
 
@@ -24,7 +24,7 @@ HTTP 201
   },
   {
     "table_name": "conversations",
-    "columns": "owner_acc text, conv_key text, peer_acc text, last_body text, last_ts timestamp with time zone, last_read_ts timestamp with time zone, unread integer"
+    "columns": "owner_acc text, conv_key text, peer_acc text, last_body text, last_ts timestamp with time zone, last_read_ts timestamp with time zone, unread integer, pinned_at timestamp with time zone"
   },
   {
     "table_name": "friend_requests",
@@ -101,11 +101,14 @@ HTTP 201
   {
     "table_name": "stickers",
     "columns": "id uuid, owner_acc text, url text, kw text, created_at timestamp with time zone"
+  },
+  {
+    "table_name": "user_mutes",
+    "columns": "owner_acc text, conv_key text"
   }
 ]
 
-```
-
+```n
 ## RLS 策略
 ```json
 HTTP 201
@@ -438,11 +441,31 @@ HTTP 201
     "cmd": "UPDATE",
     "qual": "(owner_acc = my_acc())",
     "with_check": "(owner_acc = my_acc())"
+  },
+  {
+    "tablename": "user_mutes",
+    "policyname": "um_del",
+    "cmd": "DELETE",
+    "qual": "(owner_acc = my_acc())",
+    "with_check": null
+  },
+  {
+    "tablename": "user_mutes",
+    "policyname": "um_ins",
+    "cmd": "INSERT",
+    "qual": null,
+    "with_check": "(owner_acc = my_acc())"
+  },
+  {
+    "tablename": "user_mutes",
+    "policyname": "um_sel",
+    "cmd": "SELECT",
+    "qual": "(owner_acc = my_acc())",
+    "with_check": null
   }
 ]
 
-```
-
+```n
 ## 函数
 ```json
 HTTP 201
@@ -549,6 +572,11 @@ HTTP 201
   },
   {
     "proname": "group_mute_guard",
+    "args": "",
+    "security_definer": true
+  },
+  {
+    "proname": "guard_account_id",
     "args": "",
     "security_definer": true
   },
@@ -784,8 +812,7 @@ HTTP 201
   }
 ]
 
-```
-
+```n
 ## 触发器
 ```json
 HTTP 201
@@ -861,11 +888,16 @@ HTTP 201
     "trigger_name": "trg_zz_group_mute_guard",
     "action_timing": "BEFORE",
     "event_manipulation": "INSERT"
+  },
+  {
+    "tbl": "profiles",
+    "trigger_name": "trg_guard_account_id",
+    "action_timing": "BEFORE",
+    "event_manipulation": "UPDATE"
   }
 ]
 
-```
-
+```n
 ## 存储桶
 ```json
 HTTP 201
@@ -877,4 +909,4 @@ HTTP 201
   }
 ]
 
-```
+```n
