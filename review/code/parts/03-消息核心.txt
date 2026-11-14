@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 03-消息核心 · 原文件第 1553-3160 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 03-消息核心 · 原文件第 1555-3167 行 · 2026-11-15 线上版 -->
 /* ================= 状态 ================= */
 const S = {
   uid: null, started: false, me: null, token: null,
@@ -198,7 +198,7 @@ function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderM
 function convPreview(c) {
   let t = parseQ(c.last_body).text;
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
-  if (/^e:[^\\s]{1,16}$/u.test(t)) return '[表情]';
+  if (/^e:[^\s]{1,16}$/u.test(t)) return '[表情]';
   if (t) return t;
   if (!c.last_ts) {
     if (isGroupKey(c.convKey)) { fixPreview(c.convKey); return '群聊'; }
@@ -398,12 +398,14 @@ async function syncMutes() {
     const server = {};
     (r.data || []).forEach(function (x) { server[x.conv_key] = 1; });
     pmLoad();
-    const local = mutes;
-    if (!Object.keys(server).length && Object.keys(local).length) {
-      Object.keys(local).forEach(function (k) { sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {}); });
-    } else if (Object.keys(server).length) {
+    const flag = 'ch2muteOk:' + (S.uid || '');
+    const synced = LS.get(flag, 0);
+    if (!Object.keys(server).length && !synced && Object.keys(mutes).length) {
+      Object.keys(mutes).forEach(function (k) { sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {}); });
+    } else {
       mutes = server; LS.set('ch2mute:' + (S.uid || ''), mutes); sched('list'); sched('title');
     }
+    LS.set(flag, 1);
   } catch (e) {}
 }
 let selfConvMade = false;
@@ -434,7 +436,7 @@ function applyBoot(b) {
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
-  setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);   // 全局只注册一次
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -520,7 +522,7 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': { const _b = String(m.body || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(_b) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
+    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
@@ -731,7 +733,7 @@ async function deliver(m, silent) {
     const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
-    if (!gp && S.token && m.type !== 'call') fast();
+    if (!gp && S.token && m.type !== 'call' && !(S.rt && S.rt.db)) fast();   // 实时库连着就不走快通道，省一次广播+一次查询
     S.out.delete(id); delete m._blob;
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
@@ -845,6 +847,8 @@ function onTyping(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
   if (sigDup(p)) return;
   if (S.conv !== p.conv || S.peer !== p.from) return;
+  if (now() - (S.lastTypingAt || 0) < 1500) return;   // 节流：伪造的连续“正在输入”不会反复刷新
+  S.lastTypingAt = now();
   S.typingUntil = now() + 4500; renderChatTitle();
   setTimeout(() => { if (S.typingUntil <= now()) renderChatTitle(); }, 4600);
 }
@@ -869,7 +873,7 @@ function onReadAck(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
   const t = Date.parse(p.ts); if (!(t > 0)) return;
   if (t <= peerReadOf(p.conv)) return;
-  S.peerRead[p.conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); refreshReads();
+  fetchPeerRead(p.conv);   // 不信任广播里的时间，以服务器 peer_read 为准，防止伪造已读
 }
 function onReadReq(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
@@ -899,12 +903,12 @@ async function compressImage(file) {
       src = im; w = im.naturalWidth || im.width; h = im.naturalHeight || im.height;
     }
     if (!w || !h) return file;
-    const max = 1600, r = Math.min(1, max / Math.max(w, h));
+    const max = 1280, r = Math.min(1, max / Math.max(w, h));
     const cw = Math.max(1, Math.round(w * r)), ch = Math.max(1, Math.round(h * r));
     const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(src, 0, 0, cw, ch);
     if (src.close) { try { src.close(); } catch (e) {} }
-    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.85); });
+    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.8); });
     if (!blob || blob.size >= file.size * 0.92) return file;
     return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
   } catch (e) { logErr('img-compress', e); return file; }
@@ -1358,7 +1362,7 @@ async function openConv(key, peer) {
     if (cachedMsgs.length && rows.length >= PAGE) {
       const have = new Set(cachedMsgs.map(m => m.id));
       let guard = 0; const gt0 = Date.now();
-      while (guard < 40 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
+      while (guard < 8 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
         const older = await fetchMsgs(key, rows[0].created_at);
         if (!older.length) break;
         rows = older.concat(rows);
@@ -1366,6 +1370,7 @@ async function openConv(key, peer) {
       }
       if (S.conv !== key) return;
     }
+    if (cachedMsgs.length && rows.length >= PAGE && !rows.some(r => have.has(r.id))) { S.msgs = []; }   // 接不上旧缓存就直接丢，只显示最新一页，避免 40 次查询还缺一段
     rows.forEach(r => S.seen.add(r.id));
     const map = new Map(); rows.forEach(r => map.set(r.id, r));
     S.msgs.forEach(m => { if (!map.has(m.id) && !isHidden(m)) map.set(m.id, m); });   // 刚发出去、还没进这次查询结果的消息不能丢
