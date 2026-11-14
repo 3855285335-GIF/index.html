@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 10-媒体与视频编辑 · 原文件第 5629-6202 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 10-媒体与视频编辑 · 原文件第 5733-6352 行 · 2026-11-14 线上版 -->
 /* ================= 表情包 / 视频 / 文件 / 保存到手机 / 转发 ================= */
 const NEED_V6 = '要先在 Supabase 运行 setup-v6.sql，才能发表情包、视频和文件';
 const MB = 1048576, FILE_MAX = 50 * MB, OLD_MAX = 20 * MB, STK_MAX = 10 * MB, STK_LIMIT = 500;
@@ -30,7 +30,7 @@ const EMO_SRC = [
 ];
 const EMOJI = [];
 EMO_SRC.forEach(([c, s]) => s.split('|').forEach(x => { const p = x.trim().split(/\s+/); if (p[0]) EMOJI.push({ e: p[0], k: p.slice(1), c }); }));
-const BIG = '😂 🤣 😭 🥺 😢 😍 🥰 😘 😎 🤔 😏 🙄 😤 😡 😱 🤯 😴 🥱 😋 🤤 😳 😅 👌 🙈 🤗 🤭 🤫 😇 🤡 💩 👍 👌 🙏 👏 💪 🎉 🔥 💯 ❤️ 💔 🐶 🐱 🐷 🌹 🧋 🎂'.split(' ');
+const BIG = Array.from(new Set('😂 🤣 😭 🥺 😢 😍 🥰 😘 😎 🤔 😏 🙄 😤 😡 😱 🤯 😴 🥱 😋 🤤 😳 😅 👌 🙈 🤗 🤭 🤫 😇 🤡 💩 👍 👌 🙏 👏 💪 🎉 🔥 💯 ❤️ 💔 🐶 🐱 🐷 🌹 🧋 🎂'.split(' ')));
 /* 文字贴纸：自己画的（不用别人的图），发出去只占几个字节 */
 const PAL = { pink: ['#ff8fb4', '#ff3d77'], violet: ['#a594ff', '#6c5ce7'], orange: ['#ffb46b', '#ff6f3c'], teal: ['#4fd8cf', '#159e98'], blue: ['#6cc0ff', '#3a74f5'], green: ['#86dc6e', '#2fa84a'], yellow: ['#ffe27a', '#ffb31f', 1], red: ['#ff7f7f', '#e3364a'], grey: ['#a9b0c2', '#69728a'] };
 const TSTK = [
@@ -277,6 +277,7 @@ function stkSuggest(v) {
 function hideSuggest() { const el = $('stk-suggest'); if (el.classList.contains('active')) { el.classList.remove('active'); el.innerHTML = ''; } }
 function sendSuggest(b) {
   const input = $('chat-input'); input.value = ''; draftSave(S.conv, ''); hideSuggest(); sendSticker(b);
+  requestAnimationFrame(chatGrow);
 }
 
 /* ---- 发视频 / 发文件（原文件上传，不压缩） ---- */
@@ -322,6 +323,7 @@ function openVideoPreview(file, pr) {
   return new Promise(function (resolve) {
     VPV.file = file; VPV.resolve = resolve; VPV.poster = (pr && pr.poster) || null; VPV.cover = null;
     VPV.compress = false; VPV.busy = false; VPV.rec = null; VPV.start = 0; VPV.end = 0;
+    try { const _ct = !!(document.createElement('video').captureStream); if (!_ct) { ['vpv-start','vpv-end','vpv-compress'].forEach(function (id) { const el = document.getElementById(id); if (el) { el.disabled = true; el.style.opacity = '.35'; } }); toast('这台设备不支持裁剪/压缩，可直接发送原视频'); } } catch (e) {}
     try { if (VPV.url) URL.revokeObjectURL(VPV.url); } catch (e) {}
     VPV.url = URL.createObjectURL(file);
     const v = $('vpv-video'); v.src = VPV.url; try { v.load(); } catch (e) {}
@@ -457,7 +459,7 @@ const stampName = t => { const d = new Date(t || now()); return 'Chatter_' + d.g
 function dlFile(f) {
   const u = URL.createObjectURL(f), a = document.createElement('a');
   a.href = u; a.download = f.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已开始下载');
+  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已下载：' + (f.name || '文件') + '（在浏览器的「下载」文件夹里，Ctrl+J 可查看）');
 }
 function shareFile(f, second) {
   navigator.share({ files: [f] }).catch(e => {
@@ -478,7 +480,16 @@ async function saveToPhone(url, name) {
   } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
   saving2 = false; if (!f) return;
   let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
-  if (can) shareFile(f); else dlFile(f);
+  if (can) { shareFile(f); return; }
+  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
+  if (desk && window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name });
+      const w = await h.createWritable(); await w.write(f); await w.close();
+      toast('已保存：' + name); return;
+    } catch (e) { if (e && e.name === 'AbortError') return; logErr('save-picker', e); }
+  }
+  dlFile(f);
 }
 function saveMsg(m) {
   if (m.type === 'file') { const f = parseFile(m.body); if (f) saveToPhone(f.u, f.n); return; }
@@ -488,9 +499,10 @@ function saveMsg(m) {
 
 /* ---- 转发 ---- */
 function openForward(m) {
-  const list = S.friends.map(function (a) { return { label: peerName(a) + (a === S.peer ? '（当前聊天）' : ''), fn: function () { forwardTo(m, a); } }; });
+  const list = [{ label: '发给自己（备忘）', fn: function () { forwardTo(m, ME()); } }];
+  S.friends.forEach(function (a) { list.push({ label: peerName(a) + (a === S.peer ? '（当前聊天）' : ''), fn: function () { forwardTo(m, a); } }); });
   (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardToGroup(m, g.id); } }); });
-  if (!list.length) { toast('还没有可以转发的聊天'); return; }
+  if (list.length <= 1) { toast('还没有可以转发的聊天'); return; }
   list.push({ label: '取消', fn: null });
   openActs('转发给', list);
 }
@@ -517,19 +529,53 @@ let pins = {}, mutes = {}, pmUid = null;
 function pmLoad() { if (pmUid !== S.uid) { pins = LS.get('ch2pin:' + (S.uid || ''), {}) || {}; mutes = LS.get('ch2mute:' + (S.uid || ''), {}) || {}; pmUid = S.uid; } }
 const isPinned = k => { pmLoad(); return !!pins[k]; };
 const isMuted = k => { pmLoad(); return !!mutes[k]; };
-function togglePin(k) { pmLoad(); if (pins[k]) delete pins[k]; else pins[k] = now(); LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); toast(pins[k] ? '已置顶' : '已取消置顶'); }
+function togglePin(k) {
+  pmLoad();
+  const on = !pins[k];
+  if (on) pins[k] = now(); else delete pins[k];
+  LS.set('ch2pin:' + (S.uid || ''), pins);
+  sched('list');
+  try {
+    if (sb && S.uid && isPinned(k) !== undefined) {
+      const patch = { pinned_at: on ? new Date().toISOString() : null };
+      sb.from('conversations').update(patch).eq('owner_acc', ME()).eq('conv_key', k).select('conv_key').then(function (r) {
+        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? null : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
+      }, function () {});
+    }
+  } catch (e) {}
+  toast(on ? '已置顶' : '已取消置顶');
+}
+async function syncPins() {
+  if (!sb || !S.uid) return;
+  try {
+    const r = await sb.from('conversations').select('conv_key,pinned_at').eq('owner_acc', ME());
+    if (r.error) return;
+    const srv = {};
+    (r.data || []).forEach(function (x) { if (x.pinned_at) srv[x.conv_key] = Date.parse(x.pinned_at) || 1; });
+    pmLoad();
+    if (Object.keys(srv).length) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
+    else if (Object.keys(pins).length) { Object.keys(pins).forEach(function (k) { try { sb.from('conversations').update({ pinned_at: new Date(pins[k] || Date.now()).toISOString() }).eq('owner_acc', ME()).eq('conv_key', k).then(function () {}, function () {}); } catch (e) {} }); }
+  } catch (e) {}
+}
 function toggleMute(k) {
-  pmLoad(); if (mutes[k]) delete mutes[k]; else mutes[k] = 1;
+  pmLoad();
+  const on = !mutes[k];
+  if (on) mutes[k] = 1; else delete mutes[k];
   LS.set('ch2mute:' + (S.uid || ''), mutes);
-  if (mutes[k]) {
+  if (on) {
     try {
       const tag = isGroupKey(k) ? 'g:' + gidOf(k) : 'm:' + peerOf(k, ME());
       swReg().then(function (r) { return r && r.getNotifications ? r.getNotifications() : []; }).then(function (list) { (list || []).forEach(function (n) { if ((n.tag || '') === tag) n.close(); }); }, function () {});
     } catch (e) {}
   }
-  try { if (sb && S.uid) sb.from('profiles').update({ mutes: mutes }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {}
+  try {
+    if (sb && S.uid) {
+      if (on) sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {});
+      else sb.from('user_mutes').delete().eq('owner_acc', ME()).eq('conv_key', k).then(function () {}, function () {});
+    }
+  } catch (e) {}
   sched('list'); sched('title');
-  toast(mutes[k] ? '已开启消息免打扰：不响铃、不弹通知、不计入未读总数' : '已关闭消息免打扰');
+  toast(on ? '已开启消息免打扰：不响铃、不弹通知、不计入未读总数' : '已关闭消息免打扰');
 }
 function convActs(it) {
   const k = it.dataset.key, gp = isGroupKey(k);
