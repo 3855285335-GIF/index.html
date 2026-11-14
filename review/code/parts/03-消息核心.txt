@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 03-消息核心 · 原文件第 1514-3073 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 03-消息核心 · 原文件第 1553-3160 行 · 2026-11-14 线上版 -->
 /* ================= 状态 ================= */
 const S = {
   uid: null, started: false, me: null, token: null,
@@ -198,7 +198,7 @@ function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderM
 function convPreview(c) {
   let t = parseQ(c.last_body).text;
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
-  if (/^e:/.test(t)) return '[表情]';
+  if (/^e:[^\\s]{1,16}$/u.test(t)) return '[表情]';
   if (t) return t;
   if (!c.last_ts) {
     if (isGroupKey(c.convKey)) { fixPreview(c.convKey); return '群聊'; }
@@ -235,13 +235,27 @@ function renderContacts() {
   const el = $('friend-list');
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
-  else el.innerHTML = S.friends.slice().sort(function (a, b) {
-    const ta = (S.frAt && S.frAt[a]) || 0, tb = (S.frAt && S.frAt[b]) || 0;
-    if (ta !== tb) return tb - ta;                       // 新加的好友排最上面
-    return String(peerName(a)).localeCompare(String(peerName(b)), 'zh');
-  }).map(a => '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
-    '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
-    '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>').join('');
+  else {
+    const PY = [['A', '阿'], ['B', '八'], ['C', '嚓'], ['D', '搭'], ['E', '蛾'], ['F', '发'], ['G', '噶'], ['H', '哈'], ['J', '击'], ['K', '喀'], ['L', '垃'], ['M', '妈'], ['N', '拿'], ['O', '哦'], ['P', '啪'], ['Q', '期'], ['R', '然'], ['S', '撒'], ['T', '塌'], ['W', '挖'], ['X', '昔'], ['Y', '压'], ['Z', '匝']];
+    const initialOf = function (name) {
+      const s = String(name || '').trim(); if (!s) return '#';
+      const c = s[0];
+      if (/[a-zA-Z]/.test(c)) return c.toUpperCase();
+      if (!/[\u4e00-\u9fa5]/.test(c)) return '#';
+      for (let i = PY.length - 1; i >= 0; i--) { if (s.localeCompare(PY[i][1], 'zh-Hans-CN') >= 0) return PY[i][0]; }
+      return '#';
+    };
+    const sorted = S.friends.slice().sort(function (a, b) { return String(peerName(a)).localeCompare(String(peerName(b)), 'zh-Hans-CN'); });
+    const groups = {}; sorted.forEach(function (a) { const k = initialOf(peerName(a)); (groups[k] = groups[k] || []).push(a); });
+    const order = Object.keys(groups).sort(function (a, b) { return a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b); });
+    el.innerHTML = order.map(function (k) {
+      return '<div class="abbr">' + k + '</div>' + groups[k].map(function (a) {
+        return '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
+          '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
+          '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>';
+      }).join('');
+    }).join('');
+  }
   renderGroupContacts();
 }
 function renderGroupContacts() {
@@ -379,12 +393,16 @@ function upsertConvRow(r) {
 async function syncMutes() {
   if (!sb || !S.uid) return;
   try {
-    const r = await sb.from('profiles').select('mutes').eq('id', S.uid).maybeSingle();
-    if (r.data && r.data.mutes && typeof r.data.mutes === 'object') {
-      pmLoad();
-      mutes = Object.assign({}, r.data.mutes, mutes);
-      LS.set('ch2mute:' + (S.uid || ''), mutes);
-      sched('list'); sched('title');
+    const r = await sb.from('user_mutes').select('conv_key').eq('owner_acc', ME());
+    if (r.error) return;
+    const server = {};
+    (r.data || []).forEach(function (x) { server[x.conv_key] = 1; });
+    pmLoad();
+    const local = mutes;
+    if (!Object.keys(server).length && Object.keys(local).length) {
+      Object.keys(local).forEach(function (k) { sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {}); });
+    } else if (Object.keys(server).length) {
+      mutes = server; LS.set('ch2mute:' + (S.uid || ''), mutes); sched('list'); sched('title');
     }
   } catch (e) {}
 }
@@ -415,6 +433,8 @@ function applyBoot(b) {
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
+  setTimeout(function () { syncPins(); }, 1500);
+  setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -500,7 +520,7 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': body = '<div class="bubble img"><img src="' + esc(disp(m.body)) + '" alt="" decoding="async">' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; break;
+    case 'image': { const _b = String(m.body || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(_b) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
@@ -563,7 +583,14 @@ function chatReplace(m) {
 }
 function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
-  Object.assign(S.msgs[i], p); chatReplace(S.msgs[i]); return S.msgs[i];
+  const m = S.msgs[i];
+  Object.assign(m, p);
+  // 图片从本地 blob 换成服务器地址：只换 src，不重建节点，避免“先变小再变大”的闪烁
+  if (p.body && m.type === 'image') {
+    const el = msgElOf(id), img = el && el.querySelector('.bubble.img img');
+    if (img && !/^blob:/.test(p.body)) { try { img.src = p.body; } catch (e) {} return m; }
+  }
+  chatReplace(m); return m;
 }
 /* S.msgs[i] 的时间变了或是新来的：如果位置不对，只把这一条挪到正确位置（以前会整页重画，聊天里图片视频多时很卡） */
 function placeMsg(i) {
@@ -609,10 +636,10 @@ function onIncoming(m, noInc) {
   const first = !S.seen.has(m.id); S.seen.add(m.id);
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
   const open = S.conv === m.conv;
-  const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME(); });
+  const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; });
   if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv)) { SFX.recv(open); if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
+  if (first && m.type !== 'call' && !isMuted(m.conv)) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
@@ -636,11 +663,13 @@ async function onFastMsg(p) {
     onIncoming(m);
   } catch (e) { logErr('fast', e); }
 }
-function onFastRecall(p) {
+async function onFastRecall(p) {
   if (!p || typeof p.id !== 'string' || !S.friends.includes(p.from)) return;
-  const m = S.msgs.find(x => x.id === p.id);
-  if (m && m.from_acc === p.from && m.type !== 'recalled') patchMsg(p.id, { type: 'recalled', body: '' });
-  else if (!m) { S.recalledEarly.add(p.id); if (S.recalledEarly.size > 200) S.recalledEarly = new Set(Array.from(S.recalledEarly).slice(-100)); }
+  try {
+    const r = await sb.from('messages').select('type').eq('id', p.id).maybeSingle();
+    if (!r.data || r.data.type !== 'recalled') return;   // 只认数据库里真的撤回过的
+    patchMsg(p.id, { type: 'recalled', body: '' });
+  } catch (e) { logErr('fast-r', e); }
 }
 
 /* ---- 发送 ---- */
@@ -685,7 +714,7 @@ async function deliver(m, silent) {
     if (m._blob) {
       const old = m.body, url = await upload(m._blob, m._ext, m._ct, '', '', m._blob.size > 300 * 1024 ? f => upPct(m, f) : null);
       setTimeout(() => checkStorage(), 1500);
-      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : url;
+      const nb = m._fm ? JSON.stringify({ u: url, n: m._fm.n, s: m._fm.s }) : (m.type === 'image' && m._w && m._h ? url + '#w=' + m._w + '&h=' + m._h : url);
       if (m._poster) {   // 视频封面：和视频同名加 .jpg，传不上也不影响视频本身
         const vp = /\/chat-media\/([^?#]+)/.exec(url);
         if (vp) { try { await upload(m._poster, 'jpg', 'image/jpeg', '', decodeURIComponent(vp[1]) + '.jpg'); } catch (x) { logErr('poster', x); } }
@@ -696,14 +725,13 @@ async function deliver(m, silent) {
     }
     // 新类型（表情/视频/文件）在确认后端支持之前，先写数据库再通知对方，免得对方看到一条其实没发成的消息
     const gp = isGroupKey(m.conv);
-    const fastFirst = !gp && S.token && m.type !== 'call' && (S.v6 === true || !/^(sticker|video|file)$/.test(m.type));
     const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
-    if (fastFirst) fast();
+    // 先写库、再广播：接收方收到广播会按 id 查库，广播太早会查不到
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null };
     const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
-    if (!fastFirst && !gp && S.token && m.type !== 'call') fast();
+    if (!gp && S.token && m.type !== 'call') fast();
     S.out.delete(id); delete m._blob;
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
@@ -782,11 +810,17 @@ function pickMention(acc, name) {
   pendingMentions.push({ acc: acc, name: name });
   closeMention(); try { inp.focus(); } catch (e) {}
 }
+function chatGrow() {
+  const i = $('chat-input'); if (!i) return;
+  i.style.height = 'auto';
+  i.style.height = Math.min(132, Math.max(44, i.scrollHeight)) + 'px';
+}
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
   if (!v || !S.conv) return;
   if (!canSendHere()) return;
   input.value = ''; draftSave(S.conv, ''); lastTy = 0; hideSuggest();   // 发出消息后，对方的“正在输入”会被清掉；下次打字要立刻重新通知
+  requestAnimationFrame(chatGrow);
   let body = v.replace(/\u2063/g, '');
   if (body.length > TEXT_MAX - 80) { body = body.slice(0, TEXT_MAX - 80); toast('消息太长，已截到 2 万字'); }
   if (!body) return;
@@ -884,7 +918,7 @@ function imgEditOn() { try { return LS.get('ch2imgedit', true) !== false; } catc
 function ieCanvas() { return $('ie-canvas'); }
 function ieOverlay() { return $('ie-overlay'); }
 function ieWrap() { return $('ie-wrap'); }
-function ieScale() { const cv = ieCanvas(), w = ieWrap().clientWidth || 1; return cv.width / w; }
+function ieScale() { const cv = ieCanvas(), r = ieWrap().getBoundingClientRect(), w = r.width || 1; return cv.width / w; }
 
 function iePushHist() {
   try {
@@ -913,11 +947,22 @@ function ieShowHint() {
 }
 function ieLayout() {
   const cv = ieCanvas(), ov = ieOverlay(), wrap = ieWrap(); if (!cv || !ov || !wrap) return;
-  const w = wrap.clientWidth || 0, h = wrap.clientHeight || 0;
+  const r = wrap.getBoundingClientRect(), w = r.width || 0, h = r.height || 0;
   if (!w || !h) return;
   ov.width = w; ov.height = h;
   ieDrawOverlay();
   ieShowHint();
+}
+let IEZOOM = 1;
+function ieZoomApply() {
+  const w = ieWrap(); if (!w) return;
+  w.style.zoom = IEZOOM;
+  const v = $('ie-zoom-v'); if (v) v.textContent = Math.round(IEZOOM * 100) + '%';
+  ieLayout();
+}
+function ieZoomBy(d) {
+  IEZOOM = Math.max(0.5, Math.min(3, Math.round((IEZOOM + d) * 100) / 100));
+  ieZoomApply();
 }
 function ieHandles(s) {
   return [
@@ -994,7 +1039,7 @@ function openImgEditor(file) {
       raiseSheet('imgedit-sheet', 'imgedit-backdrop');
       $('imgedit-backdrop').classList.add('active'); $('imgedit-sheet').classList.add('active');
       paintIeColors(); ieSetTool('crop');
-      setTimeout(ieLayout, 40);
+      setTimeout(function () { IEZOOM = 1; ieZoomApply(); }, 40);
     };
     if (window.createImageBitmap) {
       createImageBitmap(file).then(done, function () {
@@ -1171,8 +1216,10 @@ async function sendImageNow(file, orig) {
   if (!file || !S.conv) return;
   if (file.size > fileMax()) { toast('有图片超过 ' + (fileMax() / MB) + 'MB，已跳过（' + Math.round(file.size / MB) + 'MB）'); return; }
   const out = orig ? file : await compressImage(file);
+  let _w = 0, _h = 0;
+  try { const bm = await createImageBitmap(out); _w = bm.width; _h = bm.height; if (bm.close) bm.close(); } catch (e) {}
   const ext = ((out.type.split('/')[1]) || 'jpg').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'jpg';
-  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type }));
+  addLocal(newMsg('image', URL.createObjectURL(out), null, { _blob: out, _ext: ext, _ct: out.type, _w: _w, _h: _h }));
 }
 let IPV = { file: null, orig: false, resolve: null, url: '' };
 function openImgPreview(file) {
@@ -1282,6 +1329,7 @@ async function openConv(key, peer) {
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  requestAnimationFrame(chatGrow);
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
@@ -1309,8 +1357,8 @@ async function openConv(key, peer) {
     // 离开后对方又发了很多条：缓存和最新一页之间会有缺口，往上翻也会跳过。这里先补齐（最多 4 页）
     if (cachedMsgs.length && rows.length >= PAGE) {
       const have = new Set(cachedMsgs.map(m => m.id));
-      let guard = 0;
-      while (guard < 4 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
+      let guard = 0; const gt0 = Date.now();
+      while (guard < 40 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
         const older = await fetchMsgs(key, rows[0].created_at);
         if (!older.length) break;
         rows = older.concat(rows);
