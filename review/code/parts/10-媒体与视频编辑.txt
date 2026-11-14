@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 10-媒体与视频编辑 · 原文件第 5733-6352 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 10-媒体与视频编辑 · 原文件第 5736-6358 行 · 2026-11-15 线上版 -->
 /* ================= 表情包 / 视频 / 文件 / 保存到手机 / 转发 ================= */
 const NEED_V6 = '要先在 Supabase 运行 setup-v6.sql，才能发表情包、视频和文件';
 const MB = 1048576, FILE_MAX = 50 * MB, OLD_MAX = 20 * MB, STK_MAX = 10 * MB, STK_LIMIT = 500;
@@ -539,7 +539,7 @@ function togglePin(k) {
     if (sb && S.uid && isPinned(k) !== undefined) {
       const patch = { pinned_at: on ? new Date().toISOString() : null };
       sb.from('conversations').update(patch).eq('owner_acc', ME()).eq('conv_key', k).select('conv_key').then(function (r) {
-        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? null : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
+        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? ME() : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
       }, function () {});
     }
   } catch (e) {}
@@ -553,8 +553,11 @@ async function syncPins() {
     const srv = {};
     (r.data || []).forEach(function (x) { if (x.pinned_at) srv[x.conv_key] = Date.parse(x.pinned_at) || 1; });
     pmLoad();
-    if (Object.keys(srv).length) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
+    const flag = 'ch2pinOk:' + (S.uid || '');
+    const synced = LS.get(flag, 0);
+    if (Object.keys(srv).length || synced) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
     else if (Object.keys(pins).length) { Object.keys(pins).forEach(function (k) { try { sb.from('conversations').update({ pinned_at: new Date(pins[k] || Date.now()).toISOString() }).eq('owner_acc', ME()).eq('conv_key', k).then(function () {}, function () {}); } catch (e) {} }); }
+    LS.set(flag, 1);
   } catch (e) {}
 }
 function toggleMute(k) {
