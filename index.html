@@ -2075,11 +2075,11 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
+    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
-      const cover = m._pu ? '<img class="vposter" src="' + esc(m._pu) + '" alt="">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
+      const cover = m._pu ? '<img class="vposter" loading="lazy" src="' + esc(m._pu) + '" alt="">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" loading="lazy" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
       body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span><span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
     }
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
@@ -2113,14 +2113,17 @@ function dayLabel(t) {
 function chatRender(stick) {
   const b = $('chat-messages');
   const vis = S.msgs.filter(m => !isHidden(m));
-  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; return; }
+  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; S.rendered = 0; return; }
+  const limit = Math.min(S.renderLimit || 80, vis.length);
+  const shown = vis.slice(vis.length - limit);   // 只渲染最近 N 条，往上翻再扩，几百条也不卡
   let prevDay = '';
-  b.innerHTML = vis.map(function (m) {
+  b.innerHTML = shown.map(function (m) {
     const day = new Date(m.created_at).toDateString();
     let sep = '';
     if (day !== prevDay) { prevDay = day; sep = '<div class="day-sep"><span>' + dayLabel(m.created_at) + '</span></div>'; }
     return sep + msgHTML(m);
   }).join('');
+  S.rendered = shown.length;
   if (stick) b.scrollTop = b.scrollHeight;
 }
 function chatAppend(m, force) {
@@ -2885,7 +2888,7 @@ async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
   setAtMe(key, false);
-  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 80; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
   applyChatFor(key, S.peer);
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
@@ -7013,7 +7016,18 @@ function bindUI() {
     try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
   });
   const box = $('chat-messages');
-  box.addEventListener('scroll', () => { S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80; if (box.scrollTop < 60) loadOlder(); }, { passive: true });
+  box.addEventListener('scroll', () => {
+    S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    if (box.scrollTop < 60) {
+      const total = S.msgs.filter(m => !isHidden(m)).length;
+      if (total > (S.rendered || 0)) {   // 本地还有更早的，先扩渲染窗口，不请求
+        const h = box.scrollHeight, t = box.scrollTop;
+        S.renderLimit = (S.renderLimit || 80) + 80;
+        chatRender(false);
+        box.scrollTop = box.scrollHeight - h + t;
+      } else loadOlder();
+    }
+  }, { passive: true });
   box.addEventListener('error', e => {
     const el = e.target; if (!el || !el.closest) return;
     if (el.tagName === 'VIDEO' && el.closest('.bubble.video')) { const u = el.getAttribute('src') || ''; if (/^blob:/.test(u)) return; el.closest('.bubble.video').innerHTML = '<div class="vfail">视频无法在这里播放<small>可能已被清理，或这个浏览器不支持这种格式；可以长按“保存到手机”再看</small></div>'; return; }
