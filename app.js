@@ -5051,7 +5051,8 @@ function onProfileChange(row) {
   const acc = row.account_id;
   S.profiles[acc] = Object.assign(S.profiles[acc] || {}, row);
   if (acc === ME()) {
-    if (row.bubble_color && window.__bubApply) window.__bubApply(row.bubble_color, true);
+    const _recent = Date.now() - LS.get('ch2bubbleAt', 0) < 600000;
+    if (row.bubble_color && window.__bubApply && !(_recent && LS.get('ch2bubble', '') && LS.get('ch2bubble', '') !== row.bubble_color)) window.__bubApply(row.bubble_color, true);
     if (S.me) { if (row.nickname) S.me.nickname = row.nickname; if (typeof row.signature === 'string') S.me.signature = row.signature; }
   }
   if (S.conv) chatRender(S.stick);
@@ -5077,7 +5078,15 @@ async function syncMyBubble() {
     const r = await sb.from('profiles').select('bubble_color').eq('id', S.uid).maybeSingle();
     const v = r && r.data && r.data.bubble_color;
     const local = LS.get('ch2bubble', '');
+    const localAt = LS.get('ch2bubbleAt', 0);
+    const recent = Date.now() - localAt < 600000;
     const migKey = 'ch2bubMig:' + S.uid;
+    if (recent && local && local !== 'violet' && v === 'violet') {
+      // 刚在本机选过、服务器还没收到：补传，别让默认紫盖回去
+      try { await sb.from('profiles').update({ bubble_color: local }).eq('id', S.uid); } catch (e) {}
+      return;
+    }
+    if (recent && local && local !== v) return;   // 刚选过，忽略旧的服务器值
     if (!LS.get(migKey, 0) && local && local !== 'violet' && v === 'violet') {
       // 服务器还没有这个人的颜色记录（默认紫），本机选过：上传本机颜色，不覆盖
       LS.set(migKey, 1);
@@ -6077,6 +6086,7 @@ function bindUI() {
     if (/^#[0-9a-f]{6}$/i.test(v)) { try { LS.set('ch2bubbleCustom', v); } catch (e) {} }
     try { document.documentElement.style.setProperty('--mine', cssOf(v)); } catch (e) {}
     LS.set('ch2bubble', v);
+    try { LS.set('ch2bubbleAt', Date.now()); } catch (e) {}
     if (!remote) { try { if (S.me) S.me.bubble_color = v; if (sb && S.uid) sb.from('profiles').update({ bubble_color: v }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {} }
     const o = OPTS.find(x => x[1] === v);
     b.textContent = '💬 气泡：' + (o ? o[0] : '自定义');
