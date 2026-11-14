@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 08-朋友圈 · 原文件第 5177-5540 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 08-朋友圈 · 原文件第 5180-5543 行 · 2026-11-15 线上版 -->
 /* ================= 朋友圈 ================= */
 const MV = {};
 async function loadMomentViews(rows) {
@@ -13,7 +13,7 @@ async function loadMomentViews(rows) {
         const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
         seen.forEach(function (id) { mvDone[id] = 1; });
         const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function () {}, function () {}); row && (mvDone[row.moment_id] = 1); });
+        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function (r) { if (!r || !r.error) mvDone[row.moment_id] = 1; }, function () {}); });
         // 本机记住已经记过的访客，下次打开不再重复请求
         try { const keys = Object.keys(mvDone); if (keys.length > 400) { const keep = keys.slice(-300), o = {}; keep.forEach(function (k) { o[k] = 1; }); mvDone = o; } LS.set(mvKey, mvDone); } catch (e) {}
       }
@@ -159,7 +159,7 @@ function paintMomentVideo() {
 }
 function addMomentVideo(f) {
   if (!f || !/^video\//.test(f.type || '')) { toast('请选择视频'); return; }
-  if (f.size > 50 * 1048576) { toast('视频最多 50MB'); return; }
+  if (f.size > 20 * 1048576) { toast('视频最多 20MB（省空间，也更快）'); return; }
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.vid = f; MO.vurl = URL.createObjectURL(f); paintMomentVideo();
 }
@@ -219,7 +219,7 @@ async function postMoment() {
     const urls = [];
     for (let i = 0; i < MO.imgs.length; i++) {
       let blob = MO.imgs[i];
-      try { blob = await fitJpeg(blob, 1600, 0.85); } catch (e) { logErr('momentImg', e); }
+      try { blob = await fitJpeg(blob, 1280, 0.8); } catch (e) { logErr('momentImg', e); }
       const path = ME() + '/moment_' + now() + '_' + i + '.jpg';
       const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
       if (up.error) throw up.error;
