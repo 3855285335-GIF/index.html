@@ -2075,7 +2075,7 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': { const _b = String(m.body || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(_b) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
+    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
