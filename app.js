@@ -681,6 +681,7 @@ function applyBoot(b) {
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
   setTimeout(function () { syncMyBubble(); }, 1800);
+  startDbSync();
   if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 60000);   // 全局只注册一次
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
@@ -5025,6 +5026,42 @@ function togglePin(k) {
   } catch (e) {}
   toast(on ? '已置顶' : '已取消置顶');
 }
+let dbSyncCh = null;
+function startDbSync() {
+  if (!sb || dbSyncCh) return;
+  try {
+    dbSyncCh = sb.channel('db-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, function (x) { onProfileChange(x.new); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, function (x) { onConvChange(x.new); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_mutes' }, function () { try { syncMutes(); } catch (e) {} })
+      .subscribe();
+  } catch (e) { logErr('dbsync', e); }
+}
+function onProfileChange(row) {
+  if (!row || !row.account_id) return;
+  const acc = row.account_id;
+  S.profiles[acc] = Object.assign(S.profiles[acc] || {}, row);
+  if (acc === ME()) {
+    if (row.bubble_color && window.__bubApply) window.__bubApply(row.bubble_color, true);
+    if (S.me) { if (row.nickname) S.me.nickname = row.nickname; if (typeof row.signature === 'string') S.me.signature = row.signature; }
+  }
+  if (S.conv) chatRender(S.stick);
+  sched('list'); sched('contacts'); sched('title'); sched('me');
+}
+function onConvChange(row) {
+  if (!row || !row.conv_key) return;
+  try {
+    const c = convOf(row.conv_key);
+    if (c) {
+      if (typeof row.unread === 'number') c.unread = row.unread;
+      if (row.last_body != null) c.last_body = row.last_body;
+      if (row.last_ts) c.last_ts = row.last_ts;
+      if (row.pinned_at !== undefined) c.pinned_at = row.pinned_at;
+    }
+    sched('list');
+    syncPins();
+  } catch (e) {}
+}
 async function syncMyBubble() {
   if (!sb || !S.uid) return;
   try {
@@ -6016,12 +6053,12 @@ function bindUI() {
     const o = OPTS.find(x => x[1] === v) || OPTS[0];
     return o[2];
   };
-  const apply = function (v) {
+  const apply = function (v, remote) {
     cur = v;
     if (/^#[0-9a-f]{6}$/i.test(v)) { try { LS.set('ch2bubbleCustom', v); } catch (e) {} }
     try { document.documentElement.style.setProperty('--mine', cssOf(v)); } catch (e) {}
     LS.set('ch2bubble', v);
-    try { if (S.me) S.me.bubble_color = v; if (sb && S.uid) sb.from('profiles').update({ bubble_color: v }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {}
+    if (!remote) { try { if (S.me) S.me.bubble_color = v; if (sb && S.uid) sb.from('profiles').update({ bubble_color: v }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {} }
     const o = OPTS.find(x => x[1] === v);
     b.textContent = '💬 气泡：' + (o ? o[0] : '自定义');
     document.querySelectorAll('#bub-swatches .bub-sw').forEach(function (el) { el.classList.toggle('on', el.dataset.v === v); });
@@ -6055,6 +6092,7 @@ function bindUI() {
     $('bub-custom').onclick = function () { if (Date.now() - lastSwatch < 600) return; apply(this.value); };   // 点开取色器就先应用当前自定义色，避免没改动时确定无效
   }
   apply(cur);
+  window.__bubApply = apply;
 })();
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;
