@@ -6137,10 +6137,9 @@ function bindUI() {
     hand: '"Hannotate SC","HanziPen SC","STXingkai",cursive',
     weibei: '"Weibei SC","STKaiti",serif',
     wawa: '"Wawati SC","Yuanti SC",sans-serif',
-    mono: '"SF Mono","Consolas","Menlo",monospace',
-    naikuo: '"小可奶酪体","奶酪体","NaikuoTi","PingFang SC",sans-serif'
+    mono: '"SF Mono","Consolas","Menlo",monospace'
   };
-  const LABEL = { system: '系统', round: '圆体', song: '宋体', kai: '楷体', hei: '黑体', serif: '衬线', denxian: '等线', lishu: '隶书', xingkai: '行楷', hand: '手写', weibei: '魏碑', wawa: '娃娃体', mono: '等宽', naikuo: '奶酪体(本机)' };
+  const LABEL = { system: '系统', round: '圆体', song: '宋体', kai: '楷体', hei: '黑体', serif: '衬线', denxian: '等线', lishu: '隶书', xingkai: '行楷', hand: '手写', weibei: '魏碑', wawa: '娃娃体', mono: '等宽' };
   let cur = LS.get('ch2font', 'system') || 'system';
   const apply = function (v) {
     cur = v; LS.set('ch2font', v);
