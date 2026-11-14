@@ -89,7 +89,7 @@
     /* 双栏时左右底栏同高，横线才能对齐 */
     body.chat-open .app-nav { height: 64px; padding: 0 8px; }
     body.chat-open .app-nav button { height: 100%; justify-content: center; padding: 4px 4px 2px; }
-    body.chat-open #chat-input-bar { height: 64px; padding: 0 10px; }
+    body.chat-open #chat-input-bar { min-height: 64px; height: auto; padding: 0 10px; }
   }
   .view { display: none; position: absolute; inset: 0; flex-direction: column; }
   .view.active { display: flex; }
@@ -386,7 +386,6 @@
   .msg.mine .msg-body { align-items: flex-end; }
   .msg .row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
   .bubble { background: var(--them); color: var(--ink); padding: 9px 13px; border-radius: 19px 19px 19px 6px; font-size: 17px; line-height: 1.5; word-break: break-word; white-space: pre-wrap; user-select: text; -webkit-user-select: text; box-shadow: var(--shadow); }
-  .msg { content-visibility: auto; contain-intrinsic-size: auto 72px; }
   .msg.mine .bubble { background: var(--mine); color: #fff; border-radius: 19px 19px 6px 19px; -webkit-touch-callout: none; box-shadow: 0 6px 18px rgba(108,92,231,.28); }
   .bubble.img { padding: 0; overflow: hidden; background: transparent !important; box-shadow: var(--shadow); }
   .bubble.img img { max-width: 220px; max-height: 300px; min-width: 70px; min-height: 70px; display: block; border-radius: 18px; background: var(--surface2); }
@@ -930,8 +929,11 @@
     });
   }
   var cached = null; try { cached = localStorage.getItem(KEY); } catch (e) {}
-  if (cached && !isSafariLike) {
-    try { run(cached); window.__lib = Promise.resolve(); return; } catch (e) { try { localStorage.removeItem(KEY); } catch (x) {} }
+  if (cached) {
+    try {
+      if (isSafariLike) { const _u = URL.createObjectURL(new Blob([cached], { type: 'text/javascript' })); window.__lib = scriptOne(_u); return; }
+      run(cached); window.__lib = Promise.resolve(); return;
+    } catch (e) { try { localStorage.removeItem(KEY); } catch (x) {} }
   }
   window.__lib = race().then(function (r) {
     if (r.text) { try { localStorage.setItem(KEY, r.text); } catch (e) {} }
@@ -1749,7 +1751,7 @@ function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderM
 function convPreview(c) {
   let t = parseQ(c.last_body).text;
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
-  if (/^e:[^\\s]{1,16}$/u.test(t)) return '[表情]';
+  if (/^e:[^\s]{1,16}$/u.test(t)) return '[表情]';
   if (t) return t;
   if (!c.last_ts) {
     if (isGroupKey(c.convKey)) { fixPreview(c.convKey); return '群聊'; }
@@ -1985,7 +1987,7 @@ function applyBoot(b) {
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
-  setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);   // 全局只注册一次
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -2909,7 +2911,7 @@ async function openConv(key, peer) {
     if (cachedMsgs.length && rows.length >= PAGE) {
       const have = new Set(cachedMsgs.map(m => m.id));
       let guard = 0; const gt0 = Date.now();
-      while (guard < 40 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
+      while (guard < 8 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
         const older = await fetchMsgs(key, rows[0].created_at);
         if (!older.length) break;
         rows = older.concat(rows);
@@ -2917,6 +2919,7 @@ async function openConv(key, peer) {
       }
       if (S.conv !== key) return;
     }
+    if (cachedMsgs.length && rows.length >= PAGE && !rows.some(r => have.has(r.id))) { S.msgs = []; }   // 接不上旧缓存就直接丢，只显示最新一页，避免 40 次查询还缺一段
     rows.forEach(r => S.seen.add(r.id));
     const map = new Map(); rows.forEach(r => map.set(r.id, r));
     S.msgs.forEach(m => { if (!map.has(m.id) && !isHidden(m)) map.set(m.id, m); });   // 刚发出去、还没进这次查询结果的消息不能丢
@@ -3574,17 +3577,7 @@ async function onInvite(p) {
   if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   if (!S.friends.includes(p.from)) return;
-  // 校验这条邀请确实在数据库里，防止有人往实时通道伪造来电
-  let okInv = false;
-  for (let i = 0; i < 3 && !okInv; i++) {
-    try {
-      const r = await sb.from('signals').select('payload').eq('from_acc', p.from).eq('to_acc', ME()).order('created_at', { ascending: false }).limit(6);
-      okInv = (r.data || []).some(function (s) { return s.payload && s.payload.id === p.id && s.payload.t === 'invite'; });
-    } catch (e) {}
-    if (!okInv) await new Promise(function (r) { setTimeout(r, 250); });
-  }
-  if (!okInv) return;
-  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
+  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
@@ -3682,6 +3675,7 @@ function onSig(p) {
   if (!p || typeof p !== 'object' || typeof p.from !== 'string' || typeof p.id !== 'string') return;
   if (GC.on && p.cid && p.cid === GC.cid && typeof p.t === 'string' && p.t.indexOf('g') === 0) { gcOnSig(p); return; }   // 群语音：成员不一定互为好友，不能按好友过滤
   if (!S.friends.includes(p.from)) return;
+  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
   if (sigDup(p)) return;
   switch (p.t) {
     case 'invite': return onInvite(p);
@@ -5188,7 +5182,7 @@ async function loadMomentViews(rows) {
         const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
         seen.forEach(function (id) { mvDone[id] = 1; });
         const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function () {}, function () {}); row && (mvDone[row.moment_id] = 1); });
+        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function (r) { if (!r || !r.error) mvDone[row.moment_id] = 1; }, function () {}); });
         // 本机记住已经记过的访客，下次打开不再重复请求
         try { const keys = Object.keys(mvDone); if (keys.length > 400) { const keep = keys.slice(-300), o = {}; keep.forEach(function (k) { o[k] = 1; }); mvDone = o; } LS.set(mvKey, mvDone); } catch (e) {}
       }
@@ -6270,7 +6264,7 @@ function togglePin(k) {
     if (sb && S.uid && isPinned(k) !== undefined) {
       const patch = { pinned_at: on ? new Date().toISOString() : null };
       sb.from('conversations').update(patch).eq('owner_acc', ME()).eq('conv_key', k).select('conv_key').then(function (r) {
-        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? null : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
+        if (r && !r.error && (!r.data || !r.data.length)) sb.from('conversations').insert({ owner_acc: ME(), conv_key: k, peer_acc: isGroupKey(k) ? ME() : peerOf(k, ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), pinned_at: patch.pinned_at }).then(function () {}, function () {});
       }, function () {});
     }
   } catch (e) {}
@@ -6902,7 +6896,7 @@ function bindViewport() {
           root.style.setProperty('--vvt', '0px');
           document.body.classList.remove('kb');
         }
-        if (S.conv) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
+        if (S.conv && S.stick) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
       } catch (e) {}
     }, 900);
   };
