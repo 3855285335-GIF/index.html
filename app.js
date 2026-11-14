@@ -49,6 +49,15 @@ async function loadIceConfig() {
 
 /* ================= 工具 ================= */
 const $ = id => document.getElementById(id);
+function nightCfg() { try { return LS.get('ch2night', null); } catch (e) { return null; } }
+function nightOnAt(d) {
+  const c = nightCfg(); if (!c || !c.on) return false;
+  const cur = d.getHours() * 60 + d.getMinutes();
+  const a = String(c.from || '23:00').split(':'), b = String(c.to || '07:00').split(':');
+  const f = (parseInt(a[0], 10) || 0) * 60 + (parseInt(a[1], 10) || 0);
+  const t = (parseInt(b[0], 10) || 0) * 60 + (parseInt(b[1], 10) || 0);
+  return f <= t ? (cur >= f && cur < t) : (cur >= f || cur < t);
+}
 const now = () => Date.now();
 const ts = m => Date.parse(m.created_at) || 0;
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -847,7 +856,7 @@ function msgHTML(m) {
     default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
-  if (!mine && m.type !== 'recalled' && m.type !== 'call') {
+  if (!mine && m.type === 'text') {
     const _pc = (S.profiles[m.from_acc] || {}).bubble_color || bubbleColorCache[m.from_acc];
     const _bc = bubCss(_pc);
     if (_bc) body = body.replace(/class="bubble([^"]*)"/, 'class="bubble$1" style="background:' + _bc + ';color:#fff"');
@@ -1742,8 +1751,8 @@ async function openConv(key, peer) {
     try { if (navigator.onLine !== false) showBanner(''); } catch (x) {}
     if (S.conv !== key) return;
     // 离开后对方又发了很多条：缓存和最新一页之间会有缺口，往上翻也会跳过。这里先补齐（最多 4 页）
+    const have = new Set(cachedMsgs.map(m => m.id));
     if (cachedMsgs.length && rows.length >= PAGE) {
-      const have = new Set(cachedMsgs.map(m => m.id));
       let guard = 0; const gt0 = Date.now();
       while (guard < 8 && Date.now() - gt0 < 6000 && rows.length >= PAGE && !rows.some(r => have.has(r.id))) {
         const older = await fetchMsgs(key, rows[0].created_at);
@@ -2421,7 +2430,8 @@ async function onInvite(p) {
   if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   if (!S.friends.includes(p.from)) return;
-  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
+  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
+  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
@@ -5968,9 +5978,12 @@ function bindViewport() {
     if (desktop.matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
     if (!vv.height) return;
     // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
-    root.style.setProperty('--vvh', vv.height + 'px');
-    root.style.setProperty('--vvt', Math.max(0, vv.offsetTop || 0) + 'px');
-    const kb = (window.innerHeight - vv.height > 100) || (vv.height < (window.screen.height || 0) * 0.68);
+    // 没在输入框里打字时一律按整屏算，避免 iPhone 报个“半屏高度”
+    const typing = document.activeElement && document.activeElement.id === 'chat-input';
+    const h = typing ? vv.height : Math.max(window.innerHeight || 0, vv.height || 0);
+    root.style.setProperty('--vvh', h + 'px');
+    root.style.setProperty('--vvt', (typing ? Math.max(0, vv.offsetTop || 0) : 0) + 'px');
+    const kb = typing && ((window.innerHeight - vv.height > 100) || (vv.height < (window.screen.height || 0) * 0.68));
     document.body.classList.toggle('kb', kb);
     if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
   };
@@ -6468,10 +6481,10 @@ function nightOnAt(d) {
   $('moment-add-img').onclick = function () { $('moment-file').click(); };
   $('moment-add-video').onclick = function () { const i = $('moment-video-file'); i.value = ''; i.click(); };
   $('moment-video-file').onchange = function (e) { const f = (e.target.files || [])[0]; e.target.value = ''; addMomentVideo(f); };
-  $('moment-cover-pick').onclick = function () { if (!MO.video) { toast('先选一个视频'); return; } const i = $('moment-cover-file'); i.value = ''; i.click(); };
+  $('moment-cover-pick').onclick = function () { if (!MO.vid) { toast('先选一个视频'); return; } const i = $('moment-cover-file'); i.value = ''; i.click(); };
   $('moment-cover-file').onchange = async function (e) {
     const f = (e.target.files || [])[0]; e.target.value = '';
-    if (!f || !MO.video) return;
+    if (!f || !MO.vid) return;
     try { toast('正在上传封面…'); MO.cover = await upload(f, 'jpg', f.type || 'image/jpeg', 'mcover_'); toast('封面已设置'); }
     catch (x) { logErr('mcover', x); toast('封面上传失败'); }
   };
@@ -6737,9 +6750,12 @@ if ($('btn-devices')) $('btn-devices').onclick = async function () {
       return { label: (id === devId() ? '📱 本机 · ' : '') + String(x.ua || '未知设备').slice(0, 28) + ' · ' + (x.at ? fmtTime(x.at) : ''), fn: null };
     });
     items.push({ label: '⬅ 退出其他设备', danger: true, fn: function () {
-      sb.from('profiles').update({ kick_at: new Date().toISOString() }).eq('id', S.uid);
-      LS.set('ch2loginAt', Date.now());
-      toast('其他设备下次联网时会自动退出');
+      const t = new Date().toISOString();
+      sb.from('profiles').update({ kick_at: t }).eq('id', S.uid).then(function (r) {
+        if (r && r.error) { toast('操作失败：' + r.error.message); return; }
+        LS.set('ch2loginAt', Date.now());
+        toast('其他设备下次联网时会自动退出');
+      }, function () { toast('网络失败，没发出去'); });
     } });
     items.push({ label: '关闭', fn: null });
     openActs('登录设备（' + ids.length + '）', items);
