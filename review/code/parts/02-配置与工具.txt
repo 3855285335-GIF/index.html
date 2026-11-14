@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 02-配置与工具 · 原文件第 1273-1513 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 02-配置与工具 · 原文件第 1312-1552 行 · 2026-11-14 线上版 -->
 /* ================= 配置 ================= */
 const SUPABASE_URL = 'https://uaoiqbxptnbrvkzjwguc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_2FQ9q01lGWiDntr7VUrzcQ_SkgIo8uf';
