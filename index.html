@@ -2456,12 +2456,12 @@ async function compressImage(file) {
       src = im; w = im.naturalWidth || im.width; h = im.naturalHeight || im.height;
     }
     if (!w || !h) return file;
-    const max = 1600, r = Math.min(1, max / Math.max(w, h));
+    const max = 1280, r = Math.min(1, max / Math.max(w, h));
     const cw = Math.max(1, Math.round(w * r)), ch = Math.max(1, Math.round(h * r));
     const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(src, 0, 0, cw, ch);
     if (src.close) { try { src.close(); } catch (e) {} }
-    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.85); });
+    const blob = await new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.8); });
     if (!blob || blob.size >= file.size * 0.92) return file;
     return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
   } catch (e) { logErr('img-compress', e); return file; }
@@ -5337,7 +5337,7 @@ function paintMomentVideo() {
 }
 function addMomentVideo(f) {
   if (!f || !/^video\//.test(f.type || '')) { toast('请选择视频'); return; }
-  if (f.size > 50 * 1048576) { toast('视频最多 50MB'); return; }
+  if (f.size > 20 * 1048576) { toast('视频最多 20MB（省空间，也更快）'); return; }
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.vid = f; MO.vurl = URL.createObjectURL(f); paintMomentVideo();
 }
@@ -5397,7 +5397,7 @@ async function postMoment() {
     const urls = [];
     for (let i = 0; i < MO.imgs.length; i++) {
       let blob = MO.imgs[i];
-      try { blob = await fitJpeg(blob, 1600, 0.85); } catch (e) { logErr('momentImg', e); }
+      try { blob = await fitJpeg(blob, 1280, 0.8); } catch (e) { logErr('momentImg', e); }
       const path = ME() + '/moment_' + now() + '_' + i + '.jpg';
       const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
       if (up.error) throw up.error;
