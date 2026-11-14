@@ -5144,6 +5144,12 @@ function renderProfile() {
   const se = $('pf-sign'); if (se) { se.textContent = sg; se.style.display = sg ? '' : 'none'; }
   $('pf-remark').textContent = rm ? '修改备注' : '设置备注';
   ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-del'].forEach(id => { $(id).style.display = friend ? '' : 'none'; });
+  const addBtn = $('pf-add');
+  if (addBtn) {
+    const self = a === ME();
+    addBtn.style.display = (!friend && !self) ? '' : 'none';
+    addBtn.dataset.acc = a;
+  }
 }
 function pfCall(video) {
   const a = pfAcc; closeProfile(); if (!a) return;
@@ -5886,6 +5892,7 @@ function bindUI() {
   $('pf-backdrop').onclick = () => { if (now() - pfOpenAt > 350) closeProfile(); };
   $('pf-close').onclick = closeProfile;
   $('pf-chat').onclick = () => { const a = pfAcc; closeProfile(); if (a && S.peer !== a) openConv(convKeyOf(ME(), a), a); };
+  if ($('pf-add')) $('pf-add').onclick = function () { if (this.dataset.acc) addFriend(this); };
   $('pf-voice').onclick = () => pfCall(false); $('pf-video').onclick = () => pfCall(true);
   $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
   $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };
