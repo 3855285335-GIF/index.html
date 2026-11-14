@@ -696,9 +696,9 @@ function applyBoot(b) {
   setTimeout(function () { syncMyBubble(); }, 1800);
   setTimeout(function () { try { retryFailed(); } catch (e) {} }, 2600);
   startDbSync();
-  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 15000);   // 15 秒对一次，秒级体验
-  if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 30000);
-  if (!window.__kickT) window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 20000);
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, (S.rt && S.rt.db ? 60000 : 20000));
+  if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
+  if (!window.__kickT) window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 60000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -888,7 +888,7 @@ function chatRender(stick) {
   const b = $('chat-messages');
   const vis = S.msgs.filter(m => !isHidden(m));
   if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; S.rendered = 0; return; }
-  const limit = Math.min(S.renderLimit || 80, vis.length);
+  const limit = Math.min(S.renderLimit || 200, vis.length);
   const shown = vis.slice(vis.length - limit);   // 只渲染最近 N 条，往上翻再扩，几百条也不卡
   let prevDay = '';
   b.innerHTML = shown.map(function (m) {
@@ -1708,7 +1708,7 @@ async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
   setAtMe(key, false);
-  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 80; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
   if (!draftOf(key) && sb && S.token) {
     sb.from('conversations').select('draft').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle().then(function (r) {
@@ -1720,7 +1720,7 @@ async function openConv(key, peer) {
   applyChatFor(key, S.peer);
   if (!isGroupKey(key) && sb && S.token) {
     const _pr = S.profiles[S.peer];
-    if (!_pr || !_pr.bubble_color) sb.from('profiles').select('account_id,bubble_color').eq('account_id', S.peer).maybeSingle().then(function (r) {
+    if ((!_pr || !_pr.bubble_color) && !bubbleColorCache[S.peer]) sb.from('profiles').select('account_id,bubble_color').eq('account_id', S.peer).maybeSingle().then(function (r) {
       if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); rememberColor(S.peer, r.data.bubble_color); if (S.conv === key && S.msgs.length) chatRender(S.stick); }
     }, function () {});
   }
@@ -5258,9 +5258,9 @@ function startDbSync() {
   if (!sb || dbSyncCh) return;
   try {
     dbSyncCh = sb.channel('db-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, function (x) { onProfileChange(x.new); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, function (x) { onConvChange(x.new); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_mutes' }, function () { try { syncMutes(); } catch (e) {} })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: 'account_id=eq.' + ME() }, function (x) { onProfileChange(x.new); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: 'owner_acc=eq.' + ME() }, function (x) { onConvChange(x.new); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_mutes', filter: 'owner_acc=eq.' + ME() }, function () { try { syncMutes(); } catch (e) {} })
       .subscribe();
   } catch (e) { logErr('dbsync', e); }
 }
@@ -5273,7 +5273,7 @@ function onProfileChange(row) {
     if (row.bubble_color && window.__bubApply && !(_recent && LS.get('ch2bubble', '') && LS.get('ch2bubble', '') !== row.bubble_color)) window.__bubApply(row.bubble_color, true);
     if (S.me) { if (row.nickname) S.me.nickname = row.nickname; if (typeof row.signature === 'string') S.me.signature = row.signature; }
   }
-  if (S.conv) chatRender(S.stick);
+  if (S.conv && row.bubble_color) chatRender(S.stick);
   sched('list'); sched('contacts'); sched('title'); sched('me');
 }
 function onConvChange(row) {
@@ -5302,11 +5302,7 @@ function recordDevice() {
   if (!sb || !S.uid) return;
   try {
     const ua = (navigator.userAgent || '').slice(0, 110);
-    sb.from('profiles').select('devices').eq('id', S.uid).maybeSingle().then(function (r) {
-      const old = (r && r.data && r.data.devices && typeof r.data.devices === 'object') ? r.data.devices : {};
-      old[devId()] = { ua: ua, at: new Date().toISOString() };
-      sb.from('profiles').update({ devices: old }).eq('id', S.uid).then(function () {}, function () {});
-    }, function () {});
+    sb.from('user_devices').upsert({ account: ME(), device_id: devId(), ua: ua, last_at: new Date().toISOString() }, { onConflict: 'account,device_id' }).then(function () {}, function () {});
   } catch (e) {}
 }
 function checkKick() {
@@ -6145,7 +6141,7 @@ function bindUI() {
       const total = S.msgs.filter(m => !isHidden(m)).length;
       if (total > (S.rendered || 0)) {   // 本地还有更早的，先扩渲染窗口，不请求
         const h = box.scrollHeight, t = box.scrollTop;
-        S.renderLimit = (S.renderLimit || 80) + 80;
+        S.renderLimit = (S.renderLimit || 200) + 80;
         chatRender(false);
         box.scrollTop = box.scrollHeight - h + t;
       } else loadOlder();
@@ -6605,6 +6601,7 @@ $('ie-panel-stk').addEventListener('click', function (e) {
     if (e.target.closest('.mo-fwd')) {
       const mm = (MO.list || []).find(function (x) { return String(x.id) === String(id); });
       if (!mm) return;
+      if (mm.author_acc !== ME() && (mm.visibility === 'private' || (Array.isArray(mm.visible_to) && mm.visible_to.length))) { toast('这条朋友圈设了可见范围，不能转发'); return; }
       const list = [{ label: '发给自己（备忘）', fn: function () { forwardMomentTo(mm, ME()); } }];
       S.friends.forEach(function (a) { list.push({ label: peerName(a), fn: function () { forwardMomentTo(mm, a); } }); });
       (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardMomentToGroup(mm, g.id); } }); });
@@ -6745,13 +6742,12 @@ if ($('btn-exp')) $('btn-exp').onclick = exportSettingsCode;
 if ($('btn-imp')) $('btn-imp').onclick = importSettingsCode;
 if ($('btn-devices')) $('btn-devices').onclick = async function () {
   try {
-    const r = await sb.from('profiles').select('devices').eq('id', S.uid).maybeSingle();
-    const d = (r && r.data && r.data.devices && typeof r.data.devices === 'object') ? r.data.devices : {};
-    const ids = Object.keys(d);
-    const items = ids.map(function (id) {
-      const x = d[id] || {};
-      return { label: (id === devId() ? '📱 本机 · ' : '') + String(x.ua || '未知设备').slice(0, 28) + ' · ' + (x.at ? fmtTime(x.at) : ''), fn: null };
+    const r = await sb.from('user_devices').select('device_id,ua,last_at').eq('account', ME()).order('last_at', { ascending: false }).limit(20);
+    const rows = (r && r.data) || [];
+    const items = rows.map(function (x) {
+      return { label: (x.device_id === devId() ? '📱 本机 · ' : '') + String(x.ua || '未知设备').slice(0, 28) + ' · ' + (x.last_at ? fmtTime(x.last_at) : ''), fn: null };
     });
+    if (!items.length) items.push({ label: '还没有记录', fn: null });
     items.push({ label: '⬅ 退出其他设备', danger: true, fn: function () {
       const t = new Date().toISOString();
       sb.from('profiles').update({ kick_at: t }).eq('id', S.uid).then(function (r) {
