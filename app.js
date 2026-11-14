@@ -4911,6 +4911,13 @@ let saving2 = false;
 async function saveToPhone(url, name) {
   if (!url || saving2) return;
   if (url.indexOf('blob:') === 0) { toast('还在发送中，等发完再保存'); return; }
+  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
+  // 电脑：先弹「另存为」（必须在点击的手势里，不能等下载完再弹，否则浏览器会拦）
+  let handle = null;
+  if (desk && window.showSaveFilePicker) {
+    try { handle = await window.showSaveFilePicker({ suggestedName: name }); }
+    catch (e) { if (e && e.name === 'AbortError') return; handle = null; }
+  }
   saving2 = true; toast('正在准备…');
   let f = null;
   try {
@@ -4918,16 +4925,14 @@ async function saveToPhone(url, name) {
     const b = await r.blob(); f = new File([b], name, { type: b.type || 'application/octet-stream' });
   } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
   saving2 = false; if (!f) return;
+  if (handle) {
+    try {
+      const w = await handle.createWritable(); await w.write(f); await w.close();
+      toast('已保存到你选的位置：' + name); return;
+    } catch (e) { logErr('save-write', e); toast('写入失败，改走浏览器下载'); }
+  }
   let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
   if (can) { shareFile(f); return; }
-  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
-  if (desk && window.showSaveFilePicker) {
-    try {
-      const h = await window.showSaveFilePicker({ suggestedName: name });
-      const w = await h.createWritable(); await w.write(f); await w.close();
-      toast('已保存：' + name); return;
-    } catch (e) { if (e && e.name === 'AbortError') return; logErr('save-picker', e); }
-  }
   dlFile(f);
 }
 function saveMsg(m) {
