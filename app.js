@@ -1625,7 +1625,17 @@ async function openConv(key, peer) {
     S.msgs = Array.from(map.values()).sort((a, b) => ts(a) - ts(b));
     S.hasMore = rows.length >= PAGE && !(rows.length && rows.every(isHidden));
     chatRender(true); saveMsgsSoon(); sendReadAck(key, true); fetchPeerRead(key);
-  } catch (e) { logErr('open', e); if (!S.msgs.length) $('chat-messages').innerHTML = '<div class="empty">加载失败，请检查网络后重新打开</div>'; }
+  } catch (e) {
+    logErr('open', e);
+    const box = $('chat-messages');
+    if (!S.msgs.length) {
+      box.innerHTML = '<div class="empty">加载失败，请检查网络后重试<br><button type="button" id="chat-retry" style="margin-top:12px;padding:8px 18px;border-radius:10px;border:0;background:#7c5cff;color:#fff">重试</button></div>';
+      const rb = document.getElementById('chat-retry');
+      if (rb) rb.onclick = function () { openConv(key, peer); };
+    } else {
+      try { showBanner('网络不可用，显示的是本地缓存'); } catch (x) {}
+    }
+  }
 }
 function closeChat() {
   recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs(); exitMulti();
@@ -6273,6 +6283,8 @@ setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜�
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
 if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });
+window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); } catch (e) {} });
 boot();
 })();
 
