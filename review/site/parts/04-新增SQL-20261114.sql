@@ -142,3 +142,18 @@ begin
   new.type := 'recalled'; new.body := '';
   return new;
 end $function$;
+-- 11) 账号 ID 格式约束（先 NOT VALID 加，确认无违规后 VALIDATE）
+alter table public.profiles drop constraint if exists profiles_account_fmt;
+alter table public.profiles add constraint profiles_account_fmt
+  check (account_id ~ '^[a-z0-9_-]{3,20}$') not valid;
+alter table public.profiles validate constraint profiles_account_fmt;
+
+-- 12) 踢人名单（被踢的人不能用链接重新加入）
+create table if not exists public.group_kicks (
+  group_id uuid not null references public.chat_groups(id) on delete cascade,
+  account_id text not null,
+  at timestamptz not null default now(),
+  primary key (group_id, account_id)
+);
+alter table public.group_kicks enable row level security;
+revoke all on public.group_kicks from anon, public, authenticated;
