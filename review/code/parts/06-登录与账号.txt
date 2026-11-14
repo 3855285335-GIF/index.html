@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 06-登录与账号 · 原文件第 4054-4427 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 06-登录与账号 · 原文件第 4152-4527 行 · 2026-11-14 线上版 -->
 /* ================= 登录 / 启动 ================= */
 async function start(user) {
   S.started = true; S.uid = user.id;
@@ -54,7 +54,7 @@ function draftSave(conv, text) {
 let fsOk = null, actItems = [], sheetZ = 2700;
 function raiseSheet(sheetId, backdropId) {
   sheetZ += 20;
-  if (sheetZ > 2500) sheetZ = 500;   // 封顶：始终低于通话界面（3000），避免开太多次后菜单盖住来电
+  if (sheetZ > 50000) sheetZ = 500;   // 封顶值远高于普通弹层；通话界面在 100000，不会被盖住
   const b = document.getElementById(backdropId), s = document.getElementById(sheetId);
   if (b) b.style.zIndex = sheetZ;
   if (s) s.style.zIndex = sheetZ + 1;
@@ -156,6 +156,8 @@ async function fitJpeg(file, maxW, q) {
 function applyChatBg(url) {
   const v = url ? 'url("' + String(url).replace(/"/g, '%22') + '")' : 'none';
   document.documentElement.style.setProperty('--chat-bg', v);
+  const cv = document.getElementById('chat-view');
+  if (cv) cv.style.backgroundImage = v;   // 同时写到元素上，避免变量在某些时机丢失导致背景“消失”
   document.body.classList.toggle('has-chat-bg', !!url);
 }
 let FBG = {}, fbgUid = null;
