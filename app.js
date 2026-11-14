@@ -74,7 +74,7 @@ const convKeyOf = (a, b) => [a, b].sort().join('::');
 const isGroupKey = k => typeof k === 'string' && k.indexOf('g:') === 0;   // 群会话：g:<群id>
 const gidOf = k => isGroupKey(k) ? k.slice(2) : '';
 const peerOf = (k, me) => { if (isGroupKey(k)) return k; const p = k.split('::'); return p[0] === me ? p[1] : p[0]; };   // 群不按冒号拆
-const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null });
+const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null });
 const SEP = '\u2063';
 function encQ(q, text) { return SEP + 'Q' + q.id + SEP + String(q.snip || '').replace(/[\u2063\r\n]+/g, ' ').slice(0, 40) + SEP + text; }
 function parseQ(body) {
@@ -803,7 +803,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type !== 'recalled' && m.type !== 'call') {
@@ -1583,11 +1583,29 @@ function showMsgMenu(id) {
   $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-recall').style.display = canRecall ? '' : 'none';
+  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st) ? '' : 'none';
   $('msg-menu-del').style.display = '';
   $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
   menuId = id; menuOpenAt = now(); $('msg-menu-backdrop').classList.add('active'); $('msg-menu').classList.add('active');
 }
 function closeMenu() { $('msg-menu-backdrop').classList.remove('active'); $('msg-menu').classList.remove('active'); menuId = null; }
+function editMsg(m) {
+  if (!m || m.type !== 'text' || m.from_acc !== ME()) return;
+  const pq = parseQ(m.body);
+  openForm('编辑消息', [{ ph: '消息内容', val: pq.text, max: TEXT_MAX }], function (vals) {
+    const body = String(vals[0] || '').trim();
+    if (!body) return '不能为空';
+    if (body === pq.text) return '';
+    const nb = pq.q ? encQ(pq.q, body) : body;
+    const t = new Date().toISOString();
+    sb.from('messages').update({ body: nb, edited_at: t }).eq('id', m.id).then(function (r) {
+      if (r && r.error) { toast('保存失败：' + r.error.message); return; }
+      patchMsg(m.id, { body: nb, edited_at: t });
+      toast('已保存');
+    }, function () { toast('保存失败，检查网络'); });
+    return '';
+  }, '保存');
+}
 function copyText(t) {
   const done = () => { SFX.tap(); toast('已复制'); };
   try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, () => fb()); return; } } catch (e) {}
@@ -1601,6 +1619,7 @@ function menuAction(kind) {
   else if (kind === 'fwd') setTimeout(() => openForward(m), 50);
   else if (kind === 'stk') addToStickers(m);
   else if (kind === 'save') saveMsg(m);
+  else if (kind === 'edit') setTimeout(function () { editMsg(m); }, 50);
   else if (kind === 'del') {
     hidden.add(id); saveHidden(); S.out.delete(id);
     const el = msgElOf(id); if (el) el.remove();
@@ -3009,6 +3028,25 @@ function openActs(title, items) {
 }
 let actOpenAt = 0;
 function closeActs() { $('act-backdrop').classList.remove('active'); $('act-sheet').classList.remove('active'); }
+function globalSearch(q) {
+  if (!sb || !S.me) return;
+  const safe = String(q).replace(/[%_]/g, '');
+  if (!safe) { toast('换个关键词'); return; }
+  toast('搜索中…');
+  sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,created_at').eq('type', 'text').ilike('body', '%' + safe + '%').order('created_at', { ascending: false }).limit(40).then(function (r) {
+    if (r.error) { toast('搜索失败：' + r.error.message); return; }
+    const rows = r.data || [];
+    if (!rows.length) { toast('没找到「' + safe + '」'); return; }
+    const items = rows.map(function (x) {
+      const conv = x.conv_key, gp = isGroupKey(conv), peer = gp ? conv : peerOf(conv, ME());
+      const txt = (parseQ(x.body).text || '').replace(/\s+/g, ' ').slice(0, 28);
+      const gname = gp ? ((GRP.list.find(function (g) { return 'g:' + g.id === conv; }) || {}).name || '群聊') : peerName(peer);
+      return { label: gname + ' · ' + fmtTime(x.created_at) + ' · ' + txt, fn: function () { closeActs(); closeForm(); openConv(conv, peer); } };
+    });
+    items.push({ label: '取消', fn: null });
+    openActs('搜索「' + safe + '」', items);
+  }, function () { toast('搜索失败，检查网络'); });
+}
 
 /* ================= 账号：头像 / 昵称 / 密码 ================= */
 function notifyFriends() { if (!S.token) return; S.friends.forEach(a => bcast('u:' + a, 'fr', { from: ME() })); }
@@ -6467,6 +6505,14 @@ $('gi-members').onclick = function (e) {
 };
 if ($('me-avatar')) $('me-avatar').onclick = function (e) { e.stopPropagation(); showSelfCard(''); };
 if (document.querySelector('.me-card')) document.querySelector('.me-card').addEventListener('click', function (e) { if (e.target.closest('button')) return; showSelfCard(''); });
+$('btn-gsearch').onclick = function () {
+  openForm('搜索全部聊天', [{ ph: '关键词', max: 40 }], function (vals) {
+    const q = String(vals[0] || '').trim();
+    if (!q) return '输入关键词';
+    globalSearch(q);
+    return '';
+  }, '搜索');
+};
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
