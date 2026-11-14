@@ -1583,7 +1583,7 @@ function showMsgMenu(id) {
   $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-recall').style.display = canRecall ? '' : 'none';
-  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st) ? '' : 'none';
+  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st && now() - ts(m) <= 60000) ? '' : 'none';
   $('msg-menu-del').style.display = '';
   $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
   menuId = id; menuOpenAt = now(); $('msg-menu-backdrop').classList.add('active'); $('msg-menu').classList.add('active');
@@ -1591,6 +1591,7 @@ function showMsgMenu(id) {
 function closeMenu() { $('msg-menu-backdrop').classList.remove('active'); $('msg-menu').classList.remove('active'); menuId = null; }
 function editMsg(m) {
   if (!m || m.type !== 'text' || m.from_acc !== ME()) return;
+  if (now() - ts(m) > 60000) { toast('超过 1 分钟，不能编辑了'); return; }
   const pq = parseQ(m.body);
   openForm('编辑消息', [{ ph: '消息内容', val: pq.text, max: TEXT_MAX }], function (vals) {
     const body = String(vals[0] || '').trim();
@@ -3028,25 +3029,6 @@ function openActs(title, items) {
 }
 let actOpenAt = 0;
 function closeActs() { $('act-backdrop').classList.remove('active'); $('act-sheet').classList.remove('active'); }
-function globalSearch(q) {
-  if (!sb || !S.me) return;
-  const safe = String(q).replace(/[%_]/g, '');
-  if (!safe) { toast('换个关键词'); return; }
-  toast('搜索中…');
-  sb.from('messages').select('id,conv_key,from_acc,to_acc,type,body,created_at').eq('type', 'text').ilike('body', '%' + safe + '%').order('created_at', { ascending: false }).limit(40).then(function (r) {
-    if (r.error) { toast('搜索失败：' + r.error.message); return; }
-    const rows = r.data || [];
-    if (!rows.length) { toast('没找到「' + safe + '」'); return; }
-    const items = rows.map(function (x) {
-      const conv = x.conv_key, gp = isGroupKey(conv), peer = gp ? conv : peerOf(conv, ME());
-      const txt = (parseQ(x.body).text || '').replace(/\s+/g, ' ').slice(0, 28);
-      const gname = gp ? ((GRP.list.find(function (g) { return 'g:' + g.id === conv; }) || {}).name || '群聊') : peerName(peer);
-      return { label: gname + ' · ' + fmtTime(x.created_at) + ' · ' + txt, fn: function () { closeActs(); closeForm(); openConv(conv, peer); } };
-    });
-    items.push({ label: '取消', fn: null });
-    openActs('搜索「' + safe + '」', items);
-  }, function () { toast('搜索失败，检查网络'); });
-}
 
 /* ================= 账号：头像 / 昵称 / 密码 ================= */
 function notifyFriends() { if (!S.token) return; S.friends.forEach(a => bcast('u:' + a, 'fr', { from: ME() })); }
@@ -3445,6 +3427,21 @@ function editGroupNotice(gid) {
     return null;
   }, '保存');
 }
+async function noticeHistory(gid) {
+  if (!sb) return;
+  try {
+    const r = await sb.from('group_notices').select('body,author_acc,created_at').eq('group_id', gid).order('created_at', { ascending: false }).limit(20);
+    if (r.error) { toast('读取公告历史失败'); return; }
+    const rows = r.data || [];
+    if (!rows.length) { toast('还没有历史公告'); return; }
+    const items = rows.map(function (x) {
+      const who = x.author_acc ? peerName(x.author_acc) : '系统';
+      return { label: fmtTime(x.created_at) + ' · ' + who + ' · ' + String(x.body || '').replace(/\s+/g, ' ').slice(0, 40), fn: null };
+    });
+    items.push({ label: '取消', fn: null });
+    openActs('公告历史', items);
+  } catch (e) { toast('读取失败'); }
+}
 function grpChatMode() {
   const gp = isGroupKey(S.conv);
   $('btn-voice-call').style.display = '';                    // 群聊里这个按钮就是“群语音”
@@ -3692,7 +3689,7 @@ function openGrpInfo(k, ms, pend, loading, reqs, joinApproval) {
   $('gi-approve-row').style.display = canManage ? '' : 'none';
   $('gi-approve-toggle').classList.toggle('on', joinApproval == null ? !!g.join_approval : !!joinApproval);
   const nt = (g.notice || '').trim();
-  $('gi-notice').innerHTML = '<div class="gi-note-t"><span>群公告</span>' + (canManage ? '<button type="button" id="gi-note-edit">' + (nt ? '修改' : '发布') + '</button>' : '') + '</div>' +
+  $('gi-notice').innerHTML = '<div class="gi-note-t"><span>群公告</span>' + (nt ? '<button type="button" id="gi-note-hist">历史</button>' : '') + (canManage ? '<button type="button" id="gi-note-edit">' + (nt ? '修改' : '发布') + '</button>' : '') + '</div>' +
     '<div class="gi-note-x"' + (nt ? '' : ' style="color:var(--muted)"') + '>' + (nt ? esc(nt) : '还没有群公告') + '</div>';
   const rq = canManage ? (reqs || []) : [];
   $('gi-requests').innerHTML = rq.length ? '<div class="section-title">待审批（' + rq.length + '）</div>' + rq.map(function (r) {
@@ -6462,7 +6459,7 @@ $('gi-approve-toggle').onclick = async function () {
     toast(on ? '已打开：新成员需要群主或管理员同意' : '已关闭：被邀请的人可以直接进群');
   } catch (e) { toast('设置失败：' + grpErr(e)); }
 };
-$('gi-notice').onclick = function (e) { const b = e.target.closest('#gi-note-edit'); if (!b || !giKey) return; editGroupNotice(gidOf(giKey)); };
+$('gi-notice').onclick = function (e) { const b = e.target.closest('#gi-note-edit'), h = e.target.closest('#gi-note-hist'); if (!giKey) return; if (b) { editGroupNotice(gidOf(giKey)); return; } if (h) { noticeHistory(gidOf(giKey)); } };
 $('gi-search').addEventListener('input', function () { renderGiMembers(this.value); });
 $('gi-file-up').onclick = function () { if (!giKey) return; const i = $('gi-file-input'); i.value = ''; i.click(); };
 $('gi-file-input').onchange = function (e) {
@@ -6505,13 +6502,16 @@ $('gi-members').onclick = function (e) {
 };
 if ($('me-avatar')) $('me-avatar').onclick = function (e) { e.stopPropagation(); showSelfCard(''); };
 if (document.querySelector('.me-card')) document.querySelector('.me-card').addEventListener('click', function (e) { if (e.target.closest('button')) return; showSelfCard(''); });
-$('btn-gsearch').onclick = function () {
-  openForm('搜索全部聊天', [{ ph: '关键词', max: 40 }], function (vals) {
-    const q = String(vals[0] || '').trim();
-    if (!q) return '输入关键词';
-    globalSearch(q);
-    return '';
-  }, '搜索');
+let pwaEvt = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); pwaEvt = e; });
+if ($('btn-install')) $('btn-install').onclick = async function () {
+  try {
+    if (pwaEvt) { pwaEvt.prompt(); const r = await pwaEvt.userChoice; pwaEvt = null; toast(r && r.outcome === 'accepted' ? '正在添加…' : '已取消'); return; }
+    const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+    if (standalone) { toast('已经是桌面应用了'); return; }
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    toast(ios ? 'Safari：点分享 → 添加到主屏幕' : '浏览器菜单 → 安装应用 / 添加到主屏幕');
+  } catch (e) { toast('这个浏览器不支持一键添加，用菜单里的“添加到主屏幕”'); }
 };
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
