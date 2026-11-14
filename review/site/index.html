@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chatter 代码审查 · 20261116p</title>
+<style>
+  :root{--bg:#0f1117;--card:#171a23;--line:#262a36;--ink:#e8eaf2;--mut:#98a0b3;--accent:#8b5cf6}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{padding:20px 22px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(108,92,231,.18),rgba(201,79,168,.12))}
+  h1{margin:0 0 6px;font-size:19px}
+  .sub{color:var(--mut);font-size:12.5px}
+  .wrap{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 92px)}
+  nav{border-right:1px solid var(--line);padding:12px;overflow:auto}
+  nav button{display:block;width:100%;text-align:left;margin:4px 0;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:var(--card);color:var(--ink);cursor:pointer;font-size:13px}
+  nav button:hover{border-color:var(--line)}
+  nav button.on{border-color:var(--accent);background:rgba(139,92,246,.16)}
+  nav .n{color:var(--mut);font-size:11px;margin-left:4px}
+  main{overflow:auto;padding:14px 18px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:10px;color:var(--mut);font-size:12px;flex-wrap:wrap}
+  .bar input{flex:1;min-width:160px;background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:7px 10px}
+  a.dl{color:var(--accent);text-decoration:none}
+  pre{margin:0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;white-space:pre-wrap;word-break:break-word;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;color:#cfd4e4}
+  .mark{background:#5b4b00;color:#ffe58a;border-radius:3px}
+  .hint{color:var(--mut);font-size:12px;margin:6px 0 0}
+  @media(max-width:760px){.wrap{grid-template-columns:1fr}nav{border-right:0;border-bottom:1px solid var(--line);max-height:40vh}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Chatter 代码审查包</h1>
+  <div class="sub">版本 v=20261116p · main 4cdf9b65 · 页面/样式 + 主程序 + 数据库结构；点左边切换，右上可下载原文</div>
+</header>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <div class="bar">
+      <input id="q" placeholder="在当前文件里搜（回车下一个）">
+      <span id="meta"></span>
+      <a id="dl" class="dl" download>下载当前文件</a>
+    </div>
+    <pre id="out">加载中…</pre>
+    <p class="hint">说明：parts 里的旧切片（02-配置…14-启动）是 542KB 单文件时代的，已经过期；以本页 01/02 两份为准。</p>
+  </main>
+</div>
+<script>
+const FILES = [
+  { id: '01', name: '01 页面与样式（index.html）', file: 'parts/01-页面与样式.txt' },
+  { id: '02', name: '02 主程序（app.js）', file: 'parts/02-主程序.txt' },
+  { id: '03', name: '03 数据库结构（schema.md）', file: 'parts/03-数据库结构.md' }
+];
+const nav = document.getElementById('nav'), out = document.getElementById('out'), meta = document.getElementById('meta'), dl = document.getElementById('dl');
+let cur = FILES[1], text = '', lastIdx = -1;
+function renderNav() {
+  nav.innerHTML = '';
+  FILES.forEach(function (f) {
+    const b = document.createElement('button');
+    b.textContent = f.name;
+    b.className = (cur.id === f.id ? 'on' : '');
+    b.onclick = function () { load(f); };
+    nav.appendChild(b);
+  });
+}
+async function load(f) {
+  cur = f; renderNav(); text = ''; out.textContent = '加载中…'; meta.textContent = '';
+  try {
+    const r = await fetch(f.file + '?t=' + Date.now());
+    text = await r.text();
+    out.textContent = text;
+    meta.textContent = text.length.toLocaleString() + ' 字符';
+    dl.href = f.file; dl.download = f.file.split('/').pop();
+  } catch (e) { out.textContent = '加载失败：' + e.message; }
+}
+function search() {
+  const q = document.getElementById('q').value;
+  if (!q || !text) return;
+  const hay = text.toLowerCase(), needle = q.toLowerCase();
+  const idx = hay.indexOf(needle, lastIdx + 1);
+  if (idx < 0) { lastIdx = -1; return; }
+  lastIdx = idx;
+  const before = text.slice(0, idx), line = before.split('\n').length;
+  out.textContent = text.slice(0, idx) + '>>>' + text.slice(idx, idx + q.length) + '<<<' + text.slice(idx + q.length);
+  const mark = out.textContent.indexOf('>>>');
+  out.scrollTop = (mark / out.textContent.length) * out.scrollHeight;
+  meta.textContent = '第 ' + line + ' 行';
+}
+document.getElementById('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+load(cur);
+</script>
+</body>
+</html>
