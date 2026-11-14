@@ -1,16 +1,21 @@
-<!-- Chatter 前端 · 08-朋友圈 · 原文件第 5077-5434 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 08-朋友圈 · 原文件第 5177-5540 行 · 2026-11-14 线上版 -->
 /* ================= 朋友圈 ================= */
 const MV = {};
 async function loadMomentViews(rows) {
   try {
     const mine = [], others = [];
-    rows.forEach(function (r) { if (r.author_acc === ME()) mine.push(r.id); else others.push(r.id); });
+    const mvKey = 'ch2mv:' + (S.uid || '');
+    let mvDone = {}; try { mvDone = LS.get(mvKey, {}) || {}; } catch (e) {}
+    rows.forEach(function (r) { if (r.author_acc === ME()) mine.push(r.id); else if (!mvDone[r.id]) others.push(r.id); });
     if (others.length) {
       const r = await sb.from('moment_views').select('moment_id').in('moment_id', others);
       if (!r.error) {
         const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
+        seen.forEach(function (id) { mvDone[id] = 1; });
         const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function () {}, function () {}); });
+        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function () {}, function () {}); row && (mvDone[row.moment_id] = 1); });
+        // 本机记住已经记过的访客，下次打开不再重复请求
+        try { const keys = Object.keys(mvDone); if (keys.length > 400) { const keep = keys.slice(-300), o = {}; keep.forEach(function (k) { o[k] = 1; }); mvDone = o; } LS.set(mvKey, mvDone); } catch (e) {}
       }
     }
     if (mine.length) {
@@ -88,7 +93,7 @@ function momentCardHTML(m, i) {
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
-      ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '') + '</div>' +
+      ((m.author_acc === ME() && m.visibility === 'private') ? '<div class="mo-vis">🔒 仅自己可见</div>' : ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '')) + '</div>' +
       (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
     (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
     '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
@@ -186,6 +191,7 @@ function closeMomentCompose() {
   MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.imgs = []; MO.urls = []; MO.vid = null; MO.vurl = '';
+  MO.priv = false; try { const pb = document.getElementById('moment-priv'); if (pb) pb.textContent = '🔒 仅自己可见：关'; } catch (e) {}
 }
 function renderMomentEditor() {
   $('moment-count').textContent = MO.imgs.length + '/9';
@@ -228,7 +234,7 @@ async function postMoment() {
       if (upv.error) throw upv.error;
       videoUrl = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
     }
-    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: 'friends', visible_to: MO.vis || null, video: videoUrl || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video').single();
+    const { data, error } = await sb.from('moments').insert({ author_acc: ME(), body: body, images: urls, visibility: MO.priv ? 'private' : 'friends', visible_to: MO.priv ? null : (MO.vis || null), video: videoUrl || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video').single();
     if (error) throw error;
     closeMomentCompose(); toast('已发表');
     if (data) { MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments(); }
