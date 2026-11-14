@@ -3042,10 +3042,10 @@ function draftSave(conv, text) {
 
 /* ================= 通用弹窗 / 菜单 ================= */
 let fsOk = null, actItems = [], sheetZ = 2700;
-function globalBackupExport() {
+function settingsPayload() {
   const uid = S.uid || '';
-  const data = {
-    v: 1, at: new Date().toISOString(),
+  return {
+    v: 1,
     settings: {
       theme: LS.get('ch2theme', 'auto'), font: LS.get('ch2font', 'system'),
       bubble: LS.get('ch2bubble', 'violet'), night: LS.get('ch2night', null), imgq: LS.get('ch2imgq', 'auto')
@@ -3053,36 +3053,34 @@ function globalBackupExport() {
     drafts: LS.get('ch2dr:' + uid, {}),
     hidden: LS.get('ch2del:' + uid, [])
   };
-  const f = new File([JSON.stringify(data, null, 2)], 'chatter-settings-' + (uid || 'me') + '.json', { type: 'application/json' });
-  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
-  if (desk && window.showSaveFilePicker) {
-    window.showSaveFilePicker({ suggestedName: f.name }).then(function (h) {
-      return h.createWritable().then(function (w) { return w.write(f).then(function () { return w.close(); }); });
-    }).then(function () { toast('已导出'); }, function () {});
-    return;
-  }
-  dlFile(f);
 }
-function globalBackupImport(file) {
-  const rd = new FileReader();
-  rd.onload = function () {
-    try {
-      const d = JSON.parse(rd.result);
-      if (!d || d.v !== 1) throw new Error('bad');
-      const uid = S.uid || '';
-      const s = d.settings || {};
-      if (s.theme) LS.set('ch2theme', s.theme);
-      if (s.font) LS.set('ch2font', s.font);
-      if (s.bubble) LS.set('ch2bubble', s.bubble);
-      if (s.night) LS.set('ch2night', s.night);
-      if (s.imgq) LS.set('ch2imgq', s.imgq);
-      if (d.drafts) LS.set('ch2dr:' + uid, d.drafts);
-      if (d.hidden) LS.set('ch2del:' + uid, d.hidden);
-      toast('已导入，正在刷新…');
-      setTimeout(function () { location.reload(); }, 700);
-    } catch (e) { toast('文件不对，导入失败'); }
-  };
-  rd.readAsText(file);
+function exportSettingsCode() {
+  let code = '';
+  try { code = 'CH2:' + btoa(unescape(encodeURIComponent(JSON.stringify(settingsPayload())))); } catch (e) { toast('生成失败'); return; }
+  copyText(code);
+  openForm('本机设置代码（已复制）', [{ ph: '这串代码', val: code, max: 20000 }], function () { return ''; }, '关闭');
+}
+function applySettingsCode(code) {
+  const s = String(code || '').trim().replace(/\s+/g, '');
+  if (!/^CH2:/.test(s)) return false;
+  let d; try { d = JSON.parse(decodeURIComponent(escape(atob(s.slice(4))))); } catch (e) { return false; }
+  const uid = S.uid || '', x = d.settings || {};
+  if (x.theme) LS.set('ch2theme', x.theme);
+  if (x.font) LS.set('ch2font', x.font);
+  if (x.bubble) LS.set('ch2bubble', x.bubble);
+  if (x.night) LS.set('ch2night', x.night);
+  if (x.imgq) LS.set('ch2imgq', x.imgq);
+  if (d.drafts) LS.set('ch2dr:' + uid, d.drafts);
+  if (d.hidden) LS.set('ch2del:' + uid, d.hidden);
+  return true;
+}
+function importSettingsCode() {
+  openForm('粘贴设置代码', [{ ph: '把导出的代码整段粘贴进来', max: 20000 }], function (vals) {
+    if (!applySettingsCode(vals[0])) return '代码不对，检查有没有复制完整';
+    toast('已导入，正在刷新…');
+    setTimeout(function () { location.reload(); }, 700);
+    return '';
+  }, '导入');
 }
 function raiseSheet(sheetId, backdropId) {
   sheetZ += 20;
@@ -6630,13 +6628,8 @@ if ($('btn-install')) $('btn-install').onclick = async function () {
     toast(ios ? 'Safari：点分享 → 添加到主屏幕' : '浏览器菜单 → 安装应用 / 添加到主屏幕');
   } catch (e) { toast('这个浏览器不支持一键添加，用菜单里的“添加到主屏幕”'); }
 };
-if ($('btn-exp')) $('btn-exp').onclick = globalBackupExport;
-if ($('btn-imp')) $('btn-imp').onclick = function () {
-  const i = document.createElement('input');
-  i.type = 'file'; i.accept = '.json,application/json';
-  i.onchange = function () { const f = i.files && i.files[0]; if (f) globalBackupImport(f); };
-  i.click();
-};
+if ($('btn-exp')) $('btn-exp').onclick = exportSettingsCode;
+if ($('btn-imp')) $('btn-imp').onclick = importSettingsCode;
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
