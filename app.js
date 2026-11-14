@@ -809,10 +809,18 @@ function fillGlCards(root) {
     if (GL.info[gid]) { paint(GL.info[gid]); return; }
     if (GL.busy[gid]) return;
     GL.busy[gid] = 1;
-    sb.rpc('group_link_info', { p_gid: gid }).then(function (r) {
-      const d = r && r.data; delete GL.busy[gid];
-      if (d) GL.info[gid] = d; paint(d);
-    }, function () { delete GL.busy[gid]; paint(null); });
+    const load = function (tries) {
+      sb.rpc('group_link_info', { p_gid: gid }).then(function (r) {
+        const d = r && r.data;
+        if (d) { GL.info[gid] = d; delete GL.busy[gid]; paint(d); return; }
+        if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
+        delete GL.busy[gid]; paint(null);
+      }, function () {
+        if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
+        delete GL.busy[gid]; paint(null);
+      });
+    };
+    load(2);
   });
 }
 function msgHTML(m) {
