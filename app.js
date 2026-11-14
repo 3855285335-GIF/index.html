@@ -6124,7 +6124,7 @@ function bindUI() {
   window.__bubApply = apply;
 })();
 (function () {
-  const b = btn-font; if (!b) return;
+  const b = document.getElementById('btn-font'); if (!b) return;
   const FONTS = {
     round: '"Yuanti SC","幼圆","YouYuan","PingFang SC","Microsoft YaHei",sans-serif',
     song: '"Songti SC","SimSun","STSong",serif',
