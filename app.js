@@ -795,11 +795,15 @@ function glGids(text) {
   let m; while ((m = re.exec(String(text || '')))) out.push(m[1].toLowerCase());
   return Array.from(new Set(out));
 }
-function glCardHTML(gid) { return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div>'; }
+function glCardHTML(gid) {
+  const i = GL.info[gid];
+  if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
+  return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div>';
+}
 function fillGlCards(root) {
   if (!root || !sb) return;
   root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
-    const gid = el.dataset.gid; if (!gid || el.dataset.done) return;
+    const gid = el.dataset.gid; if (!gid) return; if (el.dataset.done === '1' && el.querySelector('.gl-go')) return;
     const paint = function (info) {
       if (!info) { el.innerHTML = '<div class="gl-name">群聊不存在或已解散</div>'; el.dataset.done = '1'; return; }
       el.dataset.member = info.member ? '1' : '';
@@ -812,10 +816,10 @@ function fillGlCards(root) {
     const load = function (tries) {
       sb.rpc('group_link_info', { p_gid: gid }).then(function (r) {
         const d = r && r.data;
-        if (d) { GL.info[gid] = d; delete GL.busy[gid]; paint(d); return; }
+        if (d) { GL.info[gid] = d; delete GL.busy[gid]; paint(d); try { if (S.conv) chatRender(true); } catch (x) {} return; }
         if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
         delete GL.busy[gid]; paint(null);
-      }, function () {
+      }, function (e) {
         if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
         delete GL.busy[gid]; paint(null);
       });
@@ -883,6 +887,7 @@ function chatRender(stick) {
   }).join('');
   S.rendered = shown.length;
   fillGlCards(b);
+  setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
   if (stick) b.scrollTop = b.scrollHeight;
 }
 function chatAppend(m, force) {
@@ -890,6 +895,7 @@ function chatAppend(m, force) {
   const b = $('chat-messages'), e = b.querySelector('.empty'); if (e) e.remove();
   b.insertAdjacentHTML('beforeend', msgHTML(m));
   fillGlCards(b);
+  setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
   if (force || S.stick) b.scrollTop = b.scrollHeight;
 }
 function msgElOf(id) { return $('chat-messages').querySelector('.msg[data-id="' + id + '"]'); }
