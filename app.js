@@ -74,7 +74,7 @@ const convKeyOf = (a, b) => [a, b].sort().join('::');
 const isGroupKey = k => typeof k === 'string' && k.indexOf('g:') === 0;   // 群会话：g:<群id>
 const gidOf = k => isGroupKey(k) ? k.slice(2) : '';
 const peerOf = (k, me) => { if (isGroupKey(k)) return k; const p = k.split('::'); return p[0] === me ? p[1] : p[0]; };   // 群不按冒号拆
-const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null });
+const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null, cover: r.cover || null });
 const SEP = '\u2063';
 function encQ(q, text) { return SEP + 'Q' + q.id + SEP + String(q.snip || '').replace(/[\u2063\r\n]+/g, ' ').slice(0, 40) + SEP + text; }
 function parseQ(body) {
@@ -835,7 +835,7 @@ function msgHTML(m) {
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
-      const cover = m._pu ? '<img class="vposter" loading="lazy" src="' + esc(m._pu) + '" alt="">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" loading="lazy" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
+      const cover = m._pu ? '<img class="vposter" loading="lazy" src="' + esc(m._pu) + '" alt="">' : m.cover ? '<img class="vposter" loading="lazy" src="' + esc(disp(m.cover)) + '" alt="" decoding="async">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" loading="lazy" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
       body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span><span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
     }
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
@@ -1051,7 +1051,7 @@ async function deliver(m, silent) {
     const gp = isGroupKey(m.conv);
     const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc, type: m.type, body: m.body, dur: m.dur });
     // 先写库、再广播：接收方收到广播会按 id 查库，广播太早会查不到
-    const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null };
+    const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, cover: m.cover || null };
     const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
@@ -5200,13 +5200,12 @@ async function forwardMomentVideo(mm, conv, to) {
   if (!mm || typeof mm.video !== 'string' || !mm.video) return;
   try {
     toast('正在转发视频…');
-    const url = canon(mm.video);
-    const r = await fetch(url);
-    const blob = await r.blob();
-    const ext = (blob.type.indexOf('webm') >= 0) ? 'webm' : 'mp4';
-    const file = new File([blob], 'moment.' + ext, { type: blob.type || 'video/mp4' });
-    const poster = await grabVideoPoster(url);
-    const fm = { id: uuid(), conv: conv, from_acc: ME(), to_acc: to, type: 'video', body: '', dur: mm.video_dur || null, created_at: stampAfterClr(conv), _st: 'sending', _blob: file, _ext: ext, _ct: file.type, _poster: poster };
+    let cover = null;
+    try {
+      const p = await grabVideoPoster(canon(mm.video));
+      if (p) cover = await upload(p, 'jpg', 'image/jpeg', 'vcover_');
+    } catch (e) { logErr('fwd-cover', e); }
+    const fm = { id: uuid(), conv: conv, from_acc: ME(), to_acc: to, type: 'video', body: mm.video, cover: cover, dur: mm.video_dur || null, created_at: stampAfterClr(conv), _st: 'sending' };
     if (conv === S.conv) addLocal(fm);
     else { S.out.set(fm.id, fm); touchConv(conv, '[视频]', fm.created_at, false); deliver(fm); }
   } catch (e) { logErr('fwd-video', e); toast('视频转发失败，检查网络'); }
