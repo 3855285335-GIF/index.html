@@ -3000,6 +3000,48 @@ function draftSave(conv, text) {
 
 /* ================= 通用弹窗 / 菜单 ================= */
 let fsOk = null, actItems = [], sheetZ = 2700;
+function globalBackupExport() {
+  const uid = S.uid || '';
+  const data = {
+    v: 1, at: new Date().toISOString(),
+    settings: {
+      theme: LS.get('ch2theme', 'auto'), font: LS.get('ch2font', 'system'),
+      bubble: LS.get('ch2bubble', 'violet'), night: LS.get('ch2night', null), imgq: LS.get('ch2imgq', 'auto')
+    },
+    drafts: LS.get('ch2dr:' + uid, {}),
+    hidden: LS.get('ch2del:' + uid, [])
+  };
+  const f = new File([JSON.stringify(data, null, 2)], 'chatter-settings-' + (uid || 'me') + '.json', { type: 'application/json' });
+  const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
+  if (desk && window.showSaveFilePicker) {
+    window.showSaveFilePicker({ suggestedName: f.name }).then(function (h) {
+      return h.createWritable().then(function (w) { return w.write(f).then(function () { return w.close(); }); });
+    }).then(function () { toast('已导出'); }, function () {});
+    return;
+  }
+  dlFile(f);
+}
+function globalBackupImport(file) {
+  const rd = new FileReader();
+  rd.onload = function () {
+    try {
+      const d = JSON.parse(rd.result);
+      if (!d || d.v !== 1) throw new Error('bad');
+      const uid = S.uid || '';
+      const s = d.settings || {};
+      if (s.theme) LS.set('ch2theme', s.theme);
+      if (s.font) LS.set('ch2font', s.font);
+      if (s.bubble) LS.set('ch2bubble', s.bubble);
+      if (s.night) LS.set('ch2night', s.night);
+      if (s.imgq) LS.set('ch2imgq', s.imgq);
+      if (d.drafts) LS.set('ch2dr:' + uid, d.drafts);
+      if (d.hidden) LS.set('ch2del:' + uid, d.hidden);
+      toast('已导入，正在刷新…');
+      setTimeout(function () { location.reload(); }, 700);
+    } catch (e) { toast('文件不对，导入失败'); }
+  };
+  rd.readAsText(file);
+}
 function raiseSheet(sheetId, backdropId) {
   sheetZ += 20;
   if (sheetZ > 50000) sheetZ = 500;   // 封顶值远高于普通弹层；通话界面在 100000，不会被盖住
@@ -5738,9 +5780,16 @@ function goLink(u) {
     linkWait = '';
     const k = 'g:' + gm[1].toLowerCase();
     const gid = gm[1].toLowerCase();
-    grpLoad(true).then(function () {
+    (async function () {
+      try { await grpLoad(true); } catch (e) {}
       const known = (GRP.list || []).some(function (g) { return g.id === gid; });
       if (known) { openConv(k, k); return; }
+      let member = false;
+      try {
+        const r = await sb.from('chat_group_members').select('account_id').eq('group_id', gid).eq('account_id', ME()).maybeSingle();
+        member = !!(r && r.data);
+      } catch (e) {}
+      if (member) { openConv(k, k); return; }
       openActs('加入这个群聊？', [
         { label: '加入', fn: function () {
           sb.rpc('join_group_by_link', { p_gid: gid }).then(function (r) {
@@ -5751,7 +5800,7 @@ function goLink(u) {
         } },
         { label: '取消', fn: null }
       ]);
-    }, function () { openConv(k, k); });
+    })();
     return;
   }
   if (/^#inv$/.test(h)) {
@@ -6527,6 +6576,13 @@ if ($('btn-install')) $('btn-install').onclick = async function () {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     toast(ios ? 'Safari：点分享 → 添加到主屏幕' : '浏览器菜单 → 安装应用 / 添加到主屏幕');
   } catch (e) { toast('这个浏览器不支持一键添加，用菜单里的“添加到主屏幕”'); }
+};
+if ($('btn-exp')) $('btn-exp').onclick = globalBackupExport;
+if ($('btn-imp')) $('btn-imp').onclick = function () {
+  const i = document.createElement('input');
+  i.type = 'file'; i.accept = '.json,application/json';
+  i.onchange = function () { const f = i.files && i.files[0]; if (f) globalBackupImport(f); };
+  i.click();
 };
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
