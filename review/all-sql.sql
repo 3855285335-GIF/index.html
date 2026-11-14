@@ -1,4 +1,4 @@
--- Chatter 全部 SQL（按修改时间排序，含安全/免打扰/置顶补丁）
+-- Chatter 全部 SQL（按修改时间排序）
 
 -- ============================================================
 -- group-diagnose.sql
@@ -1982,6 +1982,12 @@ commit;
 
 
 -- ============================================================
+-- pin-sync-v1.sql
+-- ============================================================
+-- 置顶跨设备同步（2026-11-14）
+alter table public.conversations add column if not exists pinned_at timestamptz;
+
+-- ============================================================
 -- mute-push-v3.sql
 -- ============================================================
 -- ============================================================
@@ -2017,11 +2023,15 @@ do $$
 declare def text; nw text;
 begin
   select pg_get_functiondef('public.push_job_base(uuid,text,text,text)'::regprocedure) into def;
-  nw := replace(def,
-    'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)',
-    'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)
+  if position('profiles pf' in def) = 0 then
+    nw := replace(def,
+      'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)',
+      'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)
        and not exists (select 1 from public.profiles pf where pf.account_id = s.acc and coalesce(pf.mutes, ''{}''::jsonb) ? (''g:'' || gid))');
-  if nw = def then raise notice 'gmsg clause already patched or not found'; else execute nw; end if;
+    if nw <> def then execute nw; end if;
+  else
+    raise notice 'gmsg mute clause already patched';
+  end if;
 end $$;
 
 -- 清掉测试留下的假订阅、测试群、测试静音
@@ -2036,8 +2046,12 @@ commit;
 
 
 -- ============================================================
--- pin-sync-v1.sql
+-- retention-v1.sql
 -- ============================================================
--- 置顶跨设备同步（2026-11-14）
-alter table public.conversations add column if not exists pinned_at timestamptz;
+-- 定期清理（2026-11-15）：30 天前的推送日志、7 天前的信令、30 天前的在线状态
+do $$ begin
+  begin delete from public.push_log where created_at < now() - interval '30 days'; exception when others then null; end;
+  begin delete from public.signals where created_at < now() - interval '7 days'; exception when others then null; end;
+  begin delete from public.presence where last_seen < now() - interval '30 days'; exception when others then null; end;
+end $$;
 
