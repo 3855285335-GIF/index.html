@@ -30,7 +30,7 @@
 <body>
 <header>
   <h1>Chatter 代码审查包</h1>
-  <div class="sub">版本 v=20261116p · main 4cdf9b65 · 页面/样式 + 主程序 + 数据库结构；点左边切换，右上可下载原文</div>
+  <div class="sub">版本 v=20261116q · 页面/样式 + 主程序 + 数据库结构；点左边切换，右上可下载原文</div>
 </header>
 <div class="wrap">
   <nav id="nav"></nav>
@@ -48,7 +48,8 @@
 const FILES = [
   { id: '01', name: '01 页面与样式（index.html）', file: 'parts/01-页面与样式.txt' },
   { id: '02', name: '02 主程序（app.js）', file: 'parts/02-主程序.txt' },
-  { id: '03', name: '03 数据库结构（schema.md）', file: 'parts/03-数据库结构.md' }
+  { id: '03', name: '03 数据库结构（schema.md）', file: 'parts/03-数据库结构.md' },
+  { id: '04', name: '04 今晚新增 SQL（已执行）', file: 'parts/04-新增SQL-20261114.sql' }
 ];
 const nav = document.getElementById('nav'), out = document.getElementById('out'), meta = document.getElementById('meta'), dl = document.getElementById('dl');
 let cur = FILES[1], text = '', lastIdx = -1;
