@@ -440,7 +440,7 @@ function renderMe() {
 function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 /* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
 function convPreview(c) {
-  let t = parseQ(c.last_body).text.replace(/https?:\/\/\S*#g=[0-9a-f-]{36}\S*/gi, '[群链接]').replace(/#g=[0-9a-f-]{36}/gi, '[群链接]');
+  let t = parseQ(c.last_body).text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '[群链接]');
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
   if (/^e:[^\s]{1,16}$/u.test(t)) return '[表情]';
   if (t) return t;
@@ -5158,8 +5158,18 @@ function forwardToGroup(m, gid) {
   else { S.out.set(fm.id, fm); touchConv(conv, previewOf(fm), fm.created_at, false); deliver(fm); }
   toast('已转发到「' + ((grpOf(conv) || {}).name || '群聊') + '」');
 }
-function forwardTo(m, acc) {
-  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
+function momentFwdImages(mm) { return Array.isArray(mm.images) ? mm.images.filter(Boolean) : []; }
+function forwardMomentTo(mm, acc) {
+  const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
+  forwardTo({ type: 'text', body: head }, acc);
+  momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardTo({ type: 'image', body: u }, acc); }, 150 * (i + 1)); });
+}
+function forwardMomentToGroup(mm, gid) {
+  const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
+  forwardToGroup({ type: 'text', body: head }, gid);
+  momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardToGroup({ type: 'image', body: u }, gid); }, 150 * (i + 1)); });
+}
+function forwardTo(m, acc) {  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
   const conv = convKeyOf(ME(), acc);
   const fm = { id: uuid(), conv, from_acc: ME(), to_acc: acc, type: m.type, body: m.type === 'text' ? parseQ(m.body).text : m.body, dur: m.dur || null, created_at: stampAfterClr(conv), _st: 'sending' };
   if (conv === S.conv) addLocal(fm);
@@ -6499,7 +6509,16 @@ $('ie-panel-stk').addEventListener('click', function (e) {
     const card = e.target.closest('.moment'); if (!card) return;
     const id = card.dataset.id;
     const lk = e.target.closest('.mo-liker, .mo-cauthor'); if (lk && lk.dataset.acc) { openProfile(lk.dataset.acc); return; }
-    if (e.target.closest('.mo-fwd')) { const card = e.target.closest('.moment'); const id = card && card.dataset.id; const mm = (MO.list || []).find(function (x) { return String(x.id) === String(id); }); if (!mm) return; const txt = '【朋友圈】' + peerName(mm.author_acc) + '：' + (mm.body || (Array.isArray(mm.images) && mm.images.length ? '[图片]' : '[视频]')); openForward({ id: 'fwd' + Date.now(), type: 'text', body: txt }); return; }
+    if (e.target.closest('.mo-fwd')) {
+      const mm = (MO.list || []).find(function (x) { return String(x.id) === String(id); });
+      if (!mm) return;
+      const list = [{ label: '发给自己（备忘）', fn: function () { forwardMomentTo(mm, ME()); } }];
+      S.friends.forEach(function (a) { list.push({ label: peerName(a), fn: function () { forwardMomentTo(mm, a); } }); });
+      (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardMomentToGroup(mm, g.id); } }); });
+      list.push({ label: '取消', fn: null });
+      openActs('转发朋友圈（连图片）', list);
+      return;
+    }
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
