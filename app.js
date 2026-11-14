@@ -6757,7 +6757,7 @@ if ($('btn-devices')) $('btn-devices').onclick = async function () {
       }, function () { toast('网络失败，没发出去'); });
     } });
     items.push({ label: '关闭', fn: null });
-    openActs('登录设备（' + ids.length + '）', items);
+    openActs('登录设备（' + rows.length + '）', items);
   } catch (e) { toast('读取设备失败'); }
 };
 try {
