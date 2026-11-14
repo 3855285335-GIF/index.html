@@ -680,7 +680,9 @@ function applyBoot(b) {
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
-  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); } catch (e) {} }, 60000);   // 全局只注册一次
+  setTimeout(function () { syncMyBubble(); }, 1800);
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 60000);   // 全局只注册一次
+  if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -5023,6 +5025,19 @@ function togglePin(k) {
   } catch (e) {}
   toast(on ? '已置顶' : '已取消置顶');
 }
+async function syncMyBubble() {
+  if (!sb || !S.uid) return;
+  try {
+    const r = await sb.from('profiles').select('bubble_color').eq('id', S.uid).maybeSingle();
+    const v = r && r.data && r.data.bubble_color;
+    if (!v || v === LS.get('ch2bubble', '')) return;
+    LS.set('ch2bubble', v);
+    const css = bubCss(v); if (css) document.documentElement.style.setProperty('--mine', css);
+    const b = document.getElementById('btn-bubble');
+    if (b) { const o = { violet: '紫', blue: '蓝', green: '绿', orange: '橙', pink: '粉', black: '黑' }; b.textContent = '💬 气泡：' + (o[v] || '自定义'); }
+  } catch (e) {}
+}
+
 async function syncPins() {
   if (!sb || !S.uid) return;
   try {
