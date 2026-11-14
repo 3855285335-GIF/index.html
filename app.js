@@ -3860,6 +3860,7 @@ function openGroupSettings(gid) {
   }
   if (mine && mine.title) items.push({ label: mine.title_on ? '我的头衔：戴上（点一下收起）' : '我的头衔：已收起（点一下戴上）', fn: function () { setMyTitleVisible(gid, !mine.title_on); } });
   if (owner) items.push({ label: '转让群主', fn: function () { transferOwner(gid); } });
+  items.unshift({ label: '复制邀请链接（发给好友）', fn: function () { copyText(location.origin + location.pathname + '#g=' + gid); } });
   if (!items.length) { toast('这里还没有可设置的'); return; }
   items.push({ label: '取消', fn: null });
   openActs('群设置', items);
@@ -5736,7 +5737,21 @@ function goLink(u) {
     if (!S.started || !S.me) { linkWait = h; return; }
     linkWait = '';
     const k = 'g:' + gm[1].toLowerCase();
-    grpLoad(true).then(function () { openConv(k, k); }, function () { openConv(k, k); });
+    const gid = gm[1].toLowerCase();
+    grpLoad(true).then(function () {
+      const known = (GRP.list || []).some(function (g) { return g.id === gid; });
+      if (known) { openConv(k, k); return; }
+      openActs('加入这个群聊？', [
+        { label: '加入', fn: function () {
+          sb.rpc('join_group_by_link', { p_gid: gid }).then(function (r) {
+            const d = r && r.data;
+            if (d === 'ok' || d === 'member') { grpLoad(true).then(function () { openConv(k, k); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
+            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : '无法加入');
+          }, function () { toast('加入失败，检查网络'); });
+        } },
+        { label: '取消', fn: null }
+      ]);
+    }, function () { openConv(k, k); });
     return;
   }
   if (/^#inv$/.test(h)) {
