@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 09-多选与导出 · 原文件第 5435-5628 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 09-多选与导出 · 原文件第 5541-5732 行 · 2026-11-14 线上版 -->
 /* ================= 多选 ================= */
 let selMode = false, selSet = new Set();
 function paintMulti() {
@@ -34,6 +34,13 @@ function multiDel() {
   if (!$('chat-messages').querySelector('.msg')) chatRender(true);
   toast('已删除 ' + n + ' 条（仅在你这边）');
 }
+function multiCopy() {
+  const ids = Array.from(selSet).filter(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); return m && m.type === 'text'; });
+  if (!ids.length) { toast('选中的消息里没有可复制的文字'); return; }
+  const txt = ids.map(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); return parseQ(m.body).text; }).join('\n');
+  const done = function () { toast('已复制 ' + ids.length + ' 条文字'); exitMulti(); };
+  try { navigator.clipboard.writeText(txt).then(done, function () { toast('复制失败，请重试'); }); } catch (e) { toast('复制失败'); }
+}
 function multiFwd() {
   if (!selSet.size) return;
   const okTypes = { text: 1, image: 1, voice: 1, sticker: 1, video: 1, file: 1 };
@@ -42,13 +49,24 @@ function multiFwd() {
     return m && okTypes[m.type];
   });
   if (!ids.length) { toast('撤回的消息、通话记录不能转发'); exitMulti(); return; }
-  const items = S.friends.slice(0, 12).map(function (a) {
-    return { label: peerName(a), fn: function () {
+  const items = [];
+  items.push({ label: '发给自己（备忘）', fn: function () {
+    ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, ME()); } catch (e) {} } });
+    toast('已转发 ' + ids.length + ' 条给自己'); exitMulti();
+  } });
+  S.friends.forEach(function (a) {
+    items.push({ label: peerName(a), fn: function () {
       ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardTo(m, a); } catch (e) {} } });
-      toast('已转发 ' + ids.length + ' 条'); exitMulti();
-    } };
+      toast('已转发 ' + ids.length + ' 条给 ' + peerName(a)); exitMulti();
+    } });
   });
-  items.push({ label: '取消', danger: true, fn: function () {} });
+  (GRP.list || []).forEach(function (g) {
+    items.push({ label: '群 · ' + g.name, fn: function () {
+      ids.forEach(function (id) { const m = S.msgs.find(function (x) { return x.id === id; }); if (m) { try { forwardToGroup(m, g.id); } catch (e) {} } });
+      toast('已转发 ' + ids.length + ' 条到群'); exitMulti();
+    } });
+  });
+  items.push({ label: '取消', danger: true, fn: function () { exitMulti(); } });
   openActs('转发给', items);
 }
 document.addEventListener('click', function (e) {
@@ -75,26 +93,6 @@ function cycleTheme() {
   LS.set('ch2theme', next); applyTheme();
 }
 applyTheme();
-function exportChat() {
-  if (!S.conv) { toast('先打开一个聊天再导出'); return; }
-  const other = peerName(peerOf(S.conv, ME()));
-  const kind = { image: '图片', video: '视频', voice: '语音', file: '文件', sticker: '表情', call: '通话', recalled: '撤回' };
-  const out = ['Chatter 聊天记录', '对话：' + other, '导出时间：' + new Date().toLocaleString(), '--------------------------------'];
-  S.msgs.filter(function (m) { return m && m._st !== 'sending'; }).forEach(function (m) {
-    const who = m.from_acc === ME() ? '我' : other;
-    const t = m.type === 'text' ? parseQ(m.body).text : ('[' + (kind[m.type] || m.type) + ']');
-    out.push('[' + new Date(m.created_at).toLocaleString() + '] ' + who + '：' + t);
-  });
-  try {
-    const blob = new Blob([out.join('\r\n')], { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'chat-' + other + '-' + Date.now() + '.txt';
-    document.body.appendChild(a); a.click();
-    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 3000);
-    toast('已导出 ' + (out.length - 4) + ' 条');
-  } catch (e) { logErr('export', e); toast('导出失败'); }
-}
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
@@ -167,7 +165,7 @@ async function loadStore() {
         if (!f || !f.name || f.id === null) return;
         // 只处理“聊天里发出去的媒体”：文件名是 <13位时间戳>_<随机>.<扩展名>
         // 头像 avatar_、背景 bg_、朋友圈封面 cover_、好友背景 fbg_、群图标 g_、朋友圈 moment_、群文件 gf_、表情 sticker_ 一律不碰
-        if (!/^\d{12,}_[a-z0-9]{4,10}\.[a-z0-9]{1,8}$/i.test(f.name)) return;
+        if (!/^\d{12,}_[a-z0-9]{4,10}(\.[a-z0-9]{1,8}){1,2}$/i.test(f.name)) return;
         if (f.name.indexOf('avatar_') === 0 || keep.has(ME() + '/' + f.name)) return;
         all.push(f);
       });
