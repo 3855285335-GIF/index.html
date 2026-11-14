@@ -1063,6 +1063,7 @@ function chatGrow() {
   const i = $('chat-input'); if (!i) return;
   i.style.height = 'auto';
   i.style.height = Math.min(132, Math.max(44, i.scrollHeight)) + 'px';
+  if (document.activeElement === i) i.scrollTop = i.scrollHeight;   // 打字时始终看见刚输入的那行
 }
 function sendText() {
   const input = $('chat-input'), v = input.value.trim();
