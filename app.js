@@ -4176,7 +4176,7 @@ function momentCardHTML(m, i) {
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
       ((m.author_acc === ME() && m.visibility === 'private') ? '<div class="mo-vis">🔒 仅自己可见</div>' : ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '')) + '</div>' +
-      (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '</div>' +
+      (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '<button class="mo-fwd" type="button">转发</button>' + '</div>' +
     (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
     '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
     '</div>';
@@ -6499,6 +6499,7 @@ $('ie-panel-stk').addEventListener('click', function (e) {
     const card = e.target.closest('.moment'); if (!card) return;
     const id = card.dataset.id;
     const lk = e.target.closest('.mo-liker, .mo-cauthor'); if (lk && lk.dataset.acc) { openProfile(lk.dataset.acc); return; }
+    if (e.target.closest('.mo-fwd')) { const card = e.target.closest('.moment'); const id = card && card.dataset.id; const mm = (MO.list || []).find(function (x) { return String(x.id) === String(id); }); if (!mm) return; const txt = '【朋友圈】' + peerName(mm.author_acc) + '：' + (mm.body || (Array.isArray(mm.images) && mm.images.length ? '[图片]' : '[视频]')); openForward({ id: 'fwd' + Date.now(), type: 'text', body: txt }); return; }
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
@@ -6630,6 +6631,10 @@ if ($('btn-install')) $('btn-install').onclick = async function () {
 };
 if ($('btn-exp')) $('btn-exp').onclick = exportSettingsCode;
 if ($('btn-imp')) $('btn-imp').onclick = importSettingsCode;
+try {
+  const _sa = (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: minimal-ui)').matches)) || navigator.standalone;
+  if (_sa && $('btn-install')) $('btn-install').style.display = 'none';
+} catch (e) {}
 $('btn-edit-profile').onclick = function () {
   openActs('编辑个人信息', [
     { label: '修改头像', fn: function () { $('avatar-input').click(); } },
