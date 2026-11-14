@@ -5972,6 +5972,7 @@ function bindUI() {
   };
   const apply = function (v) {
     cur = v;
+    if (/^#[0-9a-f]{6}$/i.test(v)) { try { LS.set('ch2bubbleCustom', v); } catch (e) {} }
     try { document.documentElement.style.setProperty('--mine', cssOf(v)); } catch (e) {}
     LS.set('ch2bubble', v);
     const o = OPTS.find(x => x[1] === v);
@@ -5996,12 +5997,16 @@ function bindUI() {
     raiseSheet('bub-sheet', 'bub-backdrop');
     try { $('bub-backdrop').classList.add('active'); $('bub-sheet').classList.add('active'); } catch (e) {}
     const inp = $('bub-custom');
-    if (inp && /^#[0-9a-f]{6}$/i.test(cur)) inp.value = cur;
+    if (inp) inp.value = /^#[0-9a-f]{6}$/i.test(cur) ? cur : (LS.get('ch2bubbleCustom', '#6c5ce7') || '#6c5ce7');
   };
   if ($('bub-backdrop')) $('bub-backdrop').onclick = close;
   if ($('bub-done')) $('bub-done').onclick = close;
   const onPick = function () { if (Date.now() - lastSwatch < 600) return; apply(this.value); };
-  if ($('bub-custom')) { $('bub-custom').oninput = onPick; $('bub-custom').onchange = onPick; }
+  if ($('bub-custom')) {
+    $('bub-custom').oninput = onPick;
+    $('bub-custom').onchange = onPick;
+    $('bub-custom').onclick = function () { if (Date.now() - lastSwatch < 600) return; apply(this.value); };   // 点开取色器就先应用当前自定义色，避免没改动时确定无效
+  }
   apply(cur);
 })();
   /* 朋友圈 */
