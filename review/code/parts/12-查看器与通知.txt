@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 12-查看器与通知 · 原文件第 6395-6713 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 12-查看器与通知 · 原文件第 6545-6864 行 · 2026-11-14 线上版 -->
 /* ================= 图片查看器 / 引用跳转 ================= */
 let lbList = [], lbIdx = 0;
 function lbShow() {
@@ -101,6 +101,7 @@ async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（
   }
 }
 function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求推送；连着发好几条（比如一次 9 张图）只推最后一次，通知里显示“[9条]”
+  if (m && m.to_acc === ME()) return;   // 自己给自己（备忘）不用推
   if (!m || m.type === 'call' || m.type === 'recalled' || pushBlocked()) return;
   const gp = isGroupKey(m.conv);
   if (!gp && isOnline(m.to_acc)) return;
@@ -108,7 +109,7 @@ function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求�
   const q = PUSH.q[key] || (PUSH.q[key] = {});
   q.kind = gp ? 'gmsg' : 'msg'; q.to = key; q.ref = m.id;
   clearTimeout(q.t);
-  q.t = setTimeout(() => { delete PUSH.q[key]; firePush(q.kind, q.to, q.ref); }, 1200);
+  q.t = setTimeout(() => { delete PUSH.q[key]; firePush(q.kind, q.to, q.ref); }, 300);
 }
 function flushPush() {   // 发完消息马上切走 App：等不了 1.2 秒，立刻把还没发出的推送请求发掉（手机切到后台后几秒内还能发请求）
   Object.keys(PUSH.q).forEach(k => { const q = PUSH.q[k]; clearTimeout(q.t); delete PUSH.q[k]; firePush(q.kind || 'msg', q.to || k, q.ref); });
