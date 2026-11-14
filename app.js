@@ -5163,13 +5163,53 @@ function forwardMomentTo(mm, acc) {
   const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
   forwardTo({ type: 'text', body: head }, acc);
   momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardTo({ type: 'image', body: u }, acc); }, 150 * (i + 1)); });
-  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardTo({ type: 'video', body: mm.video, dur: mm.video_dur || null }, acc); }, 150 * (momentFwdImages(mm).length + 1));
+  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardMomentVideo(mm, convKeyOf(ME(), acc), acc); }, 150 * (momentFwdImages(mm).length + 1));
 }
 function forwardMomentToGroup(mm, gid) {
   const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
   forwardToGroup({ type: 'text', body: head }, gid);
   momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardToGroup({ type: 'image', body: u }, gid); }, 150 * (i + 1)); });
-  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardToGroup({ type: 'video', body: mm.video, dur: mm.video_dur || null }, gid); }, 150 * (momentFwdImages(mm).length + 1));
+  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardMomentVideo(mm, 'g:' + gid, 'g:' + gid); }, 150 * (momentFwdImages(mm).length + 1));
+}
+function grabVideoPoster(url) {
+  return new Promise(function (res) {
+    try {
+      const v = document.createElement('video');
+      v.crossOrigin = 'anonymous'; v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.src = url;
+      const done = function (val) { try { v.removeAttribute('src'); v.load(); } catch (e) {} res(val); };
+      const t = setTimeout(function () { done(null); }, 8000);
+      v.onloadeddata = function () {
+        try { v.currentTime = Math.min(0.3, (v.duration || 1) / 2); } catch (e) {}
+      };
+      v.onseeked = function () {
+        try {
+          const c = document.createElement('canvas');
+          const w = v.videoWidth || 640, h = v.videoHeight || 360;
+          c.width = w; c.height = h;
+          c.getContext('2d').drawImage(v, 0, 0, w, h);
+          c.toBlob(function (b) { clearTimeout(t); done(b); }, 'image/jpeg', 0.82);
+        } catch (e) { clearTimeout(t); done(null); }
+      };
+      v.onerror = function () { clearTimeout(t); done(null); };
+      v.load();
+    } catch (e) { res(null); }
+  });
+}
+async function forwardMomentVideo(mm, conv, to) {
+  if (!mm || typeof mm.video !== 'string' || !mm.video) return;
+  try {
+    toast('正在转发视频…');
+    const url = canon(mm.video);
+    const r = await fetch(url);
+    const blob = await r.blob();
+    const ext = (blob.type.indexOf('webm') >= 0) ? 'webm' : 'mp4';
+    const file = new File([blob], 'moment.' + ext, { type: blob.type || 'video/mp4' });
+    const poster = await grabVideoPoster(url);
+    const fm = { id: uuid(), conv: conv, from_acc: ME(), to_acc: to, type: 'video', body: '', dur: mm.video_dur || null, created_at: stampAfterClr(conv), _st: 'sending', _blob: file, _ext: ext, _ct: file.type, _poster: poster };
+    if (conv === S.conv) addLocal(fm);
+    else { S.out.set(fm.id, fm); touchConv(conv, '[视频]', fm.created_at, false); deliver(fm); }
+  } catch (e) { logErr('fwd-video', e); toast('视频转发失败，检查网络'); }
 }
 function forwardTo(m, acc) {  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
   const conv = convKeyOf(ME(), acc);
