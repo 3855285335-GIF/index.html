@@ -5564,6 +5564,12 @@ function goLink(u) {
   linkWait = '';
   if (m[1] === 'req') { goTab('requests'); return; }
   openChatWith(m[2]);
+  // 推送点进来时数据库/网络可能刚醒：1.5 秒后如果还是空的，自动重开一次，不用用户退出重进
+  setTimeout(function () {
+    try {
+      if (S.me && S.conv === convKeyOf(m[2], ME()) && !document.querySelector('#chat-messages .msg')) openConv(S.conv, m[2]);
+    } catch (e) {}
+  }, 1500);
   if (m[1] === 'call' && sb && !S.noSigDb) pollSignals().catch(() => {});
 }
 function bindSW() {
@@ -5942,22 +5948,52 @@ function bindUI() {
   $('btn-theme').onclick = cycleTheme;
 (function () {
   const b = $('btn-bubble'); if (!b) return;
-  const SK = [['violet', '紫'], ['blue', '蓝'], ['green', '绿'], ['orange', '橙'], ['pink', '粉']];
-  const MAP = {
-    violet: 'linear-gradient(135deg,#6c5ce7 0%,#8b5cf6 55%,#c94fa8 100%)',
-    blue: 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)',
-    green: 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)',
-    orange: 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)',
-    pink: 'linear-gradient(135deg,#ffc2dd 0%,#ff8ec4 55%,#ff5fa8 100%)'
+  const OPTS = [
+    ['紫', 'violet', 'linear-gradient(135deg,#6c5ce7 0%,#8b5cf6 55%,#c94fa8 100%)'],
+    ['蓝', 'blue', 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)'],
+    ['绿', 'green', 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)'],
+    ['橙', 'orange', 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)'],
+    ['粉', 'pink', 'linear-gradient(135deg,#ff9ecb 0%,#ff6fb5 55%,#ff4f9f 100%)'],
+    ['黑', 'black', 'linear-gradient(135deg,#3a3a44 0%,#1c1c22 60%,#0a0a0d 100%)']
+  ];
+  let cur = LS.get('ch2bubble', 'violet') || 'violet';
+  const cssOf = function (v) {
+    if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
+    const o = OPTS.find(x => x[1] === v) || OPTS[0];
+    return o[2];
   };
-  let i = SK.findIndex(function (x) { return x[0] === (LS.get('ch2bubble', 'violet') || 'violet'); }); if (i < 0) i = 0;
-  b.textContent = '💬 气泡：' + SK[i][1];
+  const apply = function (v) {
+    cur = v;
+    try { document.documentElement.style.setProperty('--mine', cssOf(v)); } catch (e) {}
+    LS.set('ch2bubble', v);
+    const o = OPTS.find(x => x[1] === v);
+    b.textContent = '💬 气泡：' + (o ? o[0] : '自定义');
+    document.querySelectorAll('#bub-swatches .bub-sw').forEach(function (el) { el.classList.toggle('on', el.dataset.v === v); });
+  };
+  const box = $('bub-swatches');
+  if (box) {
+    OPTS.forEach(function (o) {
+      const el = document.createElement('button');
+      el.type = 'button'; el.className = 'bub-sw'; el.dataset.v = o[1]; el.title = o[0];
+      el.style.background = o[2];
+      el.onclick = function () { apply(o[1]); };
+      box.appendChild(el);
+    });
+  }
+  const close = function () {
+    try { $('bub-backdrop').classList.remove('active'); $('bub-sheet').classList.remove('active'); } catch (e) {}
+  };
   b.onclick = function () {
-    i = (i + 1) % SK.length; const k = SK[i][0];
-    LS.set('ch2bubble', k);
-    try { document.documentElement.style.setProperty('--mine', MAP[k]); } catch (e) {}
-    b.textContent = '💬 气泡：' + SK[i][1]; toast('气泡颜色：' + SK[i][1]);
+    apply(cur);
+    raiseSheet('bub-sheet', 'bub-backdrop');
+    try { $('bub-backdrop').classList.add('active'); $('bub-sheet').classList.add('active'); } catch (e) {}
+    const inp = $('bub-custom');
+    if (inp && /^#[0-9a-f]{6}$/i.test(cur)) inp.value = cur;
   };
+  if ($('bub-backdrop')) $('bub-backdrop').onclick = close;
+  if ($('bub-done')) $('bub-done').onclick = close;
+  if ($('bub-custom')) $('bub-custom').oninput = function () { apply(this.value); };
+  apply(cur);
 })();
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;

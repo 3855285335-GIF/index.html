@@ -21,14 +21,16 @@
       blue: 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)',
       green: 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)',
       orange: 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)',
-      pink: 'linear-gradient(135deg,#ffc2dd 0%,#ff8ec4 55%,#ff5fa8 100%)'
+      pink: 'linear-gradient(135deg,#ff9ecb 0%,#ff6fb5 55%,#ff4f9f 100%)',
+      black: 'linear-gradient(135deg,#3a3a44 0%,#1c1c22 60%,#0a0a0d 100%)'
     };
-    if (map[b]) document.documentElement.style.setProperty('--mine', map[b]);
+    if (typeof b === 'string' && /^#[0-9a-f]{6}$/i.test(b)) document.documentElement.style.setProperty('--mine', 'linear-gradient(135deg,' + b + ' 0%,' + b + ' 100%)');
+    else if (map[b]) document.documentElement.style.setProperty('--mine', map[b]);
   } catch (e) {}
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261115f">
+<link rel="preload" as="script" href="app.js?v=20261115g">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -609,6 +611,13 @@
   .sheet-bd { position: fixed; inset: 0; background: rgba(10,6,30,.42); backdrop-filter: blur(3px); z-index: 2700; display: none; }
   .sheet-bd.active { display: block; }
   .sheet { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--surface); border-radius: 22px; z-index: 2800; display: none; width: min(340px, 86vw); box-shadow: 0 20px 60px rgba(0,0,0,.35); overflow: hidden; }
+  .bub-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 16px 2px; }
+  .bub-sw { width: 46px; height: 46px; border-radius: 15px; border: 2px solid transparent; padding: 0; }
+  .bub-sw.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+  .bub-custom-row { display: flex; align-items: center; gap: 10px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); font-size: 12px; color: var(--muted); }
+  .bub-custom-row input[type=color] { width: 46px; height: 34px; border: 0; background: none; padding: 0; }
+  .bub-custom-row .btn-primary { margin-left: auto; padding: 8px 18px; border-radius: 10px; }
+  .msg.mine .bubble { text-shadow: 0 1px 2px rgba(0,0,0,.22); }
   .sheet.active { display: block; animation: popc .18s ease; }
   .sheet .menu-title { padding: 15px 18px; font-size: 14px; line-height: 1.5; color: var(--ink); text-align: center; border-bottom: 1px solid var(--line); }
   .sheet .menu-item { display: block; width: 100%; padding: 16px 20px; text-align: center; background: none; font-size: 16px; color: var(--danger); font-weight: 600; border-radius: 0; }
@@ -1142,6 +1151,12 @@
 <div id="act-backdrop" class="sheet-bd"></div>
 <div id="nbar" aria-hidden="true" role="button" tabindex="-1"><div class="nb-av"></div><div class="nb-tx"><div class="nb-top"><span class="nb-name"></span><span class="nb-when">现在</span></div><div class="nb-body"></div></div></div>
 <div id="act-sheet" class="sheet"><div class="menu-title" id="as-title"></div><div id="as-items"></div></div>
+<div id="bub-backdrop" class="sheet-bd"></div>
+<div id="bub-sheet" class="sheet">
+  <div class="menu-title">聊天气泡颜色</div>
+  <div class="bub-swatches" id="bub-swatches"></div>
+  <div class="bub-custom-row"><span>自定义</span><input type="color" id="bub-custom" value="#6c5ce7"><button id="bub-done" type="button" class="btn-primary">完成</button></div>
+</div>
 <div id="pf-backdrop" class="sheet-bd"></div>
 <div id="profile-card" class="sheet">
   <div id="pf-cover"></div>
@@ -1308,6 +1323,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261115f" defer></script>
+<script src="app.js?v=20261115g" defer></script>
 </body>
 </html>
