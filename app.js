@@ -3856,7 +3856,8 @@ function renderGiMembers(q) {
 }
 async function grpKick(gid, acc) {
   try {
-    const { error } = await sb.rpc('kick_group_member', { p_gid: gid, p_acc: acc });
+    const { data: krr, error } = await sb.rpc('kick_member_v2', { p_gid: gid, p_acc: acc });
+      if (!error && krr && krr !== 'ok') { toast(krr === 'denied' ? '没有权限踢人' : krr === 'self' ? '不能踢自己' : '操作失败'); return; }
     if (error) throw error;
     delete GRP.members[gid];
     try { await grpMembers(gid, true); } catch (e) {}
@@ -5955,7 +5956,7 @@ function goLink(u) {
           sb.rpc('join_group_by_link', { p_gid: gid, p_token: kTok }).then(function (r) {
             const d = r && r.data;
             if (d === 'ok' || d === 'member') { grpLoad(true).then(function () { openConv(k, k); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
+            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : d === 'kicked' ? '你已被移出这个群，不能再加入' : '无法加入');
           }, function () { toast('加入失败，检查网络'); });
         } },
         { label: '取消', fn: null }
@@ -6162,7 +6163,7 @@ function bindUI() {
     sb.rpc('join_group_by_link', { p_gid: gid, p_token: tok }).then(function (r) {
       const d = r && r.data;
       if (d === 'ok' || d === 'member') { GL.info[gid] = Object.assign({}, info || {}, { member: true }); grpLoad(true).then(function () { openConv('g:' + gid, 'g:' + gid); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
+      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : d === 'kicked' ? '你已被移出这个群，不能再加入' : '无法加入');
     }, function () { toast('加入失败，检查网络'); });
   });
   box.addEventListener('scroll', () => {
