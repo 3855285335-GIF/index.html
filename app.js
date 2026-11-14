@@ -696,7 +696,12 @@ function applyBoot(b) {
   setTimeout(function () { syncMyBubble(); }, 1800);
   setTimeout(function () { try { retryFailed(); } catch (e) {} }, 2600);
   startDbSync();
-  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, (S.rt && S.rt.db ? 60000 : 20000));
+  if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () {
+    try {
+      const t = Date.now();
+      if (!window.__lastPS || t - window.__lastPS > ((S.rt && S.rt.db) ? 60000 : 20000)) { window.__lastPS = t; syncMutes(); syncPins(); }
+    } catch (e) {}
+  }, 5000);
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
   if (!window.__kickT) window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 60000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
@@ -801,13 +806,14 @@ function bubCss(v) {
   if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
   return BUB_CSS[v] || '';
 }
-const GL = { info: {}, busy: {} };
+const GL = { info: {}, busy: {}, fail: {} };
 function glGids(text) {
   const out = [], re = /#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/ig;
   let m; while ((m = re.exec(String(text || '')))) out.push(m[1].toLowerCase());
   return Array.from(new Set(out));
 }
 function glCardHTML(gid) {
+  if (GL.fail[gid]) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button></div>';
   const i = GL.info[gid];
   if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">' + esc((i.name || '群').slice(0, 1)) + '</div><div class="gl-info"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div></div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
   return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div></div>';
@@ -817,7 +823,7 @@ function fillGlCards(root) {
   root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
     const gid = el.dataset.gid; if (!gid) return; if (el.dataset.done === '1' && el.querySelector('.gl-go')) return;
     const paint = function (info) {
-      if (!info) { el.innerHTML = '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button>'; el.dataset.done = '1'; return; }
+      if (!info) { GL.fail[gid] = 1; delete GL.busy[gid]; try { if (S.conv) chatRender(true); } catch (x) {} return; }
       el.dataset.member = info.member ? '1' : '';
       el.innerHTML = '<div class="gl-name">' + esc(info.name || '群聊') + '</div><div class="gl-meta">' + (info.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (info.member ? '进入' : '加入') + '</button>';
       el.dataset.done = '1';
@@ -847,7 +853,7 @@ function msgHTML(m) {
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
-      const cover = m._pu ? '<img class="vposter" loading="lazy" src="' + esc(m._pu) + '" alt="">' : m.cover ? '<img class="vposter" loading="lazy" src="' + esc(disp(m.cover)) + '" alt="" decoding="async">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" loading="lazy" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
+      const cover = (m._pu && String(m._pu).indexOf('blob:') === 0) ? '<img class="vposter" loading="lazy" src="' + esc(m._pu) + '" alt="">' : (m.cover && String(m.cover).indexOf(SUPABASE_URL + '/storage/v1/object/public/chat-media/') === 0) ? '<img class="vposter" loading="lazy" src="' + esc(disp(m.cover)) + '" alt="" decoding="async">' : local ? '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>' : '<img class="vposter" loading="lazy" src="' + esc(disp(m.body + '.jpg')) + '" alt="" decoding="async">';
       body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span><span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
     }
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
@@ -1238,7 +1244,7 @@ async function compressImage(file) {
       src = im; w = im.naturalWidth || im.width; h = im.naturalHeight || im.height;
     }
     if (!w || !h) return file;
-    const max = 1280, r = Math.min(1, max / Math.max(w, h));
+    const max = 1600, r = Math.min(1, max / Math.max(w, h));
     const cw = Math.max(1, Math.round(w * r)), ch = Math.max(1, Math.round(h * r));
     const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(src, 0, 0, cw, ch);
@@ -6124,7 +6130,7 @@ function bindUI() {
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
     const rt = e.target.closest('.gl-retry');
-    if (rt) { const card = rt.closest('.gl-card'); if (card) { card.dataset.done = ''; delete GL.busy[card.dataset.gid]; fillGlCards(box); } return; }
+    if (rt) { const gid = rt.dataset.gid; delete GL.fail[gid]; delete GL.busy[gid]; try { if (S.conv) chatRender(true); } catch (x) {} if (S.conv) setTimeout(function () { fillGlCards(box); }, 50); return; }
     const b = e.target.closest('.gl-go'); if (!b) return;
     const gid = b.dataset.gid; if (!gid) return;
     const info = GL.info[gid];
