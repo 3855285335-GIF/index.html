@@ -859,7 +859,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '" data-links="' + esc(glGids(pq.text).length ? pq.text : '') + '">' + qh + mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type === 'text') {
@@ -3977,7 +3977,12 @@ function openGroupSettings(gid) {
   }
   if (mine && mine.title) items.push({ label: mine.title_on ? '我的头衔：戴上（点一下收起）' : '我的头衔：已收起（点一下戴上）', fn: function () { setMyTitleVisible(gid, !mine.title_on); } });
   if (owner) items.push({ label: '转让群主', fn: function () { transferOwner(gid); } });
-  items.unshift({ label: '复制邀请链接（发给好友）', fn: function () { copyText(location.origin + location.pathname + '#g=' + gid); } });
+  items.unshift({ label: '复制邀请链接（发给好友）', fn: function () {
+    sb.rpc('ensure_group_link', { p_gid: gid }).then(function (r) {
+      const t = r && r.data;
+      copyText(location.origin + location.pathname + '#g=' + gid + (t ? ('&k=' + t) : ''));
+    }, function () { toast('生成链接失败，检查网络'); });
+  } });
   if (!items.length) { toast('这里还没有可设置的'); return; }
   items.push({ label: '取消', fn: null });
   openActs('群设置', items);
@@ -5929,12 +5934,12 @@ function noteRequest(r) {
 let linkWait = '';
 function goLink(u) {
   let h = ''; try { h = new URL(u, location.href).hash; } catch (e) { h = String(u || ''); }
-  const gm = /^#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(h);
+  const gm = /^#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&k=([0-9a-f]{18}))?$/i.exec(h);
   if (gm) {
     if (!S.started || !S.me) { linkWait = h; return; }
     linkWait = '';
     const k = 'g:' + gm[1].toLowerCase();
-    const gid = gm[1].toLowerCase();
+    const gid = gm[1].toLowerCase(), kTok = gm[2] || null;
     (async function () {
       try { await grpLoad(true); } catch (e) {}
       const known = (GRP.list || []).some(function (g) { return g.id === gid; });
@@ -5947,10 +5952,10 @@ function goLink(u) {
       if (member) { openConv(k, k); return; }
       openActs('加入这个群聊？', [
         { label: '加入', fn: function () {
-          sb.rpc('join_group_by_link', { p_gid: gid }).then(function (r) {
+          sb.rpc('join_group_by_link', { p_gid: gid, p_token: kTok }).then(function (r) {
             const d = r && r.data;
             if (d === 'ok' || d === 'member') { grpLoad(true).then(function () { openConv(k, k); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : '无法加入');
+            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
           }, function () { toast('加入失败，检查网络'); });
         } },
         { label: '取消', fn: null }
@@ -6151,11 +6156,13 @@ function bindUI() {
     const b = e.target.closest('.gl-go'); if (!b) return;
     const gid = b.dataset.gid; if (!gid) return;
     const info = GL.info[gid];
+    const bub = b.closest('[data-links]'), km = bub ? /&k=([0-9a-f]{18})/i.exec(bub.getAttribute('data-links') || '') : null;
+    const tok = km ? km[1] : null;
     if (info && info.member) { openConv('g:' + gid, 'g:' + gid); return; }
-    sb.rpc('join_group_by_link', { p_gid: gid }).then(function (r) {
+    sb.rpc('join_group_by_link', { p_gid: gid, p_token: tok }).then(function (r) {
       const d = r && r.data;
       if (d === 'ok' || d === 'member') { GL.info[gid] = Object.assign({}, info || {}, { member: true }); grpLoad(true).then(function () { openConv('g:' + gid, 'g:' + gid); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : '无法加入');
+      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
     }, function () { toast('加入失败，检查网络'); });
   });
   box.addEventListener('scroll', () => {
