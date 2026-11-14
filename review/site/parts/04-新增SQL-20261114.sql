@@ -90,3 +90,23 @@ create policy ud_sel on public.user_devices for select to authenticated using (a
 create policy ud_ins on public.user_devices for insert to authenticated with check (account = public.my_acc());
 create policy ud_upd on public.user_devices for update to authenticated using (account = public.my_acc()) with check (account = public.my_acc());
 create policy ud_del on public.user_devices for delete to authenticated using (account = public.my_acc());
+-- 9) 消息更新守卫：允许发送者 1 分钟内改正文；撤回逻辑不变
+CREATE OR REPLACE FUNCTION public.messages_before_update() RETURNS trigger LANGUAGE plpgsql AS $function$
+begin
+  if new.conv_key <> old.conv_key or new.from_acc <> old.from_acc or new.to_acc <> old.to_acc or new.created_at <> old.created_at then
+    raise exception 'immutable fields';
+  end if;
+  if old.type = 'recalled' then raise exception 'already recalled'; end if;
+  if new.type = old.type then
+    if old.from_acc <> public.my_acc() then raise exception 'not yours'; end if;
+    if now() - old.created_at > interval '1 minute' then raise exception 'edit window passed'; end if;
+    if new.cover is distinct from old.cover then raise exception 'only body edit'; end if;
+    return new;
+  end if;
+  if new.type <> 'recalled' then raise exception 'only recall is allowed'; end if;
+  if now() - old.created_at > interval '2 minutes 15 seconds' then raise exception 'recall window passed'; end if;
+  new.id := old.id; new.conv_key := old.conv_key; new.from_acc := old.from_acc;
+  new.to_acc := old.to_acc; new.created_at := old.created_at; new.dur := old.dur;
+  new.type := 'recalled'; new.body := '';
+  return new;
+end $function$;
