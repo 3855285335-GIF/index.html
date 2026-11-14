@@ -1,10 +1,12 @@
-<!-- Chatter 前端 · 14-启动 · 原文件第 7345-7372 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 14-启动 · 原文件第 7539-7568 行 · 2026-11-14 线上版 -->
 /* ================= 启动 ================= */
 function boot() {
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
   ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
   ready.catch(e => {
-    hideSplash();
+hideSplash();
+window.addEventListener('pageshow', function () { try { hideSplash(); } catch (e) {} });
+setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜底：启动图 4 秒内必须消失
     logErr('lib', e);
     var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
   });
