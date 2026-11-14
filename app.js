@@ -1714,7 +1714,7 @@ async function openConv(key, peer) {
   if (!S.me) return;
   recAbort();
   setAtMe(key, false);
-  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
+  S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; S.editSince = new Date().toISOString(); clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
   if (!draftOf(key) && sb && S.token) {
     sb.from('conversations').select('draft').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle().then(function (r) {
@@ -1820,6 +1820,21 @@ async function syncChat() {
     rows.forEach(r => { if (r.from_acc !== ME() && !S.msgs.some(x => x.id === r.id)) onIncoming(r); else upsertMsg(r); });
     fetchPeerRead(conv);
   } catch (e) { logErr('syncChat', e); }
+}
+async function syncEdited() {
+  const conv = S.conv; if (!conv || !sb) return;
+  try {
+    const since = S.editSince || new Date(Date.now() - 86400000).toISOString();
+    const { data, error } = await sb.from('messages').select('*').eq('conv_key', conv).gt('edited_at', since).order('edited_at', { ascending: true }).limit(30);
+    if (error || !data || !data.length || S.conv !== conv) return;
+    let changed = false;
+    data.forEach(function (r) {
+      const m = S.msgs.find(function (x) { return x.id === String(r.id); });
+      if (m && r.body !== m.body) { m.body = r.body; m.edited_at = r.edited_at; changed = true; }
+      S.editSince = r.edited_at;
+    });
+    if (changed) chatRender(S.stick);
+  } catch (e) {}
 }
 async function loadOlder() {
   if (S.loadingOlder || !S.hasMore || !S.conv || !S.msgs.length) return;
@@ -2980,6 +2995,7 @@ function startTimers() {
     if (n % 5 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化：30 秒一次
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
+    if (S.conv && n % 3 === 0) syncEdited();
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 6000);
 }
@@ -5315,6 +5331,7 @@ function checkKick() {
   if (!sb || !S.uid) return;
   sb.from('profiles').select('kick_at').eq('id', S.uid).maybeSingle().then(function (r) {
     const k = r && r.data && r.data.kick_at; if (!k) return;
+    if (String(k) === String(LS.get('ch2kickAt', ''))) { LS.set('ch2loginAt', Date.now()); return; }   // 这次是本机发起的，不踢自己
     const la = LS.get('ch2loginAt', 0) || 0;
     if (Date.parse(k) > la + 1500) {
       LS.set('ch2loginAt', Date.now());
@@ -6758,6 +6775,7 @@ if ($('btn-devices')) $('btn-devices').onclick = async function () {
       const t = new Date().toISOString();
       sb.from('profiles').update({ kick_at: t }).eq('id', S.uid).then(function (r) {
         if (r && r.error) { toast('操作失败：' + r.error.message); return; }
+        LS.set('ch2kickAt', t);
         LS.set('ch2loginAt', Date.now());
         toast('其他设备下次联网时会自动退出');
       }, function () { toast('网络失败，没发出去'); });
