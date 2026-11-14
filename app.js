@@ -6123,6 +6123,34 @@ function bindUI() {
   apply(cur);
   window.__bubApply = apply;
 })();
+(function () {
+  const b = btn-font; if (!b) return;
+  const FONTS = {
+    round: '"Yuanti SC","幼圆","YouYuan","PingFang SC","Microsoft YaHei",sans-serif',
+    song: '"Songti SC","SimSun","STSong",serif',
+    kai: '"Kaiti SC","KaiTi","STKaiti",serif',
+    hei: '"Heiti SC","SimHei","Microsoft YaHei",sans-serif',
+    serif: 'Georgia,"Times New Roman","Songti SC",serif'
+  };
+  const LABEL = { system: '系统', round: '圆体', song: '宋体', kai: '楷体', hei: '黑体', serif: '衬线' };
+  let cur = LS.get('ch2font', 'system') || 'system';
+  const apply = function (v) {
+    cur = v; LS.set('ch2font', v);
+    try {
+      if (FONTS[v]) document.documentElement.style.setProperty('--font', FONTS[v]);
+      else document.documentElement.style.removeProperty('--font');
+    } catch (e) {}
+    b.textContent = '🔤 字体：' + (LABEL[v] || '系统');
+  };
+  apply(cur);
+  b.onclick = function () {
+    const items = Object.keys(LABEL).map(function (k) {
+      return { label: LABEL[k] + (k === cur ? ' ✓' : ''), fn: function () { apply(k); } };
+    });
+    items.push({ label: '取消', fn: null });
+    openActs('聊天字体', items);
+  };
+})();
   /* 朋友圈 */
   $('moment-new').onclick = openMomentCompose;
   $('mo-cover-btn').onclick = function () { const i = $('cover-input'); i.value = ''; i.click(); };
