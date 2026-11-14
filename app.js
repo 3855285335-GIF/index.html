@@ -5163,11 +5163,13 @@ function forwardMomentTo(mm, acc) {
   const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
   forwardTo({ type: 'text', body: head }, acc);
   momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardTo({ type: 'image', body: u }, acc); }, 150 * (i + 1)); });
+  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardTo({ type: 'video', body: mm.video, dur: mm.video_dur || null }, acc); }, 150 * (momentFwdImages(mm).length + 1));
 }
 function forwardMomentToGroup(mm, gid) {
   const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
   forwardToGroup({ type: 'text', body: head }, gid);
   momentFwdImages(mm).forEach(function (u, i) { setTimeout(function () { forwardToGroup({ type: 'image', body: u }, gid); }, 150 * (i + 1)); });
+  if (typeof mm.video === 'string' && mm.video) setTimeout(function () { forwardToGroup({ type: 'video', body: mm.video, dur: mm.video_dur || null }, gid); }, 150 * (momentFwdImages(mm).length + 1));
 }
 function forwardTo(m, acc) {  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
   const conv = convKeyOf(ME(), acc);
@@ -6516,7 +6518,7 @@ $('ie-panel-stk').addEventListener('click', function (e) {
       S.friends.forEach(function (a) { list.push({ label: peerName(a), fn: function () { forwardMomentTo(mm, a); } }); });
       (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardMomentToGroup(mm, g.id); } }); });
       list.push({ label: '取消', fn: null });
-      openActs('转发朋友圈（连图片）', list);
+      openActs('转发朋友圈（连图片/视频）', list);
       return;
     }
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
