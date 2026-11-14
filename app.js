@@ -5957,6 +5957,7 @@ function bindUI() {
     ['黑', 'black', 'linear-gradient(135deg,#3a3a44 0%,#1c1c22 60%,#0a0a0d 100%)']
   ];
   let cur = LS.get('ch2bubble', 'violet') || 'violet';
+  let lastSwatch = 0;   // 防止系统取色器延迟触发的 input 事件把刚选的颜色改回去
   const cssOf = function (v) {
     if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
     const o = OPTS.find(x => x[1] === v) || OPTS[0];
@@ -5976,7 +5977,7 @@ function bindUI() {
       const el = document.createElement('button');
       el.type = 'button'; el.className = 'bub-sw'; el.dataset.v = o[1]; el.title = o[0];
       el.style.background = o[2];
-      el.onclick = function () { apply(o[1]); };
+      el.onclick = function () { lastSwatch = Date.now(); apply(o[1]); };
       box.appendChild(el);
     });
   }
@@ -5992,7 +5993,8 @@ function bindUI() {
   };
   if ($('bub-backdrop')) $('bub-backdrop').onclick = close;
   if ($('bub-done')) $('bub-done').onclick = close;
-  if ($('bub-custom')) $('bub-custom').oninput = function () { apply(this.value); };
+  const onPick = function () { if (Date.now() - lastSwatch < 600) return; apply(this.value); };
+  if ($('bub-custom')) { $('bub-custom').oninput = onPick; $('bub-custom').onchange = onPick; }
   apply(cur);
 })();
   /* 朋友圈 */
