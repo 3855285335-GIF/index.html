@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 04-好友通话群语音 · 原文件第 3161-3965 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 04-好友通话群语音 · 原文件第 3168-3963 行 · 2026-11-15 线上版 -->
 /* ================= 好友 ================= */
 let searchT = 0;
 async function runSearch(q) {
@@ -415,17 +415,7 @@ async function onInvite(p) {
   if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   if (!S.friends.includes(p.from)) return;
-  // 校验这条邀请确实在数据库里，防止有人往实时通道伪造来电
-  let okInv = false;
-  for (let i = 0; i < 3 && !okInv; i++) {
-    try {
-      const r = await sb.from('signals').select('payload').eq('from_acc', p.from).eq('to_acc', ME()).order('created_at', { ascending: false }).limit(6);
-      okInv = (r.data || []).some(function (s) { return s.payload && s.payload.id === p.id && s.payload.t === 'invite'; });
-    } catch (e) {}
-    if (!okInv) await new Promise(function (r) { setTimeout(r, 250); });
-  }
-  if (!okInv) return;
-  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
+  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id  S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
@@ -523,6 +513,7 @@ function onSig(p) {
   if (!p || typeof p !== 'object' || typeof p.from !== 'string' || typeof p.id !== 'string') return;
   if (GC.on && p.cid && p.cid === GC.cid && typeof p.t === 'string' && p.t.indexOf('g') === 0) { gcOnSig(p); return; }   // 群语音：成员不一定互为好友，不能按好友过滤
   if (!S.friends.includes(p.from)) return;
+  // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
   if (sigDup(p)) return;
   switch (p.t) {
     case 'invite': return onInvite(p);
