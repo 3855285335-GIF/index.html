@@ -789,6 +789,32 @@ function bubCss(v) {
   if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
   return BUB_CSS[v] || '';
 }
+const GL = { info: {}, busy: {} };
+function glGids(text) {
+  const out = [], re = /#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/ig;
+  let m; while ((m = re.exec(String(text || '')))) out.push(m[1].toLowerCase());
+  return Array.from(new Set(out));
+}
+function glCardHTML(gid) { return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div>'; }
+function fillGlCards(root) {
+  if (!root || !sb) return;
+  root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
+    const gid = el.dataset.gid; if (!gid || el.dataset.done) return;
+    const paint = function (info) {
+      if (!info) { el.innerHTML = '<div class="gl-name">群聊不存在或已解散</div>'; el.dataset.done = '1'; return; }
+      el.dataset.member = info.member ? '1' : '';
+      el.innerHTML = '<div class="gl-name">' + esc(info.name || '群聊') + '</div><div class="gl-meta">' + (info.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (info.member ? '进入' : '加入') + '</button>';
+      el.dataset.done = '1';
+    };
+    if (GL.info[gid]) { paint(GL.info[gid]); return; }
+    if (GL.busy[gid]) return;
+    GL.busy[gid] = 1;
+    sb.rpc('group_link_info', { p_gid: gid }).then(function (r) {
+      const d = r && r.data; delete GL.busy[gid];
+      if (d) GL.info[gid] = d; paint(d);
+    }, function () { delete GL.busy[gid]; paint(null); });
+  });
+}
 function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
@@ -803,7 +829,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type !== 'recalled' && m.type !== 'call') {
@@ -848,12 +874,14 @@ function chatRender(stick) {
     return sep + msgHTML(m);
   }).join('');
   S.rendered = shown.length;
+  fillGlCards(b);
   if (stick) b.scrollTop = b.scrollHeight;
 }
 function chatAppend(m, force) {
   if (isHidden(m)) return;
   const b = $('chat-messages'), e = b.querySelector('.empty'); if (e) e.remove();
   b.insertAdjacentHTML('beforeend', msgHTML(m));
+  fillGlCards(b);
   if (force || S.stick) b.scrollTop = b.scrollHeight;
 }
 function msgElOf(id) { return $('chat-messages').querySelector('.msg[data-id="' + id + '"]'); }
@@ -5983,6 +6011,17 @@ function bindUI() {
     try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
   });
   const box = $('chat-messages');
+  box.addEventListener('click', function (e) {
+    const b = e.target.closest('.gl-go'); if (!b) return;
+    const gid = b.dataset.gid; if (!gid) return;
+    const info = GL.info[gid];
+    if (info && info.member) { openConv('g:' + gid, 'g:' + gid); return; }
+    sb.rpc('join_group_by_link', { p_gid: gid }).then(function (r) {
+      const d = r && r.data;
+      if (d === 'ok' || d === 'member') { GL.info[gid] = Object.assign({}, info || {}, { member: true }); grpLoad(true).then(function () { openConv('g:' + gid, 'g:' + gid); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
+      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : '无法加入');
+    }, function () { toast('加入失败，检查网络'); });
+  });
   box.addEventListener('scroll', () => {
     S.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
     if (box.scrollTop < 60) {
