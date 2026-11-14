@@ -1,7 +1,7 @@
--- Chatter 全部 SQL（按文件修改时间排序，含最新安全/免打扰补丁）
+-- Chatter 全部 SQL（按修改时间排序，含安全/免打扰/置顶补丁）
 
 -- ============================================================
--- group-diagnose.sql  (2026-11-08 14:06)
+-- group-diagnose.sql
 -- ============================================================
 -- ============================================================
 -- 群聊改造 · 第一步：只读诊断（不改任何数据）
@@ -50,7 +50,7 @@ union all select 'FUNCTIONS', d from fn;
 
 
 -- ============================================================
--- diag-2.sql  (2026-11-08 14:17)
+-- diag-2.sql
 -- ============================================================
 select c.relname, c.relrowsecurity, c.relforcerowsecurity,
        pg_get_userbyid(c.relowner) as owner
@@ -74,7 +74,7 @@ order by table_name, grantee, privilege_type;
 
 
 -- ============================================================
--- group-patch-v1.sql  (2026-11-08 14:22)
+-- group-patch-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群聊改造补丁 v1（幂等：可以重复执行）
@@ -317,7 +317,7 @@ commit;
 
 
 -- ============================================================
--- cleanup-tests.sql  (2026-11-08 14:44)
+-- cleanup-tests.sql
 -- ============================================================
 begin;
 
@@ -347,7 +347,7 @@ commit;
 
 
 -- ============================================================
--- group-patch-v2.sql  (2026-11-08 15:35)
+-- group-patch-v2.sql
 -- ============================================================
 -- ============================================================
 -- 群聊补丁 v2（幂等，可重复执行）
@@ -661,7 +661,7 @@ commit;
 
 
 -- ============================================================
--- group-patch-v3.sql  (2026-11-08 15:50)
+-- group-patch-v3.sql
 -- ============================================================
 -- 文字消息上限从 5000 放宽到 20000（群聊/单聊都生效）
 begin;
@@ -701,7 +701,7 @@ commit;
 
 
 -- ============================================================
--- profile-signature-v1.sql  (2026-11-09 19:15)
+-- profile-signature-v1.sql
 -- ============================================================
 -- ============================================================
 -- 个性签名补丁 v1（幂等，可重复执行）
@@ -717,7 +717,7 @@ commit;
 
 
 -- ============================================================
--- profile-signature-v2.sql  (2026-11-09 19:48)
+-- profile-signature-v2.sql
 -- ============================================================
 -- ============================================================
 -- 个性签名补丁 v2（幂等）：bootstrap 返回好友/会话对端的签名
@@ -759,7 +759,7 @@ commit;
 
 
 -- ============================================================
--- moments-v1.sql  (2026-11-09 22:31)
+-- moments-v1.sql
 -- ============================================================
 -- ============================================================
 -- 朋友圈 v1（幂等）：文字 + 最多 9 图、仅好友可见、点赞、评论
@@ -870,7 +870,7 @@ commit;
 
 
 -- ============================================================
--- group-roles-v1.sql  (2026-11-09 22:40)
+-- group-roles-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群角色 / 头衔 / 禁言 / 群图标补丁 v1（幂等，可重复执行）
@@ -1099,7 +1099,7 @@ commit;
 
 
 -- ============================================================
--- moments-notify-v1.sql  (2026-11-09 23:06)
+-- moments-notify-v1.sql
 -- ============================================================
 -- 朋友圈未读互动：记录用户上次看朋友圈互动的时间
 begin;
@@ -1108,7 +1108,7 @@ commit;
 
 
 -- ============================================================
--- covers-v1.sql  (2026-11-10 18:57)
+-- covers-v1.sql
 -- ============================================================
 -- ============================================================
 -- 独立个人页/朋友圈封面 + 好友专属聊天背景跨设备同步
@@ -1151,7 +1151,7 @@ commit;
 
 
 -- ============================================================
--- group-call-v1.sql  (2026-11-10 19:42)
+-- group-call-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群语音 v1 补丁（4 人以内，前台）
@@ -1327,7 +1327,7 @@ commit;
 
 
 -- ============================================================
--- moments-reply-v1.sql  (2026-11-10 20:12)
+-- moments-reply-v1.sql
 -- ============================================================
 -- ============================================================
 -- 朋友圈评论回复 v1（幂等，可重复执行）
@@ -1343,7 +1343,7 @@ commit;
 
 
 -- ============================================================
--- group-join-approval-v1.sql  (2026-11-10 22:03)
+-- group-join-approval-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群加入审批 v1（幂等）
@@ -1516,7 +1516,7 @@ commit;
 
 
 -- ============================================================
--- group-notice-mentions-v1.sql  (2026-11-10 22:34)
+-- group-notice-mentions-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群公告 + @某人（幂等）
@@ -1556,7 +1556,7 @@ commit;
 
 
 -- ============================================================
--- moments-visibility-v1.sql  (2026-11-10 22:54)
+-- moments-visibility-v1.sql
 -- ============================================================
 -- ============================================================
 -- 朋友圈分组可见（幂等）
@@ -1592,7 +1592,7 @@ commit;
 
 
 -- ============================================================
--- moments-video-v1.sql  (2026-11-10 22:57)
+-- moments-video-v1.sql
 -- ============================================================
 -- 朋友圈视频（幂等）：一条动态最多一个视频，存在 chat-media
 begin;
@@ -1601,7 +1601,7 @@ commit;
 
 
 -- ============================================================
--- self-chat-v1.sql  (2026-11-11 19:34)
+-- self-chat-v1.sql
 -- ============================================================
 -- ============================================================
 -- 我的备忘：允许给自己发消息（幂等）
@@ -1618,7 +1618,7 @@ commit;
 
 
 -- ============================================================
--- group-files-v1.sql  (2026-11-11 21:23)
+-- group-files-v1.sql
 -- ============================================================
 -- ============================================================
 -- 群文件 v1（幂等）
@@ -1668,7 +1668,7 @@ commit;
 
 
 -- ============================================================
--- moment-views-v1.sql  (2026-11-11 22:51)
+-- moment-views-v1.sql
 -- ============================================================
 -- ============================================================
 -- 朋友圈访客（幂等）
@@ -1704,7 +1704,7 @@ commit;
 
 
 -- ============================================================
--- security-v1.sql  (2026-11-12 19:27)
+-- security-v1.sql
 -- ============================================================
 -- ============================================================
 -- 安全加固 v1（幂等）
@@ -1748,7 +1748,7 @@ commit;
 
 
 -- ============================================================
--- security-v2.sql  (2026-11-12 19:38)
+-- security-v2.sql
 -- ============================================================
 -- ============================================================
 -- 安全加固 v2（幂等）
@@ -1802,7 +1802,7 @@ commit;
 
 
 -- ============================================================
--- mute-push-v1.sql  (2026-11-12 20:40)
+-- mute-push-v1.sql
 -- ============================================================
 -- ============================================================
 -- 免打扰同步 + 推送端拦截（幂等）
@@ -1850,7 +1850,7 @@ commit;
 
 
 -- ============================================================
--- mute-push-v2.sql  (2026-11-12 21:27)
+-- mute-push-v2.sql
 -- ============================================================
 -- ============================================================
 -- 免打扰 v2：按“收件人”的 mutes 判断（v1 错判成了发送者）
@@ -1893,4 +1893,151 @@ end $$;
 
 commit;
 
+
+-- ============================================================
+-- security-v3.sql
+-- ============================================================
+-- ============================================================
+-- 安全加固 v3（幂等）
+-- 1) push_job 收回 anon/authenticated 执行权，只给 service_role
+-- 2) 免打扰从 profiles.mutes（所有人可读）搬到 user_mutes（仅本人可读）
+-- 3) push 包装层改读 user_mutes；群推送按成员排除
+-- 4) 账号 ID 不可修改（触发器）
+-- ============================================================
+begin;
+
+revoke all on function public.push_job(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.push_job(uuid, text, text, text) to service_role;
+
+create table if not exists public.user_mutes (
+  owner_acc text not null,
+  conv_key  text not null,
+  primary key (owner_acc, conv_key)
+);
+alter table public.user_mutes enable row level security;
+grant select, insert, delete on public.user_mutes to authenticated;
+revoke all on public.user_mutes from anon;
+
+drop policy if exists um_sel on public.user_mutes;
+create policy um_sel on public.user_mutes for select to authenticated using (owner_acc = public.my_acc());
+drop policy if exists um_ins on public.user_mutes;
+create policy um_ins on public.user_mutes for insert to authenticated with check (owner_acc = public.my_acc());
+drop policy if exists um_del on public.user_mutes;
+create policy um_del on public.user_mutes for delete to authenticated using (owner_acc = public.my_acc());
+
+-- 把旧的 profiles.mutes 迁过来（只迁自己的；以 profile 所有者为 owner_acc）
+insert into public.user_mutes (owner_acc, conv_key)
+select p.account_id, k
+  from public.profiles p, jsonb_object_keys(coalesce(p.mutes, '{}'::jsonb)) k
+on conflict do nothing;
+
+-- 迁移完把旧列清空，避免继续泄露
+update public.profiles set mutes = '{}'::jsonb where coalesce(mutes, '{}'::jsonb) <> '{}'::jsonb;
+
+create or replace function public.push_job(p_uid uuid, p_kind text, p_ref text, p_to text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text; ck text;
+begin
+  select account_id into me from public.profiles where id = p_uid;
+  if me is null then return jsonb_build_object('skip', 'auth'); end if;
+
+  if p_kind in ('msg', 'call', 'miss') and p_to is not null and p_to <> '' then
+    ck := public.conv_key_of(me, p_to);
+    if exists (select 1 from public.user_mutes um where um.owner_acc = p_to and um.conv_key = ck) then
+      return jsonb_build_object('skip', 'muted');
+    end if;
+  end if;
+
+  return public.push_job_base(p_uid, p_kind, p_ref, p_to);
+end $$;
+
+revoke all on function public.push_job(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.push_job(uuid, text, text, text) to service_role;
+
+do $$
+declare def text; nw text;
+begin
+  select pg_get_functiondef('public.push_job_base(uuid,text,text,text)'::regprocedure) into def;
+  nw := replace(def,
+    'and not exists (select 1 from public.profiles pf where pf.account_id = s.acc and pf.mutes ? (''g:'' || gid))',
+    'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)');
+  if nw = def then raise notice 'gmsg mute clause not found'; else execute nw; end if;
+end $$;
+
+-- 账号 ID 不可修改
+create or replace function public.guard_account_id() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.account_id is distinct from old.account_id then
+    raise exception 'account id cannot be changed';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_guard_account_id on public.profiles;
+create trigger trg_guard_account_id before update on public.profiles
+  for each row execute function public.guard_account_id();
+
+commit;
+
+
+-- ============================================================
+-- mute-push-v3.sql
+-- ============================================================
+-- ============================================================
+-- 免打扰兼容 v4（幂等）
+-- 旧版客户端写的是 profiles.mutes，新版写 user_mutes；推送时两边都认
+-- ============================================================
+begin;
+
+create or replace function public.push_job(p_uid uuid, p_kind text, p_ref text, p_to text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text; ck text;
+begin
+  select account_id into me from public.profiles where id = p_uid;
+  if me is null then return jsonb_build_object('skip', 'auth'); end if;
+
+  if p_kind in ('msg', 'call', 'miss') and p_to is not null and p_to <> '' then
+    ck := public.conv_key_of(me, p_to);
+    if exists (select 1 from public.user_mutes um where um.owner_acc = p_to and um.conv_key = ck) then
+      return jsonb_build_object('skip', 'muted');
+    end if;
+    if exists (select 1 from public.profiles pf where pf.account_id = p_to and coalesce(pf.mutes, '{}'::jsonb) ? ck) then
+      return jsonb_build_object('skip', 'muted');
+    end if;
+  end if;
+
+  return public.push_job_base(p_uid, p_kind, p_ref, p_to);
+end $$;
+
+revoke all on function public.push_job(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.push_job(uuid, text, text, text) to service_role;
+
+do $$
+declare def text; nw text;
+begin
+  select pg_get_functiondef('public.push_job_base(uuid,text,text,text)'::regprocedure) into def;
+  nw := replace(def,
+    'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)',
+    'and not exists (select 1 from public.user_mutes um where um.owner_acc = s.acc and um.conv_key = ''g:'' || gid)
+       and not exists (select 1 from public.profiles pf where pf.account_id = s.acc and coalesce(pf.mutes, ''{}''::jsonb) ? (''g:'' || gid))');
+  if nw = def then raise notice 'gmsg clause already patched or not found'; else execute nw; end if;
+end $$;
+
+-- 清掉测试留下的假订阅、测试群、测试静音
+delete from public.push_subs where endpoint like 'https://fcm.example/%';
+delete from public.user_mutes where conv_key like 'g:4a805265-%';
+delete from public.chat_groups where name = '__mute_gmsg__';
+delete from public.chat_groups where name = '__shot_grp__';
+delete from public.chat_groups where name = '__selfcard_test__';
+delete from public.chat_groups where name = '__gf_probe__';
+
+commit;
+
+
+-- ============================================================
+-- pin-sync-v1.sql
+-- ============================================================
+-- 置顶跨设备同步（2026-11-14）
+alter table public.conversations add column if not exists pinned_at timestamptz;
 
