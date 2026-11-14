@@ -732,6 +732,8 @@ function bindPull(el, fn) {
     pulling = false; locked = false;
     if (dist > 80 && !pullBusy) fn();
     else if (!pullBusy) paintPull('', false);
+    // 兜底：任何情况下 1.2 秒内必须收起“松开刷新/下拉刷新”，避免卡在提示上
+    setTimeout(function () { if (!pullBusy) paintPull('', false); }, 1200);
   };
   el.addEventListener('touchstart', function (e) {
     if (pullBusy || el.scrollTop > 0 || e.touches.length !== 1) { pulling = false; return; }
@@ -766,7 +768,7 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _ar = _d ? ' style="aspect-ratio:' + _d[1] + '/' + _d[2] + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
+    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _W = _d ? _d[1] : (m._w || 0), _H = _d ? _d[2] : (m._h || 0); const _ar = (_W && _H) ? ' style="aspect-ratio:' + _W + '/' + _H + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
@@ -1605,6 +1607,7 @@ async function openConv(key, peer) {
   chatRender(true);                                // 缓存先显示，网络结果再补
   try {
     let rows = await fetchMsgs(key);
+    try { if (navigator.onLine !== false) showBanner(''); } catch (x) {}
     if (S.conv !== key) return;
     // 离开后对方又发了很多条：缓存和最新一页之间会有缺口，往上翻也会跳过。这里先补齐（最多 4 页）
     if (cachedMsgs.length && rows.length >= PAGE) {
@@ -1633,7 +1636,7 @@ async function openConv(key, peer) {
       const rb = document.getElementById('chat-retry');
       if (rb) rb.onclick = function () { openConv(key, peer); };
     } else {
-      try { showBanner('网络不可用，显示的是本地缓存'); } catch (x) {}
+      try { if (navigator.onLine === false) showBanner('当前离线，显示的是本地缓存'); else showBanner(''); } catch (x) {}
     }
   }
 }
