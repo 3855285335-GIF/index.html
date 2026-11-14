@@ -847,7 +847,7 @@
 /* 依赖库加载：先读本地缓存（二次打开零网络）；没有缓存则同时请求多个来源，谁先到用谁，并缓存下来。
    来源包含 esm.sh（上一版就是用它，你的网络能通），失败原因会记录并显示在登录框下面。 */
 (function () {
-  var VER = '2.45.4', KEY = 'ch2lib3:' + VER, ERR = window.__libErr = [];
+  var VER = '2.45.4', KEY = 'ch2lib4:' + VER, ERR = window.__libErr = [];
   var isSafariLike = /iP(hone|ad|od)|Macintosh/.test(navigator.userAgent) && !/Chrome|CriOS|Edg|OPR/.test(navigator.userAgent);
   var TXT = [
     'https://3855285335-gif.github.io/index.html/vendor/supabase-' + VER + '.js',
@@ -1951,12 +1951,14 @@ async function syncMutes() {
     const server = {};
     (r.data || []).forEach(function (x) { server[x.conv_key] = 1; });
     pmLoad();
-    const local = mutes;
-    if (!Object.keys(server).length && Object.keys(local).length) {
-      Object.keys(local).forEach(function (k) { sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {}); });
-    } else if (Object.keys(server).length) {
+    const flag = 'ch2muteOk:' + (S.uid || '');
+    const synced = LS.get(flag, 0);
+    if (!Object.keys(server).length && !synced && Object.keys(mutes).length) {
+      Object.keys(mutes).forEach(function (k) { sb.from('user_mutes').insert({ owner_acc: ME(), conv_key: k }).then(function () {}, function () {}); });
+    } else {
       mutes = server; LS.set('ch2mute:' + (S.uid || ''), mutes); sched('list'); sched('title');
     }
+    LS.set(flag, 1);
   } catch (e) {}
 }
 let selfConvMade = false;
@@ -2284,7 +2286,7 @@ async function deliver(m, silent) {
     const t0 = now(), { data, error } = await sb.from('messages').insert(row).select('created_at').single();
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
-    if (!gp && S.token && m.type !== 'call') fast();
+    if (!gp && S.token && m.type !== 'call' && !(S.rt && S.rt.db)) fast();   // 实时库连着就不走快通道，省一次广播+一次查询
     S.out.delete(id); delete m._blob;
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
@@ -6278,8 +6280,11 @@ async function syncPins() {
     const srv = {};
     (r.data || []).forEach(function (x) { if (x.pinned_at) srv[x.conv_key] = Date.parse(x.pinned_at) || 1; });
     pmLoad();
-    if (Object.keys(srv).length) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
+    const flag = 'ch2pinOk:' + (S.uid || '');
+    const synced = LS.get(flag, 0);
+    if (Object.keys(srv).length || synced) { pins = srv; LS.set('ch2pin:' + (S.uid || ''), pins); sched('list'); }
     else if (Object.keys(pins).length) { Object.keys(pins).forEach(function (k) { try { sb.from('conversations').update({ pinned_at: new Date(pins[k] || Date.now()).toISOString() }).eq('owner_acc', ME()).eq('conv_key', k).then(function () {}, function () {}); } catch (e) {} }); }
+    LS.set(flag, 1);
   } catch (e) {}
 }
 function toggleMute(k) {
