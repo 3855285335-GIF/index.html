@@ -440,7 +440,7 @@ function renderMe() {
 function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 /* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
 function convPreview(c) {
-  let t = parseQ(c.last_body).text;
+  let t = parseQ(c.last_body).text.replace(/https?:\/\/\S*#g=[0-9a-f-]{36}\S*/gi, '[群链接]').replace(/#g=[0-9a-f-]{36}/gi, '[群链接]');
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
   if (/^e:[^\s]{1,16}$/u.test(t)) return '[表情]';
   if (t) return t;
@@ -797,8 +797,8 @@ function glGids(text) {
 }
 function glCardHTML(gid) {
   const i = GL.info[gid];
-  if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
-  return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div>';
+  if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">' + esc((i.name || '群').slice(0, 1)) + '</div><div class="gl-info"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div></div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
+  return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div></div>';
 }
 function fillGlCards(root) {
   if (!root || !sb) return;
