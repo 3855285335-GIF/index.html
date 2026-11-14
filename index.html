@@ -4630,7 +4630,12 @@ function grpChatMode() {
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
   if (gp) {
-    GRP.chatT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) pollConv(S.conv); }, 3000);
+    GRP.chatT = setInterval(function () {
+    if (document.hidden || !isGroupKey(S.conv)) return;
+    const idle = now() - (S.lastIncAt || 0) > 120000;   // 2 分钟没新消息就降到 9 秒一次
+    if (idle && ((GRP.pollSkip = ((GRP.pollSkip || 0) + 1) % 3) !== 0)) return;
+    pollConv(S.conv);
+  }, 3000);
     refreshMyMuteState(gidOf(S.conv));
     GRP.muteT = setInterval(function () { if (!document.hidden && S.conv && isGroupKey(S.conv)) refreshMyMuteState(gidOf(S.conv)); }, 20000);
     GC.tipT = setInterval(function () { if (!document.hidden && isGroupKey(S.conv)) gcTipPoll(); }, 6000);
@@ -6938,6 +6943,7 @@ function bindUI() {
   $('register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type=submit]'), acc = $('reg-acc').value.trim().toLowerCase(), pass = $('reg-pass').value, name = $('reg-name').value.trim();
+       if (!/^[a-z0-9_-]{3,20}$/.test(acc)) { toast('账号只能是 3-20 位小写字母、数字、_ 或 -'); return; }
     if (!/^[a-z0-9_-]{3,20}$/.test(acc)) { msgAuth('❌ 账号只能用英文/数字/_/-，3-20 位'); return; }
     if (pass.length < 6) { msgAuth('❌ 密码至少 6 位'); return; }
     if (!name) { msgAuth('❌ 请输入昵称'); return; }
