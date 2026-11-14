@@ -670,7 +670,7 @@ async function ensureSelfConv() {
   try {
     const r = await sb.from('conversations').select('conv_key').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle();
     if (!r.error && !r.data) {
-      await sb.from('conversations').insert({ owner_acc: ME(), conv_key: key, peer_acc: ME(), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), unread: 0 });
+      await sb.from('conversations').insert({ owner_acc: ME(), conv_key: key, peer_acc: (isGroupKey(key) ? key : ME()), last_body: '', last_ts: new Date().toISOString(), last_read_ts: new Date().toISOString(), unread: 0 });
     }
     resyncSoon();
   } catch (e) { selfConvMade = false; }
@@ -817,7 +817,7 @@ function fillGlCards(root) {
   root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
     const gid = el.dataset.gid; if (!gid) return; if (el.dataset.done === '1' && el.querySelector('.gl-go')) return;
     const paint = function (info) {
-      if (!info) { el.innerHTML = '<div class="gl-name">群聊不存在或已解散</div>'; el.dataset.done = '1'; return; }
+      if (!info) { el.innerHTML = '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button>'; el.dataset.done = '1'; return; }
       el.dataset.member = info.member ? '1' : '';
       el.innerHTML = '<div class="gl-name">' + esc(info.name || '群聊') + '</div><div class="gl-meta">' + (info.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (info.member ? '进入' : '加入') + '</button>';
       el.dataset.done = '1';
@@ -853,7 +853,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type === 'text') {
@@ -1076,7 +1076,7 @@ async function deliver(m, silent) {
       try {
         sb.from('conversations').update({ last_body: previewOf(m), last_ts: t, unread: 0 }).eq('owner_acc', ME()).eq('conv_key', m.conv).select('conv_key').then(function (r) {
           if (r && !r.error && Array.isArray(r.data) && !r.data.length) {
-            sb.from('conversations').insert({ owner_acc: ME(), conv_key: m.conv, peer_acc: ME(), last_body: previewOf(m), last_ts: t, unread: 0 }).then(function () {}, function () {});
+            sb.from('conversations').insert({ owner_acc: ME(), conv_key: m.conv, peer_acc: (isGroupKey(m.conv) ? m.conv : ME()), last_body: previewOf(m), last_ts: t, unread: 0 }).then(function () {}, function () {});
           }
         }, function () {});
       } catch (e) {}
@@ -5290,6 +5290,13 @@ function onConvChange(row) {
     syncPins();
   } catch (e) {}
 }
+async function logout() {
+  try { if (typeof pushLogout === 'function') await pushLogout(); } catch (e) {}
+  try { teardown(); } catch (e) {}
+  try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
+  try { if (sb) await sb.auth.signOut(); } catch (e) {}
+  location.reload();
+}
 function devId() { let d = LS.get('ch2dev', ''); if (!d) { d = 'd' + Math.random().toString(36).slice(2, 10); LS.set('ch2dev', d); } return d; }
 function recordDevice() {
   if (!sb || !S.uid) return;
@@ -5979,7 +5986,7 @@ function bindViewport() {
     if (!vv.height) return;
     // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
     // 没在输入框里打字时一律按整屏算，避免 iPhone 报个“半屏高度”
-    const typing = document.activeElement && document.activeElement.id === 'chat-input';
+    const typing = (function () { const a = document.activeElement; return !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)); })();
     const h = typing ? vv.height : Math.max(window.innerHeight || 0, vv.height || 0);
     root.style.setProperty('--vvh', h + 'px');
     root.style.setProperty('--vvt', (typing ? Math.max(0, vv.offsetTop || 0) : 0) + 'px');
@@ -5992,6 +5999,9 @@ function bindViewport() {
   // 从后台回来：iOS 有时会保留“键盘打开时的高度”，聊天页只占半屏、输入栏悬在中间
   const resumeFix = () => {
     try {
+      // 从后台回来：先让输入框失焦，否则 iOS 会继续用“键盘打开时”的旧高度
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) { try { ae.blur(); } catch (e) {} }
       const root = document.documentElement;
       if (!desktop.matches) {
         root.style.setProperty('--vvh', window.innerHeight + 'px');
@@ -6117,6 +6127,8 @@ function bindUI() {
   });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
+    const rt = e.target.closest('.gl-retry');
+    if (rt) { const card = rt.closest('.gl-card'); if (card) { card.dataset.done = ''; delete GL.busy[card.dataset.gid]; fillGlCards(box); } return; }
     const b = e.target.closest('.gl-go'); if (!b) return;
     const gid = b.dataset.gid; if (!gid) return;
     const info = GL.info[gid];
@@ -6436,15 +6448,6 @@ function bindUI() {
     openActs('聊天字体', items);
   };
 })();
-function nightCfg() { try { return LS.get('ch2night', null); } catch (e) { return null; } }
-function nightOnAt(d) {
-  const c = nightCfg(); if (!c || !c.on) return false;
-  const cur = d.getHours() * 60 + d.getMinutes();
-  const a = String(c.from || '23:00').split(':'), b = String(c.to || '07:00').split(':');
-  const f = (parseInt(a[0], 10) || 0) * 60 + (parseInt(a[1], 10) || 0);
-  const t = (parseInt(b[0], 10) || 0) * 60 + (parseInt(b[1], 10) || 0);
-  return f <= t ? (cur >= f && cur < t) : (cur >= f || cur < t);
-}
 (function () {
   const b = document.getElementById('btn-night'); if (!b) return;
   const paint = function () {
@@ -6808,14 +6811,7 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
   nb.addEventListener('touchend', () => { if (nbY != null && nbCur) nbT = setTimeout(hideNBar, 3000); nbY = null; }, { passive: true });
   $('btn-logout').onclick = () => {
     openActs('退出登录？\n会清掉这台手机上的消息缓存，服务器里的记录还在。', [
-      { label: '退出登录', danger: true, fn: async function () {
-        await pushLogout();
-        teardown();
-        try { Object.keys(localStorage).forEach(k => { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
-        try { await idbClear(); } catch (e) {}
-        try { if (sb) await sb.auth.signOut(); } catch (e) {}
-        location.reload();
-      } },
+      { label: '退出登录', danger: true, fn: function () { logout(); } },
       { label: '取消', fn: null }
     ]);
   };
