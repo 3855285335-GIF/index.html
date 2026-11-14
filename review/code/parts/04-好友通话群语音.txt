@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 04-好友通话群语音 · 原文件第 3074-3867 行 · 当前线上版本 -->
+<!-- Chatter 前端 · 04-好友通话群语音 · 原文件第 3161-3965 行 · 2026-11-14 线上版 -->
 /* ================= 好友 ================= */
 let searchT = 0;
 async function runSearch(q) {
@@ -408,12 +408,23 @@ async function startCall(video) {
     ctimer(call, () => { if (S.call === call && !call.connected) endCall('对方未接听', true); }, 45000);
   } catch (e) { logErr('startCall', e); if (S.call === call) endCall('无法发起通话：' + micError(e), false); }
 }
-function onInvite(p) {
+async function onInvite(p) {
   if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
   if (GC.on) { sig(p.from, 'busy', { id: p.id }); return; }   // 群语音里：直接回忙，不响铃
   if (S.incoming && S.incoming.id === p.id) return;
   if (S.call && S.call.id === p.id) return;
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
+  if (!S.friends.includes(p.from)) return;
+  // 校验这条邀请确实在数据库里，防止有人往实时通道伪造来电
+  let okInv = false;
+  for (let i = 0; i < 3 && !okInv; i++) {
+    try {
+      const r = await sb.from('signals').select('payload').eq('from_acc', p.from).eq('to_acc', ME()).order('created_at', { ascending: false }).limit(6);
+      okInv = (r.data || []).some(function (s) { return s.payload && s.payload.id === p.id && s.payload.t === 'invite'; });
+    } catch (e) {}
+    if (!okInv) await new Promise(function (r) { setTimeout(r, 250); });
+  }
+  if (!okInv) return;
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
