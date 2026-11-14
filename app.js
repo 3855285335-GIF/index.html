@@ -668,6 +668,8 @@ async function ensureSelfConv() {
 }
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
+  if (!LS.get('ch2loginAt', 0)) LS.set('ch2loginAt', Date.now());
+  recordDevice();
   loadOutQueue();
   try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
@@ -687,6 +689,7 @@ function applyBoot(b) {
   startDbSync();
   if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 15000);   // 15 秒对一次，秒级体验
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 30000);
+  if (!window.__kickT) window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 20000);
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -5179,18 +5182,17 @@ function grabVideoPoster(url) {
       v.src = url;
       const done = function (val) { try { v.removeAttribute('src'); v.load(); } catch (e) {} res(val); };
       const t = setTimeout(function () { done(null); }, 8000);
-      v.onloadeddata = function () {
-        try { v.currentTime = Math.min(0.3, (v.duration || 1) / 2); } catch (e) {}
-      };
-      v.onseeked = function () {
+      const draw = function () {
         try {
           const c = document.createElement('canvas');
           const w = v.videoWidth || 640, h = v.videoHeight || 360;
           c.width = w; c.height = h;
-          c.getContext('2d').drawImage(v, 0, 0, w, h);
-          c.toBlob(function (b) { clearTimeout(t); done(b); }, 'image/jpeg', 0.82);
+          c.getContext('2d').drawImage(v, 0, 0, w, h);   // 第 0 秒：和朋友圈里看到的第一帧一致
+          c.toBlob(function (b) { clearTimeout(t); done(b); }, 'image/jpeg', 0.9);
         } catch (e) { clearTimeout(t); done(null); }
       };
+      v.onloadeddata = function () { draw(); };
+      v.onseeked = function () { draw(); };
       v.onerror = function () { clearTimeout(t); done(null); };
       v.load();
     } catch (e) { res(null); }
@@ -5275,6 +5277,30 @@ function onConvChange(row) {
     sched('list');
     syncPins();
   } catch (e) {}
+}
+function devId() { let d = LS.get('ch2dev', ''); if (!d) { d = 'd' + Math.random().toString(36).slice(2, 10); LS.set('ch2dev', d); } return d; }
+function recordDevice() {
+  if (!sb || !S.uid) return;
+  try {
+    const ua = (navigator.userAgent || '').slice(0, 110);
+    sb.from('profiles').select('devices').eq('id', S.uid).maybeSingle().then(function (r) {
+      const old = (r && r.data && r.data.devices && typeof r.data.devices === 'object') ? r.data.devices : {};
+      old[devId()] = { ua: ua, at: new Date().toISOString() };
+      sb.from('profiles').update({ devices: old }).eq('id', S.uid).then(function () {}, function () {});
+    }, function () {});
+  } catch (e) {}
+}
+function checkKick() {
+  if (!sb || !S.uid) return;
+  sb.from('profiles').select('kick_at').eq('id', S.uid).maybeSingle().then(function (r) {
+    const k = r && r.data && r.data.kick_at; if (!k) return;
+    const la = LS.get('ch2loginAt', 0) || 0;
+    if (Date.parse(k) > la + 1500) {
+      LS.set('ch2loginAt', Date.now());
+      toast('已在其他设备退出登录');
+      try { logout(); } catch (e) { location.reload(); }
+    }
+  }, function () {});
 }
 async function syncMyBubble() {
   if (!sb || !S.uid) return;
@@ -5998,7 +6024,8 @@ function bindUI() {
       let { error } = await sb.auth.signInWithPassword({ email: acc + '@chatter.local', password: pass });
       if (error && isNetErr(error)) { msgAuth(NET_MSG); return; }
       if (error) { const r2 = await sb.auth.signInWithPassword({ email: acc + '@gmail.com', password: pass }); error = r2.error; if (error && isNetErr(error)) { msgAuth(NET_MSG); return; } }
-      msgAuth(error ? '❌ 账号或密码错误' : '');
+      if (!error) LS.set('ch2loginAt', Date.now());
+    msgAuth(error ? '❌ 账号或密码错误' : '');
     } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 登录失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
   });
   $('register-form').addEventListener('submit', async e => {
@@ -6691,6 +6718,24 @@ if ($('btn-install')) $('btn-install').onclick = async function () {
 };
 if ($('btn-exp')) $('btn-exp').onclick = exportSettingsCode;
 if ($('btn-imp')) $('btn-imp').onclick = importSettingsCode;
+if ($('btn-devices')) $('btn-devices').onclick = async function () {
+  try {
+    const r = await sb.from('profiles').select('devices').eq('id', S.uid).maybeSingle();
+    const d = (r && r.data && r.data.devices && typeof r.data.devices === 'object') ? r.data.devices : {};
+    const ids = Object.keys(d);
+    const items = ids.map(function (id) {
+      const x = d[id] || {};
+      return { label: (id === devId() ? '📱 本机 · ' : '') + String(x.ua || '未知设备').slice(0, 28) + ' · ' + (x.at ? fmtTime(x.at) : ''), fn: null };
+    });
+    items.push({ label: '⬅ 退出其他设备', danger: true, fn: function () {
+      sb.from('profiles').update({ kick_at: new Date().toISOString() }).eq('id', S.uid);
+      LS.set('ch2loginAt', Date.now());
+      toast('其他设备下次联网时会自动退出');
+    } });
+    items.push({ label: '关闭', fn: null });
+    openActs('登录设备（' + ids.length + '）', items);
+  } catch (e) { toast('读取设备失败'); }
+};
 try {
   const _sa = (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: minimal-ui)').matches)) || navigator.standalone;
   if (_sa && $('btn-install')) $('btn-install').style.display = 'none';
