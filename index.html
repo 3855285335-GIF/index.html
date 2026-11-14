@@ -2400,6 +2400,8 @@ function onTyping(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
   if (sigDup(p)) return;
   if (S.conv !== p.conv || S.peer !== p.from) return;
+  if (now() - (S.lastTypingAt || 0) < 1500) return;   // 节流：伪造的连续“正在输入”不会反复刷新
+  S.lastTypingAt = now();
   S.typingUntil = now() + 4500; renderChatTitle();
   setTimeout(() => { if (S.typingUntil <= now()) renderChatTitle(); }, 4600);
 }
@@ -2424,7 +2426,7 @@ function onReadAck(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
   const t = Date.parse(p.ts); if (!(t > 0)) return;
   if (t <= peerReadOf(p.conv)) return;
-  S.peerRead[p.conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); refreshReads();
+  fetchPeerRead(p.conv);   // 不信任广播里的时间，以服务器 peer_read 为准，防止伪造已读
 }
 function onReadReq(p) {
   if (!p || typeof p.from !== 'string' || !S.friends.includes(p.from) || p.conv !== convKeyOf(p.from, ME())) return;
