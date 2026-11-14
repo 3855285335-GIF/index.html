@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 14-启动 · 原文件第 7539-7568 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 14-启动 · 原文件第 7546-7575 行 · 2026-11-15 线上版 -->
 /* ================= 启动 ================= */
 function boot() {
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
