@@ -764,6 +764,19 @@ async function resync() {
 
 /* ---- 聊天窗口 DOM（增量更新，不整页重绘）---- */
 let audioEl = null, playingId = null;
+const BUB_CSS = {
+  violet: 'linear-gradient(135deg,#6c5ce7 0%,#8b5cf6 55%,#c94fa8 100%)',
+  blue: 'linear-gradient(135deg,#2f6fed 0%,#4f8bff 60%,#38bdf8 100%)',
+  green: 'linear-gradient(135deg,#12a150 0%,#2fbf71 60%,#84cc16 100%)',
+  orange: 'linear-gradient(135deg,#f97316 0%,#fb923c 60%,#f43f5e 100%)',
+  pink: 'linear-gradient(135deg,#ff9ecb 0%,#ff6fb5 55%,#ff4f9f 100%)',
+  black: 'linear-gradient(135deg,#3a3a44 0%,#1c1c22 60%,#0a0a0d 100%)'
+};
+function bubCss(v) {
+  if (typeof v !== 'string' || !v) return '';
+  if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
+  return BUB_CSS[v] || '';
+}
 function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
@@ -779,6 +792,12 @@ function msgHTML(m) {
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
     default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '">' + qh + mentionify(pq.text, mentionsOf(m)) + '</div>'; }
+  }
+  // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
+  if (!mine && m.type !== 'recalled' && m.type !== 'call') {
+    const _pc = (S.profiles[m.from_acc] || {}).bubble_color;
+    const _bc = bubCss(_pc);
+    if (_bc) body = body.replace(/class="bubble([^"]*)"/, 'class="bubble$1" style="background:' + _bc + ';color:#fff"');
   }
   const st = m._st === 'sending' && m.type !== 'text' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
@@ -1585,6 +1604,12 @@ async function openConv(key, peer) {
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 80; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
   applyChatFor(key, S.peer);
+  if (!isGroupKey(key) && sb && S.token) {
+    const _pr = S.profiles[S.peer];
+    if (!_pr || !_pr.bubble_color) sb.from('profiles').select('account_id,bubble_color').eq('account_id', S.peer).maybeSingle().then(function (r) {
+      if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); if (S.conv === key && S.msgs.length) chatRender(S.stick); }
+    }, function () {});
+  }
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
   document.body.classList.add('chat-open');
   try { document.body.classList.remove('kb'); if (viewportApply) viewportApply(); } catch (e) {}
@@ -3289,8 +3314,14 @@ async function grpMembers(gid, force) {
   sched('contacts');
   const need = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !S.profiles[a]; });
   if (need.length) {
-    const p = await sb.from('profiles').select('account_id,nickname,avatar_url').in('account_id', need);
+    const p = await sb.from('profiles').select('account_id,nickname,avatar_url,bubble_color').in('account_id', need);
     if (p && p.data) p.data.forEach(function (x) { S.profiles[x.account_id] = x; });
+    const needC = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !(S.profiles[a] && S.profiles[a].bubble_color); });
+    if (needC.length) {
+      const pc = await sb.from('profiles').select('account_id,bubble_color').in('account_id', needC);
+      if (pc && pc.data) pc.data.forEach(function (x) { S.profiles[x.account_id] = Object.assign(S.profiles[x.account_id] || {}, x); });
+      if (S.conv === 'g:' + gid && S.msgs.length) chatRender(S.stick);
+    }
     sched('list');
   }
   return ms;
@@ -5975,6 +6006,7 @@ function bindUI() {
     if (/^#[0-9a-f]{6}$/i.test(v)) { try { LS.set('ch2bubbleCustom', v); } catch (e) {} }
     try { document.documentElement.style.setProperty('--mine', cssOf(v)); } catch (e) {}
     LS.set('ch2bubble', v);
+    try { if (S.me) S.me.bubble_color = v; if (sb && S.uid) sb.from('profiles').update({ bubble_color: v }).eq('id', S.uid).select('id').then(function () {}, function () {}); } catch (e) {}
     const o = OPTS.find(x => x[1] === v);
     b.textContent = '💬 气泡：' + (o ? o[0] : '自定义');
     document.querySelectorAll('#bub-swatches .bub-sw').forEach(function (el) { el.classList.toggle('on', el.dataset.v === v); });
@@ -6242,6 +6274,7 @@ $('gi-members').onclick = function (e) {
     if (!(my === 'admin' && target === 'admin')) items.push({ label: '禁言', fn: function () { muteMember(gid, acc); } });
   }
   if (target !== 'owner' && !(my === 'admin' && target === 'admin')) items.push({ label: '移出群聊', danger: true, fn: function () { setTimeout(function () { confirmGrpKick(gid, acc); }, 30); } });
+  items.push({ label: '查看资料 / 加好友', fn: function () { closeGrpInfo(); setTimeout(function () { openProfile(acc); }, 60); } });
   items.push({ label: '取消', fn: null });
   openActs(peerName(acc), items);
 };
