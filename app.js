@@ -668,6 +668,7 @@ async function ensureSelfConv() {
 }
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
+  loadOutQueue();
   try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
   (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
@@ -682,6 +683,7 @@ function applyBoot(b) {
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
   setTimeout(function () { syncMyBubble(); }, 1800);
+  setTimeout(function () { try { retryFailed(); } catch (e) {} }, 2600);
   startDbSync();
   if (!window.__muteSyncT) window.__muteSyncT = setInterval(function () { try { syncMutes(); syncPins(); } catch (e) {} }, 15000);   // 15 秒对一次，秒级体验
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 30000);
@@ -919,7 +921,7 @@ function onIncoming(m, noInc) {
   const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; });
   if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv)) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
+  if (first && m.type !== 'call' && !isMuted(m.conv) && !nightOnAt(new Date())) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
@@ -1012,7 +1014,7 @@ async function deliver(m, silent) {
     if (error && error.code !== '23505') throw error;
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
     if (!gp && S.token && m.type !== 'call' && !(S.rt && S.rt.db)) fast();   // 实时库连着就不走快通道，省一次广播+一次查询
-    S.out.delete(id); delete m._blob;
+    S.out.delete(id); saveOutQueue(); delete m._blob;
     const t = data ? data.created_at : m.created_at;
     patchMsg(id, { _st: '', created_at: t, _blob: undefined });
     touchConv(m.conv, previewOf(m), t, false);
@@ -1034,7 +1036,7 @@ async function deliver(m, silent) {
     const noType = /invalid message type/i.test(em), tooBig = /maximum allowed size|exceeded|too large|413/i.test(em);
     if (noType && m.type !== 'recalled') S.v6 = false;
     if (m.type === 'recalled') { m._fatal = true; }
-    m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' });
+    m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' }); saveOutQueue();
     if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
   }
 }
@@ -1534,6 +1536,26 @@ function sendVoice(blob, dur, ext, ct) {
   if (!canSendHere()) return;
   addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
 }
+function outKey() { return 'ch2outq:' + (S.uid || ''); }
+function saveOutQueue() {
+  try {
+    const arr = [];
+    S.out.forEach(function (m) {
+      if (m && m._st === 'failed' && !m._fatal && !m._blob && m.type !== 'call') {
+        arr.push({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, created_at: m.created_at });
+      }
+    });
+    LS.set(outKey(), arr);
+  } catch (e) {}
+}
+function loadOutQueue() {
+  try {
+    const arr = LS.get(outKey(), []) || [];
+    arr.forEach(function (o) {
+      if (o && o.id && !S.out.has(o.id)) S.out.set(o.id, Object.assign({}, o, { _st: 'failed' }));
+    });
+  } catch (e) {}
+}
 function retryMsg(id) {
   const m = S.out.get(id); if (!m || m._st !== 'failed') return;
   m._tries = 0; m._fatal = false; m._st = 'sending'; patchMsg(id, { _st: 'sending' }); deliver(m);
@@ -1544,6 +1566,7 @@ function retryFailed() {
     if (m._st !== 'failed' || m._fatal || (m._tries || 0) >= 8) return;
     m._tries = (m._tries || 0) + 1; m._st = 'sending'; patchMsg(m.id, { _st: 'sending' }); deliver(m, true);
   });
+  saveOutQueue();
 }
 
 /* ---- 撤回 ---- */
@@ -1613,6 +1636,13 @@ async function openConv(key, peer) {
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 80; S.rendered = 0; clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
+  if (!draftOf(key) && sb && S.token) {
+    sb.from('conversations').select('draft').eq('owner_acc', ME()).eq('conv_key', key).maybeSingle().then(function (r) {
+      const d = r && r.data && r.data.draft;
+      const inp = document.getElementById('chat-input');
+      if (d && S.conv === key && inp && !inp.value) { inp.value = d; draftsLoad(); drafts[key] = d; LS.set('ch2dr:' + (S.uid || ''), drafts); requestAnimationFrame(chatGrow); }
+    }, function () {});
+  }
   applyChatFor(key, S.peer);
   if (!isGroupKey(key) && sb && S.token) {
     const _pr = S.profiles[S.peer];
@@ -2936,11 +2966,16 @@ function initClient() {
 let drafts = {}, draftUid = null, draftT = 0;
 function draftsLoad() { if (draftUid !== S.uid) { drafts = LS.get('ch2dr:' + (S.uid || ''), {}) || {}; draftUid = S.uid; } }
 function draftOf(conv) { draftsLoad(); return drafts[conv] || ''; }
+let draftST = 0;
 function draftSave(conv, text) {
   if (!conv) return; draftsLoad();
   const v = (text || '').replace(/\u2063/g, '');
   if (v.trim()) drafts[conv] = v.slice(0, 5000); else delete drafts[conv];
   clearTimeout(draftT); draftT = setTimeout(() => LS.set('ch2dr:' + (S.uid || ''), drafts), 250);
+  // 草稿也写服务器：换设备能接着打
+  clearTimeout(draftST); draftST = setTimeout(function () {
+    try { if (sb && S.uid) sb.from('conversations').update({ draft: v.trim() ? v.slice(0, 5000) : null }).eq('owner_acc', ME()).eq('conv_key', conv).then(function () {}, function () {}); } catch (e) {}
+  }, 800);
 }
 
 /* ================= 通用弹窗 / 菜单 ================= */
@@ -6156,6 +6191,41 @@ function bindUI() {
     });
     items.push({ label: '取消', fn: null });
     openActs('聊天字体', items);
+  };
+})();
+function nightCfg() { try { return LS.get('ch2night', null); } catch (e) { return null; } }
+function nightOnAt(d) {
+  const c = nightCfg(); if (!c || !c.on) return false;
+  const cur = d.getHours() * 60 + d.getMinutes();
+  const a = String(c.from || '23:00').split(':'), b = String(c.to || '07:00').split(':');
+  const f = (parseInt(a[0], 10) || 0) * 60 + (parseInt(a[1], 10) || 0);
+  const t = (parseInt(b[0], 10) || 0) * 60 + (parseInt(b[1], 10) || 0);
+  return f <= t ? (cur >= f && cur < t) : (cur >= f || cur < t);
+}
+(function () {
+  const b = document.getElementById('btn-night'); if (!b) return;
+  const paint = function () {
+    const c = nightCfg();
+    b.textContent = '🌙 夜间免打扰：' + (c && c.on ? (c.from + '–' + c.to) : '关');
+  };
+  paint();
+  b.onclick = function () {
+    const c = nightCfg();
+    openActs('夜间免打扰（只静音提醒，消息照收）', [
+      { label: (c && c.on ? '✓ 已开启（' + c.from + '–' + c.to + '）' : '开启（默认 23:00–07:00）'), fn: function () {
+        openForm('夜间免打扰时段', [
+          { ph: '开始，例如 23:00', val: (c && c.from) || '23:00', max: 5 },
+          { ph: '结束，例如 07:00', val: (c && c.to) || '07:00', max: 5 }
+        ], function (vals) {
+          const from = String(vals[0] || '').trim(), to = String(vals[1] || '').trim();
+          if (!/^\d{1,2}:\d{2}$/.test(from) || !/^\d{1,2}:\d{2}$/.test(to)) return '时间格式像 23:00';
+          LS.set('ch2night', { on: true, from: from, to: to }); paint(); toast('夜间免打扰已开启');
+          return '';
+        }, '保存');
+      } },
+      { label: c && c.on ? '关闭' : '保持关闭', fn: function () { LS.set('ch2night', { on: false, from: (c && c.from) || '23:00', to: (c && c.to) || '07:00' }); paint(); toast('已关闭夜间免打扰'); } },
+      { label: '取消', fn: null }
+    ]);
   };
 })();
   /* 朋友圈 */
