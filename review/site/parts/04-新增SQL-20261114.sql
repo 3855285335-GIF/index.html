@@ -74,3 +74,19 @@ grant execute on function public.group_link_info(uuid) to authenticated;
 -- alter publication supabase_realtime add table public.profiles;
 -- alter publication supabase_realtime add table public.conversations;
 -- alter publication supabase_realtime add table public.user_mutes;
+
+-- 8) 登录设备（独立表：只有本人能读自己的设备）
+create table if not exists public.user_devices (
+  account text not null,
+  device_id text not null,
+  ua text,
+  last_at timestamptz not null default now(),
+  primary key (account, device_id)
+);
+alter table public.user_devices enable row level security;
+grant select, insert, update, delete on public.user_devices to authenticated;
+revoke all on public.user_devices from anon, public;
+create policy ud_sel on public.user_devices for select to authenticated using (account = public.my_acc());
+create policy ud_ins on public.user_devices for insert to authenticated with check (account = public.my_acc());
+create policy ud_upd on public.user_devices for update to authenticated using (account = public.my_acc()) with check (account = public.my_acc());
+create policy ud_del on public.user_devices for delete to authenticated using (account = public.my_acc());
