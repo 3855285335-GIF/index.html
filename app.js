@@ -668,6 +668,7 @@ async function ensureSelfConv() {
 }
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
+  try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
   (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
   const oldConvs = S.convs || [];
@@ -775,6 +776,12 @@ const BUB_CSS = {
   pink: 'linear-gradient(135deg,#ff9ecb 0%,#ff6fb5 55%,#ff4f9f 100%)',
   black: 'linear-gradient(135deg,#3a3a44 0%,#1c1c22 60%,#0a0a0d 100%)'
 };
+let bubbleColorCache = {};
+function rememberColor(acc, v) {
+  if (!acc || !v) return;
+  bubbleColorCache[acc] = v;
+  try { LS.set('ch2profc:' + (S.uid || ''), bubbleColorCache); } catch (e) {}
+}
 function bubCss(v) {
   if (typeof v !== 'string' || !v) return '';
   if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
@@ -798,7 +805,7 @@ function msgHTML(m) {
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type !== 'recalled' && m.type !== 'call') {
-    const _pc = (S.profiles[m.from_acc] || {}).bubble_color;
+    const _pc = (S.profiles[m.from_acc] || {}).bubble_color || bubbleColorCache[m.from_acc];
     const _bc = bubCss(_pc);
     if (_bc) body = body.replace(/class="bubble([^"]*)"/, 'class="bubble$1" style="background:' + _bc + ';color:#fff"');
   }
@@ -1610,7 +1617,7 @@ async function openConv(key, peer) {
   if (!isGroupKey(key) && sb && S.token) {
     const _pr = S.profiles[S.peer];
     if (!_pr || !_pr.bubble_color) sb.from('profiles').select('account_id,bubble_color').eq('account_id', S.peer).maybeSingle().then(function (r) {
-      if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); if (S.conv === key && S.msgs.length) chatRender(S.stick); }
+      if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); rememberColor(S.peer, r.data.bubble_color); if (S.conv === key && S.msgs.length) chatRender(S.stick); }
     }, function () {});
   }
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
@@ -1628,13 +1635,15 @@ async function openConv(key, peer) {
   if (S.token && !isGroupKey(key)) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
   { const pa = S.peer; closeNotes(t => t === 'm:' + pa || t === 'c:' + pa || t === pa); if (nbCur && nbCur.acc === pa) hideNBar(); }
   if (isGroupKey(key)) { grpOpenMeta(key); refreshMyMuteState(gidOf(key)); }
-  const cachedMsgs = await msgCacheGet(key);
+  const pCache = msgCacheGet(key), pRows = fetchMsgs(key).catch(function (e) { return { __err: e }; });   // 缓存和网络并行，不等缓存读完再发请求
+  const cachedMsgs = await pCache;
   if (S.conv !== key) return;
   S.msgs = cachedMsgs.slice();
   S.out.forEach(m => { if (m.conv === key && !S.msgs.some(x => x.id === m.id)) S.msgs.push(m); });
   chatRender(true);                                // 缓存先显示，网络结果再补
   try {
-    let rows = await fetchMsgs(key);
+    let rows = await pRows;
+    if (rows && rows.__err) throw rows.__err;
     try { if (navigator.onLine !== false) showBanner(''); } catch (x) {}
     if (S.conv !== key) return;
     // 离开后对方又发了很多条：缓存和最新一页之间会有缺口，往上翻也会跳过。这里先补齐（最多 4 页）
@@ -3322,7 +3331,7 @@ async function grpMembers(gid, force) {
     const needC = ms.map(function (m) { return m.account_id; }).filter(function (a) { return a && !(S.profiles[a] && S.profiles[a].bubble_color); });
     if (needC.length) {
       const pc = await sb.from('profiles').select('account_id,bubble_color').in('account_id', needC);
-      if (pc && pc.data) pc.data.forEach(function (x) { S.profiles[x.account_id] = Object.assign(S.profiles[x.account_id] || {}, x); });
+      if (pc && pc.data) pc.data.forEach(function (x) { S.profiles[x.account_id] = Object.assign(S.profiles[x.account_id] || {}, x); rememberColor(x.account_id, x.bubble_color); });
       if (S.conv === 'g:' + gid && S.msgs.length) chatRender(S.stick);
     }
     sched('list');
@@ -5069,6 +5078,7 @@ async function syncMyBubble() {
     const v = r && r.data && r.data.bubble_color;
     if (!v || v === LS.get('ch2bubble', '')) return;
     LS.set('ch2bubble', v);
+    rememberColor(ME(), v);
     const css = bubCss(v); if (css) document.documentElement.style.setProperty('--mine', css);
     const b = document.getElementById('btn-bubble');
     if (b) { const o = { violet: '紫', blue: '蓝', green: '绿', orange: '橙', pink: '粉', black: '黑' }; b.textContent = '💬 气泡：' + (o[v] || '自定义'); }
