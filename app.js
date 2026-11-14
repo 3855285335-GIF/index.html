@@ -5076,7 +5076,16 @@ async function syncMyBubble() {
   try {
     const r = await sb.from('profiles').select('bubble_color').eq('id', S.uid).maybeSingle();
     const v = r && r.data && r.data.bubble_color;
-    if (!v || v === LS.get('ch2bubble', '')) return;
+    const local = LS.get('ch2bubble', '');
+    const migKey = 'ch2bubMig:' + S.uid;
+    if (!LS.get(migKey, 0) && local && local !== 'violet' && v === 'violet') {
+      // 服务器还没有这个人的颜色记录（默认紫），本机选过：上传本机颜色，不覆盖
+      LS.set(migKey, 1);
+      try { await sb.from('profiles').update({ bubble_color: local }).eq('id', S.uid); } catch (e) {}
+      return;
+    }
+    LS.set(migKey, 1);
+    if (!v || v === local) return;
     LS.set('ch2bubble', v);
     rememberColor(ME(), v);
     const css = bubCss(v); if (css) document.documentElement.style.setProperty('--mine', css);
