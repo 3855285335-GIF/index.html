@@ -1,4 +1,4 @@
-<!-- Chatter 前端 · 13-事件绑定 · 原文件第 6865-7538 行 · 2026-11-14 线上版 -->
+<!-- Chatter 前端 · 13-事件绑定 · 原文件第 6871-7545 行 · 2026-11-15 线上版 -->
 /* ================= 事件绑定 ================= */
 let viewportApply = null;
 function bindViewport() {
@@ -39,7 +39,7 @@ function bindViewport() {
           root.style.setProperty('--vvt', '0px');
           document.body.classList.remove('kb');
         }
-        if (S.conv) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
+        if (S.conv && S.stick) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
       } catch (e) {}
     }, 900);
   };
@@ -74,6 +74,7 @@ function bindUI() {
   $('register-form').addEventListener('submit', async e => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type=submit]'), acc = $('reg-acc').value.trim().toLowerCase(), pass = $('reg-pass').value, name = $('reg-name').value.trim();
+       if (!/^[a-z0-9_-]{3,20}$/.test(acc)) { toast('账号只能是 3-20 位小写字母、数字、_ 或 -'); return; }
     if (!/^[a-z0-9_-]{3,20}$/.test(acc)) { msgAuth('❌ 账号只能用英文/数字/_/-，3-20 位'); return; }
     if (pass.length < 6) { msgAuth('❌ 密码至少 6 位'); return; }
     if (!name) { msgAuth('❌ 请输入昵称'); return; }
