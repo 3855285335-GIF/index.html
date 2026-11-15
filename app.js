@@ -1033,7 +1033,9 @@ function inAppBanner(m) {
     const el = $('msg-banner'); if (!el || !m) return;
     const who = m.from_acc === ME() ? '我' : peerName(m.from_acc);
     const txt = previewOf(m) || '';
-    el.innerHTML = '<b>' + esc(who) + '</b><span>' + esc(txt) + '</span>';
+    const pf = S.profiles[m.from_acc] || {};
+    const av = avatarHTML(who, pf.avatar_url, false, m.from_acc || '');
+    el.innerHTML = '<span class="mb-av">' + av + '</span><b>' + esc(who) + '</b><span>' + esc(txt) + '</span>';
     el.classList.add('on');
     clearTimeout(msgBannerT);
     msgBannerT = setTimeout(function () { el.classList.remove('on'); }, 3800);
