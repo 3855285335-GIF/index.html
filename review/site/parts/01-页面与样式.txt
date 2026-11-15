@@ -47,7 +47,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261117z">
+<link rel="preload" as="script" href="app.js?v=20261118b">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -414,7 +414,7 @@
   .bubble { background: var(--them); color: var(--ink); padding: 9px 13px; border-radius: 19px 19px 19px 6px; font-size: 17px; line-height: 1.5; word-break: break-word; white-space: pre-wrap; user-select: text; -webkit-user-select: text; box-shadow: var(--shadow); }
   .msg.mine .bubble { background: var(--mine); color: #fff; border-radius: 19px 19px 6px 19px; -webkit-touch-callout: none; box-shadow: 0 6px 18px rgba(108,92,231,.28); }
   .bubble.img { padding: 0; overflow: hidden; background: transparent !important; box-shadow: var(--shadow); }
-  .bubble.img img { max-width: 220px; max-height: 300px; min-width: 70px; min-height: 70px; display: block; border-radius: 18px; background: var(--surface2); }
+  .bubble.img img { max-width: min(220px, 64vw); max-height: 300px; display: block; border-radius: 18px; background: var(--surface2); object-fit: contain; }   /* 去掉 min-width/min-height：长截图、全景图会被拉变形 */
   .bubble.voice { display: flex; align-items: center; gap: 10px; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; padding: 8px 14px; position: relative; }
   .bubble.voice .vprog { position: absolute; left: 12px; right: 12px; bottom: 3px; height: 3px; border-radius: 2px; background: color-mix(in srgb, currentColor 16%, transparent); overflow: hidden; }
   .bubble.voice .vprog i { display: block; height: 100%; width: 0; background: currentColor; opacity: .6; border-radius: 2px; }
@@ -1376,6 +1376,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261117z" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261117z&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261118b" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261118b&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>
