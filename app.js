@@ -679,7 +679,7 @@ async function ensureSelfConv() {
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
   if (!LS.get('ch2loginAt', 0)) LS.set('ch2loginAt', Date.now());
-  recordDevice();
+  setTimeout(function () { try { recordDevice(); } catch (e) {} }, 1500);   // 设备表不是首屏要用的，先让列表出来
   loadOutQueue();
   try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
@@ -693,6 +693,7 @@ function applyBoot(b) {
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
+  setTimeout(function () { try { prefetchBubbleColors(); } catch (e) {} }, 300);
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
   setTimeout(function () { syncMyBubble(); }, 1800);
@@ -802,6 +803,26 @@ function rememberColor(acc, v) {
   if (!acc || !v) return;
   bubbleColorCache[acc] = v;
   try { LS.set('ch2profc:' + (S.uid || ''), bubbleColorCache); } catch (e) {}
+}
+function prefetchBubbleColors() {   // 登录后一次性把会话里各人的气泡颜色拉回来：打开会话直接有颜色，不再先灰后紫地跳
+  if (!sb || !S.token) return;
+  const seen = {}, uniq = [];
+  (S.convs || []).forEach(function (c) {
+    const a = c.peer_acc;
+    if (!a || isGroupKey(a) || seen[a]) return;
+    seen[a] = 1;
+    if (bubbleColorCache[a]) return;
+    if (S.profiles[a] && S.profiles[a].bubble_color) return;
+    uniq.push(a);
+  });
+  const list = uniq.slice(0, 80);
+  if (!list.length) return;
+  sb.from('profiles').select('account_id,bubble_color').in('account_id', list).then(function (r) {
+    ((r && r.data) || []).forEach(function (x) {
+      S.profiles[x.account_id] = Object.assign(S.profiles[x.account_id] || {}, x);
+      rememberColor(x.account_id, x.bubble_color);
+    });
+  }, function () {});
 }
 function bubCss(v) {
   if (typeof v !== 'string' || !v) return '';
@@ -3094,7 +3115,11 @@ async function start(user) {
   if (linkWait) setTimeout(() => goLink(linkWait), 0);   // 点通知打开的 App：直接进那个聊天
   setTimeout(pushSync, 2500);
   setTimeout(msgMigrate, 1200);
-  startRealtime(); startTimers(); fbStart(); loadIceConfig(); checkSchema(true); heartbeat(true).then(() => announcePresence(true));   // 先报到再通知，免得对方查数据库时读到旧状态
+  startRealtime(); startTimers(); fbStart();
+  // 启动时先让列表/消息跑起来，次要请求往后放，别跟 bootstrap 抢连接（国内一条 RTT 就几百毫秒）
+  setTimeout(function () { try { heartbeat(true).then(function () { announcePresence(true); }); } catch (e) {} }, 500);
+  setTimeout(function () { try { loadIceConfig(); } catch (e) {} }, 1200);
+  setTimeout(function () { try { checkSchema(true); } catch (e) {} }, 1800);
   setTimeout(setupPresence, 1200);
   setTimeout(momentNotifyCheck, 3000);
   setTimeout(loadFriendBgs, 1200);
