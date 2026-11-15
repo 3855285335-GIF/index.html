@@ -1694,6 +1694,8 @@ function editMsg(m) {
       if (r && r.error) { toast('保存失败：' + r.error.message); return; }
       patchMsg(m.id, { body: nb, edited_at: t });
       toast('已保存');
+      // 编辑也要推一条：走跟正常发送完全相同的推送通道（数据库触发器只是"造了个 job"，没人发）
+      try { if (!isGroupKey(m.conv)) firePush('msg', m.to_acc || S.peer, m.id); } catch (e) {}
     }, function () { toast('保存失败，检查网络'); });
     return '';
   }, '保存');
