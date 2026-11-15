@@ -679,7 +679,9 @@ async function ensureSelfConv() {
 function applyBoot(b) {
   S.me = b.me; S.profiles[b.me.account_id] = b.me;
   if (!LS.get('ch2loginAt', 0)) LS.set('ch2loginAt', Date.now());
-  setTimeout(function () { try { recordDevice(); } catch (e) {} }, 1500);   // 设备表不是首屏要用的，先让列表出来
+  const first = !S.bootInited; S.bootInited = true;
+  try { (LS.get('ch2eds:' + (S.uid || ''), []) || []).forEach(function (x) { editSeen.add(x); }); } catch (e) {}
+  if (first) setTimeout(function () { try { recordDevice(); } catch (e) {} }, 1500);   // 设备登记只做一次：以前每次 resync 都会写一次库
   loadOutQueue();
   try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
@@ -692,6 +694,7 @@ function applyBoot(b) {
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
+  if (!first) return;   // 下面这些是「登录后初始化」：每次 resync 重跑会多出好几倍请求
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { try { prefetchBubbleColors(); } catch (e) {} }, 300);
   setTimeout(function () { try { warmConvs(); } catch (e) {} }, 700);
@@ -837,7 +840,7 @@ function glGids(text) {
   return Array.from(new Set(out));
 }
 function glCardHTML(gid) {
-  if (GL.fail[gid]) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button></div>';
+  if (GL.fail[gid] && Date.now() - GL.fail[gid] < 300000) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button></div>';
   const i = GL.info[gid];
   if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">' + esc((i.name || '群').slice(0, 1)) + '</div><div class="gl-info"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div></div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
   return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div></div>';
@@ -847,7 +850,11 @@ function fillGlCards(root) {
   root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
     const gid = el.dataset.gid; if (!gid) return; if (el.dataset.done === '1' && el.querySelector('.gl-go')) return;
     const paint = function (info) {
-      if (!info) { GL.fail[gid] = 1; delete GL.busy[gid]; try { if (S.conv) chatRender(true); } catch (x) {} return; }
+      if (!info) {   // 取不到就定格，别再每帧重试（以前 30 秒能打 38 次，还把翻历史的人拽回底部）
+        GL.fail[gid] = Date.now(); delete GL.busy[gid]; el.dataset.done = '1';
+        el.innerHTML = '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button>';
+        return;
+      }
       el.dataset.member = info.member ? '1' : '';
       el.innerHTML = '<div class="gl-name">' + esc(info.name || '群聊') + '</div><div class="gl-meta">' + (info.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (info.member ? '进入' : '加入') + '</button>';
       el.dataset.done = '1';
@@ -1734,11 +1741,11 @@ async function copyImageMsg(m) {
     if (!url) { toast('这张图还没传完'); return; }
     if (!(window.ClipboardItem) || !navigator.clipboard || !navigator.clipboard.write) { toast('这个浏览器不支持复制图片，长按图片保存到相册'); return; }
     const src = disp(url);
-    const blob = await (await fetch(src)).blob();
-    // Chrome/Edge 的剪贴板只认 image/png（jpg 会直接报错，这就是“复制不了图片”的真因）→ 统一转成 PNG 再写
-    let out = blob;
-    if (blob.type !== 'image/png') {
-      out = await new Promise(function (res, rej) {
+    // Safari 要求「点击当下」就交出 ClipboardItem，所以这里先把 Promise 塞进去，图片在 Promise 里再下载/转码
+    const png = (async function () {
+      const blob = await (await fetch(src)).blob();
+      if (blob.type === 'image/png') return blob;
+      return await new Promise(function (res, rej) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = function () {
@@ -1752,13 +1759,8 @@ async function copyImageMsg(m) {
         img.onerror = function () { rej(new Error('图片读不到')); };
         img.src = src;
       });
-    }
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': out })]);
-    } catch (e) {
-      // 有的浏览器要求把 blob 包成 Promise（Safari 的怪脾气）
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': Promise.resolve(out) })]);
-    }
+    })();
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     toast('图片已复制');
   } catch (e) {
     logErr('copyImage', e);
@@ -1963,7 +1965,7 @@ async function editWatch() {   // 别人改了消息：不管你在不在那个�
       if (!row || row.from_acc === ME()) return;          // 自己改的不提醒自己
       const sig = String(row.id) + '@' + String(row.edited_at);   // 同一条同一次编辑只提示一次（窗口重叠会重复查到）
       if (editSeen.has(sig)) return;
-      editSeen.add(sig);
+      editSeen.add(sig); try { LS.set('ch2eds:' + (S.uid || ''), Array.from(editSeen).slice(-200)); } catch (e) {}
       if (editSeen.size > 300) editSeen.delete(editSeen.values().next().value);
       const key = row.conv_key;
       if (key === S.conv) {                               // 正看着这个会话：就地更新 + 闪一下
@@ -1976,7 +1978,8 @@ async function editWatch() {   // 别人改了消息：不管你在不在那个�
         return;
       }
       const m = rowToMsg(row);
-      touchConv(key, '（已编辑）' + previewOf(m), row.created_at, false);   // 列表预览跟着变
+      const c0 = convOf(key); const latest = !c0 || (Date.parse(row.created_at) >= Date.parse(c0.last_ts || 0));
+      if (latest) touchConv(key, '（已编辑）' + previewOf(m), row.created_at, false);   // 只有改的是最新一条才动预览，否则会把最新消息顶掉
       if (!isMuted(key)) { try { inAppBanner(m); } catch (e) {} try { SFX.recv(false); } catch (e) {} }
     });
   } catch (e) {}
@@ -3082,6 +3085,7 @@ function handleMsgRows(rows, base) {
     if (pollTypes.get(m.id) === m.type) return;
     pollTypes.set(m.id, m.type); if (pollTypes.size > 500) pollTypes.delete(pollTypes.keys().next().value);
     if (base && t <= base) { S.seen.add(m.id); return; }   // 第一次：会话列表里已有的消息，只登记、不当新消息提醒
+    if (m.from_acc === ME()) return;   // 自己发的（本机或另一台设备）不算新消息：不弹横幅、不响铃、不加未读
     if (m.type === 'recalled' && S.seen.has(m.id)) { if (S.conv === m.conv) upsertMsg(m); return; }
     onIncoming(m);
   });
@@ -3136,13 +3140,13 @@ function startTimers() {
     const lp = !S.noInbox;                                         // 国内模式的长轮询在工作：新消息已经即时到达，补漏校对放慢到 18 秒
     if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 15 秒校对一次；异常：3 秒（长轮询时 9 秒）
     if (S.conv && !S.rt.db && (!lp || n % 3 === 0)) syncChat();   // 实时断开时才兜底；正常时群聊由 pollConv（8 秒增量）负责
-    if (!S.rt.db || n % 2 === 0) grpPoll();                        // 群消息兜底轮询：实时通道断了 3 秒一次，正常时 6 秒一次
+    if (S.rt.db ? (n % 2 === 0) : S.noInbox) grpPoll();            // 实时正常 6 秒一次；实时断了且有长轮询（它已经带群消息）就不重复轮
     if (n % 2 === 0) grpInvitesLoad();                            // 群邀请：6 秒查一次（没开推送也能较快看到）
     if (n % 5 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化：15 秒一次
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
-    editWatch();                                                   // 别人改了消息：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
+    if (n % 2 === 0) editWatch();                                  // 别人改了消息（6 秒一次；3 秒太费请求）：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 3000);
 }
