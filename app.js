@@ -6332,12 +6332,22 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  try { if (!history.state || !history.state.app) { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } } catch (e) {}
+  // 历史守卫：iOS 边缘滑退会把「上一条历史」整页滑出来（就是白屏）。做法是始终在自己页面里垫 2 条同文档历史，
+  // 被吃掉一条马上补一条，保证滑退只会退回本页，不会退到真正的前一页。
+  function armGuard(n) {
+    try {
+      let k = (history.state && history.state.app) || 0;
+      for (let i = 0; i < (n || 1); i++) { k++; history.pushState({ app: k }, '', location.href); }
+    } catch (e) {}
+  }
+  armGuard(2);
   window.addEventListener('popstate', () => {
-    if (S.call) { try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {} return; }
+    if (S.call) { armGuard(1); return; }
     if (S.conv) { S.hist = false; closeChat(); return; }
-    try { history.pushState({ app: 1 }, '', location.href); history.pushState({ app: 2 }, '', location.href); } catch (e) {}   // 根页面：挡住“滑退”把应用滑成白屏
+    armGuard(1);   // 已经在根页面还想退：立刻补一条，别让 iOS 把 App 滑成空白
   });
+  window.addEventListener('pageshow', function (e) { if (!S.conv) armGuard(1); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !S.conv && (!history.state || !history.state.app)) armGuard(1); });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
     const rt = e.target.closest('.gl-retry');
