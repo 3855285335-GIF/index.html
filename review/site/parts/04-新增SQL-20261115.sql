@@ -1,4 +1,4 @@
--- 2026-11-15 今天新增/修改的 SQL（都已在线执行过，幂等）
+-- 2026-11-15 今天新增/修改的 SQL（全部已在线执行，幂等）
 
 
 
@@ -175,3 +175,127 @@ begin
   return public.push_job_base(p_uid, p_kind, p_ref, p_to);
 end $function$;
 
+
+
+-- ===== sql\push-edit-v2.sql =====
+-- 编辑推送 v2：① 推送正文去掉引用前缀 ② 编辑改由数据库触发器发起（kind='edit'）
+-- 幂等
+
+create or replace function public.push_on_edit()
+ returns trigger
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $fn$
+declare uid uuid;
+begin
+  if new.type <> 'text' or new.body is not distinct from old.body then return new; end if;
+  if new.to_acc is null or new.to_acc = '' or new.to_acc like 'g:%' then return new; end if;
+  begin
+    select p.id into uid from public.profiles p where p.account_id = new.from_acc;
+    if uid is not null then perform public.push_job(uid, 'edit', new.id::text, new.to_acc); end if;   -- 走编辑专用通道
+  exception when others then null;   -- 推送出任何错都不许影响消息本身
+  end;
+  return new;
+end $fn$;
+
+create or replace function public.push_job_edit(p_uid uuid, p_ref text, p_to text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+declare
+  me text; tgt text := p_to; nm text; b text; h text; m record; subs jsonb; lref text;
+begin
+  select account_id into me from public.profiles where id = p_uid;
+  if me is null then return jsonb_build_object('skip', 'auth'); end if;
+  if tgt is null or tgt = '' then return jsonb_build_object('skip', 'to'); end if;
+  if not exists (select 1 from public.friendships where owner_acc = tgt and friend_acc = me) then
+    return jsonb_build_object('skip', 'friend');
+  end if;
+
+  select * into m from public.messages
+   where id::text = p_ref and from_acc = me and to_acc = tgt
+     and edited_at is not null and edited_at > now() - interval '5 minutes';
+  if not found then return jsonb_build_object('skip', 'ref'); end if;
+
+  if exists (select 1 from public.user_mutes um where um.owner_acc = tgt and um.conv_key = m.conv_key) then
+    return jsonb_build_object('skip', 'muted');
+  end if;
+  if exists (select 1 from public.profiles pf where pf.account_id = tgt and coalesce(pf.mutes, '{}'::jsonb) ? m.conv_key) then
+    return jsonb_build_object('skip', 'muted');
+  end if;
+  if exists (select 1 from public.presence pr where pr.account_id = tgt and pr.last_seen > now() - interval '75 seconds') then
+    return jsonb_build_object('skip', 'online');
+  end if;
+
+  select jsonb_agg(jsonb_build_object('endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'preview', s.preview))
+    into subs from public.push_subs s where s.acc = tgt;
+  if subs is null then return jsonb_build_object('skip', 'nosub'); end if;
+
+  nm := coalesce(nullif(btrim((select remark from public.friendships where owner_acc = tgt and friend_acc = me)), ''),
+                 nullif(btrim((select nickname from public.profiles where account_id = me)), ''), me);
+
+  -- 引用消息的正文前面带 \u2063Q...\u2063 前缀，必须跟 push_job_base 一样去掉，否则通知里是一串乱码
+  b := left(btrim(regexp_replace(regexp_replace(coalesce(m.body, ''), '^\u2063Q[^\u2063]*\u2063[^\u2063]*\u2063', ''), '[\s\u2063]+', ' ', 'g')), 120);
+
+  h := nm || ' 修改了一条消息';
+  b := nm || ' 修改了消息：' || b;
+
+  delete from public.push_log where at < now() - interval '1 hour';
+  lref := 'e:' || m.id::text || ':' || floor(extract(epoch from m.edited_at))::bigint;
+  insert into public.push_log (ref, from_acc, to_acc) values (lref, me, tgt) on conflict (ref) do nothing;
+  if not found then return jsonb_build_object('skip', 'dup'); end if;
+
+  return jsonb_build_object('subs', subs, 'title', nm, 'body', b, 'hidden', h,
+    'tag', 'e:' || m.id::text, 'url', './#c=' || me, 'ttl', 86400, 'kind', 'msg', 'from', me);
+end $fn$;
+
+revoke all on function public.push_job_edit(uuid, text, text) from public, anon, authenticated;
+
+
+
+-- ===== sql\edit-guard-v2.sql =====
+-- 编辑/撤回守卫收紧（幂等）
+-- 新增：① 编辑后正文长度 1–20000 字 ② 撤回时清掉封面/提及/时长等残留
+create or replace function public.messages_before_update()
+ returns trigger
+ language plpgsql
+as $fn$
+begin
+  if new.id <> old.id or new.conv_key <> old.conv_key or new.from_acc <> old.from_acc or new.to_acc <> old.to_acc
+     or new.created_at <> old.created_at or new.dur is distinct from old.dur then
+    raise exception 'immutable fields';
+  end if;
+  if old.type = 'recalled' then raise exception 'already recalled'; end if;
+  if new.type = old.type then
+    if old.type <> 'text' then raise exception 'only text editable'; end if;
+    if old.from_acc <> public.my_acc() then raise exception 'not yours'; end if;
+    if now() - old.created_at > interval '1 minute' then raise exception 'edit window passed'; end if;
+    if old.edited_at is not null then raise exception 'already edited once'; end if;
+    if new.cover is distinct from old.cover or new.mentions is distinct from old.mentions then raise exception 'only body edit'; end if;
+    if length(coalesce(new.body, '')) > 20000 then raise exception 'too long'; end if;
+    if btrim(coalesce(new.body, '')) = '' then raise exception 'empty body'; end if;
+    new.edited_at := now();
+    return new;
+  end if;
+  if new.type <> 'recalled' then raise exception 'only recall is allowed'; end if;
+  if now() - old.created_at > interval '2 minutes 15 seconds' then raise exception 'recall window passed'; end if;
+  new.id := old.id; new.conv_key := old.conv_key; new.from_acc := old.from_acc;
+  new.to_acc := old.to_acc; new.created_at := old.created_at; new.dur := old.dur;
+  new.type := 'recalled'; new.body := '';
+  new.cover := null;        -- 撤回后不要把封面地址留在行里
+  new.mentions := null;
+  return new;
+end $fn$;
+
+
+
+-- ===== sql\security-edit-index-v1.sql =====
+-- 关掉旧的单参数 join_group_by_link（新客户端都用带 p_token 的两参数版本）
+-- 旧版在网上还能被 aauthenticated 调用 = 绕过入群审批 / 被踢后直接重进
+revoke execute on function public.join_group_by_link(uuid) from public, anon, authenticated;
+
+-- editWatch 按 edited_at 查：加个部分索引，消息多了也不会越查越慢
+create index if not exists idx_messages_edited_at on public.messages (edited_at) where edited_at is not null;
