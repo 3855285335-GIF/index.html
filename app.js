@@ -694,6 +694,7 @@ function applyBoot(b) {
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   setTimeout(function () { ensureSelfConv(); }, 800);
   setTimeout(function () { try { prefetchBubbleColors(); } catch (e) {} }, 300);
+  setTimeout(function () { try { warmConvs(); } catch (e) {} }, 700);
   setTimeout(function () { syncMutes(); }, 900);
   setTimeout(function () { syncPins(); }, 1500);
   setTimeout(function () { syncMyBubble(); }, 1800);
@@ -1729,11 +1730,33 @@ async function copyImageMsg(m) {
     const raw = String(m.body || '');
     const url = raw.indexOf('#') >= 0 ? raw.slice(0, raw.indexOf('#')) : raw;
     if (!url) { toast('这张图还没传完'); return; }
-    const ab = await (await fetch(disp(url))).blob();
-    let type = ab.type || 'image/png';
-    if (type.indexOf('image/') !== 0) type = 'image/png';
-    if (!(window.ClipboardItem) || !navigator.clipboard || !navigator.clipboard.write) { toast('这台设备不支持复制图片，长按图片保存'); return; }
-    await navigator.clipboard.write([new ClipboardItem({ [type]: ab })]);
+    if (!(window.ClipboardItem) || !navigator.clipboard || !navigator.clipboard.write) { toast('这个浏览器不支持复制图片，长按图片保存到相册'); return; }
+    const src = disp(url);
+    const blob = await (await fetch(src)).blob();
+    // Chrome/Edge 的剪贴板只认 image/png（jpg 会直接报错，这就是“复制不了图片”的真因）→ 统一转成 PNG 再写
+    let out = blob;
+    if (blob.type !== 'image/png') {
+      out = await new Promise(function (res, rej) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function () {
+          try {
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+            c.getContext('2d').drawImage(img, 0, 0);
+            c.toBlob(function (b) { b ? res(b) : rej(new Error('toBlob 失败')); }, 'image/png');
+          } catch (e) { rej(e); }
+        };
+        img.onerror = function () { rej(new Error('图片读不到')); };
+        img.src = src;
+      });
+    }
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': out })]);
+    } catch (e) {
+      // 有的浏览器要求把 blob 包成 Promise（Safari 的怪脾气）
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': Promise.resolve(out) })]);
+    }
     toast('图片已复制');
   } catch (e) {
     logErr('copyImage', e);
@@ -1781,6 +1804,17 @@ async function fetchMsgs(conv, before) {
   if (before) q = q.lt('created_at', before);
   const { data, error } = await q; if (error) throw error;
   return (data || []).reverse().map(rowToMsg);
+}
+async function warmConvs() {   // 启动后先把最近几个会话的消息拉进内存缓存：点进去立刻有气泡，不用再等一个来回
+  if (!sb || !S.token || !S.me) return;
+  const list = (S.convs || []).filter(function (c) { return !((MSG.mem.get(msgKey(c.convKey))) || []).length; }).slice(0, 3);
+  for (let i = 0; i < list.length; i++) {
+    if (document.hidden) return;
+    try {
+      const rows = await fetchMsgs(list[i].convKey);
+      if (rows && rows.length && !((MSG.mem.get(msgKey(list[i].convKey))) || []).length) MSG.mem.set(msgKey(list[i].convKey), rows);
+    } catch (e) {}
+  }
 }
 async function openConv(key, peer) {
   if (!S.me) return;
