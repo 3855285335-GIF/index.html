@@ -4399,9 +4399,11 @@ async function postMoment() {
       let blob = MO.imgs[i];
       try { blob = await fitJpeg(blob, 1280, 0.8); } catch (e) { logErr('momentImg', e); }
       const path = ME() + '/moment_' + now() + '_' + i + '.jpg';
+      let _iw = 0, _ih = 0;
+      try { const _bm = await createImageBitmap(blob); _iw = _bm.width; _ih = _bm.height; if (_bm.close) _bm.close(); } catch (e) {}
       const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000' });
       if (up.error) throw up.error;
-      urls.push(canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl));
+      urls.push(canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl) + ((_iw && _ih) ? ('#w=' + _iw + '&h=' + _ih) : ''));
     }
     let videoUrl = '';
     if (MO.vid) {
@@ -5320,7 +5322,7 @@ function forwardToGroup(m, gid) {
   else { S.out.set(fm.id, fm); touchConv(conv, previewOf(fm), fm.created_at, false); deliver(fm); }
   toast('已转发到「' + ((grpOf(conv) || {}).name || '群聊') + '」');
 }
-function momentFwdImages(mm) { return Array.isArray(mm.images) ? mm.images.filter(Boolean) : []; }
+function momentFwdImages(mm) { return Array.isArray(mm.images) ? mm.images.filter(Boolean).map(function (u) { return String(u).split('#')[0]; }) : []; }
 function forwardMomentTo(mm, acc) {
   const head = '【朋友圈】' + peerName(mm.author_acc) + (mm.body ? ('：' + mm.body) : '');
   forwardTo({ type: 'text', body: head }, acc);
