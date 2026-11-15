@@ -6312,6 +6312,11 @@ function bindUI() {
     if (el.tagName === 'IMG' && el.classList.contains('vposter')) { const vb = el.closest('.bubble.video'), u = vb && vb.dataset.v; if (u) el.outerHTML = '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>'; return; }
     const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
     const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
+    if (!im.dataset.rty) {   // 先自己重试一次（加 r= 破缓存），别一次失败就说“已被清理”——手机切网/滚动时误报就是这里来的
+      im.dataset.rty = '1';
+      im.src = u.replace(/[?&]r=\d+$/, '') + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now();
+      return;
+    }
     const holder = im.parentNode; if (!holder) return;
     holder.innerHTML = '<div class="imgfail" data-src="' + esc(u.replace(/[?&]r=\d+$/, '')) + '">图片无法显示<small>可能已被清理，点一下重试</small></div>';
   }, true);
