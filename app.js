@@ -849,7 +849,12 @@ function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
     case 'recalled': body = '<div class="bubble recalled">' + (mine ? '你撤回了一条消息' : '对方撤回了一条消息') + '</div>'; break;
-    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _W = _d ? _d[1] : (m._w || 0), _H = _d ? _d[2] : (m._h || 0); const _ar = (_W && _H) ? ' style="aspect-ratio:' + _W + '/' + _H + ';width:100%"' : ''; body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
+    case 'image': { const _b = String(m.body || ''); const _hi = _b.indexOf('#'); const _u = _hi >= 0 ? _b.slice(0, _hi) : _b, _fr = _hi >= 0 ? _b.slice(_hi) : ''; const _d = /#w=(\d+)&h=(\d+)/.exec(_b); const _W = _d ? _d[1] : (m._w || 0), _H = _d ? _d[2] : (m._h || 0);
+      // 关键：用「具体像素」占位，不能用 width:100%。
+      // 气泡是收缩布局，width:100% 会先按 min-width 70 排一次，图片加载完再撑大 —— 就是"先变小再变大"。
+      let _ar = '';
+      if (_W && _H) { const s = Math.min(1, 220 / _W, 300 / _H); const w = Math.max(1, Math.round(_W * s)), h = Math.max(1, Math.round(_H * s)); _ar = ' width="' + w + '" height="' + h + '" style="width:' + w + 'px;height:' + h + 'px"'; }
+      body = '<div class="bubble img"><img src="' + esc(disp(_u) + _fr) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
       const u = disp(m.body), local = /^blob:/.test(m.body);
@@ -3093,14 +3098,14 @@ function exportSettingsCode() {
   let code = '';
   try { code = 'CH2:' + btoa(unescape(encodeURIComponent(JSON.stringify(settingsPayload())))); } catch (e) { toast('生成失败'); return; }
   copyText(code);
-  openForm('本机设置代码（已复制）', [{ ph: '这串代码', val: code, max: 20000 }], function () { return ''; }, '关闭');
+  openForm('本机设置代码（已复制）', [{ ph: '这串代码', val: code, max: 500000 }], function () { return ''; }, '关闭');
 }
 function applySettingsCode(code) {
   let s = String(code || '').trim().replace(/\s+/g, '');
   // 手机键盘/复制粘贴常把开头弄成小写 ch2:，大小写都认
   if (/^ch2:/i.test(s)) s = 'CH2:' + s.slice(4);
   if (!/^CH2:/.test(s)) return false;
-  let d; try { d = JSON.parse(decodeURIComponent(escape(atob(s.slice(4))))); } catch (e) { return false; }
+  let b64 = s.slice(4).replace(/-/g, '+').replace(/_/g, '/'); while (b64.length % 4) b64 += '='; let d; try { d = JSON.parse(decodeURIComponent(escape(atob(b64)))); } catch (e) { return false; }
   const uid = S.uid || '', x = d.settings || {};
   if (x.theme) LS.set('ch2theme', x.theme);
   if (x.font) LS.set('ch2font', x.font);
@@ -3112,7 +3117,7 @@ function applySettingsCode(code) {
   return true;
 }
 function importSettingsCode() {
-  openForm('粘贴设置代码', [{ ph: '把导出的代码整段粘贴进来', max: 20000 }], function (vals) {
+  openForm('粘贴设置代码', [{ ph: '把导出的代码整段粘贴进来', max: 500000 }], function (vals) {
     if (!applySettingsCode(vals[0])) return '代码不对，检查有没有复制完整';
     toast('已导入，正在刷新…');
     setTimeout(function () { location.reload(); }, 700);
