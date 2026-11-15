@@ -398,7 +398,7 @@ function flush() {
   if (dirty.reqs) { dirty.reqs = false; renderRequests(); }
   if (dirty.title) { dirty.title = false; renderChatTitle(); }
 }
-let baseTitle = 'Chatter', flashI = 0;
+let baseTitle = 'Chatter', flashI = 0, convsReady = false;
 function flashTitle() {
   if (flashI) return; let k = 0;
   flashI = setInterval(() => { if (!document.hidden) { stopFlash(); return; } document.title = (k++ % 2 ? baseTitle : '💬 新消息'); }, 900);
@@ -408,6 +408,7 @@ function updateTitle() {
   let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
   baseTitle = (n ? '(' + (n > 99 ? '99+' : n) + ') ' : '') + 'Chatter';
   if (!flashI) document.title = baseTitle;
+  if (!convsReady) return;   // 会话还没从服务器读回来：此时 n 一定是 0，动系统角标会把推送设好的数字清掉（冷启动角标消失的原因）
   try { if (navigator.setAppBadge) { if (n) navigator.setAppBadge(n).catch(() => {}); else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); } } catch (e) {}
 }
 let splashGone = false;
@@ -685,6 +686,7 @@ function applyBoot(b) {
   (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
   const oldConvs = S.convs || [];
   S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
+  convsReady = true;   // 从这里开始，未读数才是真的，可以据此设置/清除系统角标
   S.requests = b.requests || [];
   const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
