@@ -986,13 +986,28 @@ function onIncoming(m, noInc) {
   const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; });
   if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv) && !nightOnAt(new Date())) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
+  if (first && m.type !== 'call' && !isMuted(m.conv) && !nightOnAt(new Date())) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); if (!open && !document.hidden && m.type !== 'recalled') inAppBanner(m); }
   if (open) { upsertMsg(m); if (first) markReadSoon(m.conv); }
   touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
 }
-function onDbMsg(row, kind) {
-  const m = rowToMsg(row);
+let msgBannerT = 0;
+function inAppBanner(m) {
+  try {
+    const el = $('msg-banner'); if (!el || !m) return;
+    const who = m.from_acc === ME() ? '我' : peerName(m.from_acc);
+    const txt = previewOf(m) || '';
+    el.innerHTML = '<b>' + esc(who) + '</b><span>' + esc(txt) + '</span>';
+    el.classList.add('on');
+    clearTimeout(msgBannerT);
+    msgBannerT = setTimeout(function () { el.classList.remove('on'); }, 3800);
+    el.onclick = function () {
+      el.classList.remove('on'); clearTimeout(msgBannerT);
+      if (m.conv) { try { openConv(m.conv); } catch (e) {} }
+    };
+  } catch (e) {}
+}
+function onDbMsg(row, kind) {  const m = rowToMsg(row);
   if (kind === 'ins') { if (m.from_acc !== ME()) onIncoming(m); }
   else if (S.conv === m.conv) upsertMsg(m);
 }
