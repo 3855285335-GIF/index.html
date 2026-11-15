@@ -4266,7 +4266,7 @@ function momentReactHTML(id, isMine) {
 function momentCardHTML(m, i) {
   const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
   const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
-  const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { return '<img src="' + esc(disp(u)) + '" data-url="' + esc(disp(u)) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '';
+  const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { const _s = String(u || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_s); let _at = ''; if (_d) { const _W = +_d[1], _H = +_d[2]; const _k = Math.min(1, 420 / _W, 420 / _H); _at = ' width="' + Math.round(_W * _k) + '" height="' + Math.round(_H * _k) + '"'; } return '<img src="' + esc(disp(_s)) + '" data-url="' + esc(disp(_s)) + '" alt="" loading="lazy"' + _at + '>'; }).join('') + '</div>' : '';
   const vid = (typeof m.video === 'string' && m.video) ? '<div class="mo-video"><video src="' + esc(disp(m.video)) + '"' + (m.cover ? ' poster="' + esc(disp(m.cover)) + '"' : '') + ' controls preload="metadata" playsinline webkit-playsinline></video></div>' : '';
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
@@ -4505,7 +4505,7 @@ function deleteMoment(id) {
       const { error } = await sb.from('moments').delete().eq('id', id);
       if (error) { toast('删除失败：' + ((error && error.message) || '请重试')); return; }
       if (mm && Array.isArray(mm.images)) {
-        const keys = mm.images.map(function (u) { const m = /\/chat-media\/([^?]+)/.exec(u || ''); return m ? decodeURIComponent(m[1]) : ''; })
+        const keys = mm.images.map(function (u) { const m = /\/chat-media\/([^?]+)/.exec(String(u || '').split('#')[0]); return m ? decodeURIComponent(m[1]) : ''; })
           .filter(function (k) { return k && k.indexOf(ME() + '/moment_') === 0; });
         if (keys.length) sb.storage.from('chat-media').remove(keys).catch(function () {});
       }
