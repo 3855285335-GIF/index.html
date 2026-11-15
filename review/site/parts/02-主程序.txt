@@ -3124,11 +3124,12 @@ function raiseSheet(sheetId, backdropId) {
   if (b) b.style.zIndex = sheetZ;
   if (s) s.style.zIndex = sheetZ + 1;
 }
-function openForm(title, fields, onOk, okText) {
+function openForm(title, fields, onOk, okText, opts) {
   raiseSheet('form-sheet', 'form-backdrop');
   $('fs-title').textContent = title; $('fs-msg').textContent = '';
-  $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">').join('');
+  $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">').join('') + ((opts && opts.after) || '');
   $('fs-ok').textContent = okText || '确定'; $('fs-ok').disabled = false;
+  if (opts && opts.mount) { try { opts.mount(); } catch (e) { logErr('formMount', e); } }
   fsOk = async () => {
     const vals = fields.map((f, i) => $('fsf' + i).value); $('fs-ok').disabled = true;
     try { const err = await onOk(vals); if (err) { $('fs-msg').textContent = err; $('fs-ok').disabled = false; return; } closeForm(); }
@@ -3443,7 +3444,8 @@ function searchMsgs() {
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
-const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], loadAt: 0 };
+const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], ats: [], loadAt: 0 };
+let moAtSel = [];   // 评论时选中的 @ 好友 [{acc,name}]
 function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
 function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
 function grpErr(e) {
@@ -3856,7 +3858,8 @@ function renderGiMembers(q) {
 }
 async function grpKick(gid, acc) {
   try {
-    const { error } = await sb.rpc('kick_group_member', { p_gid: gid, p_acc: acc });
+    const { data: krr, error } = await sb.rpc('kick_member_v2', { p_gid: gid, p_acc: acc });
+      if (!error && krr && krr !== 'ok') { toast(krr === 'denied' ? '没有权限踢人' : krr === 'self' ? '不能踢自己' : '操作失败'); return; }
     if (error) throw error;
     delete GRP.members[gid];
     try { await grpMembers(gid, true); } catch (e) {}
@@ -4373,26 +4376,74 @@ async function toggleMomentLike(id) {
     else await sb.from('moment_likes').insert({ moment_id: id, account_id: ME() });
   } catch (e) { MO.likes[id] = arr; refreshMomentReact(id); logErr('momentLike', e); toast('操作失败：' + ((e && e.message) || '请重试')); }
 }
+function paintMoAtChips() {
+  const el = $('mo-at-chips'); if (!el) return;
+  el.innerHTML = moAtSel.map(function (x) {
+    return '<span class="mo-at-chip" data-acc="' + esc(x.acc) + '">＠' + esc(x.name) + '<b>×</b></span>';
+  }).join('');
+  el.onclick = function (e) {
+    const b = e.target.closest('b'); if (!b) return;
+    const chip = e.target.closest('.mo-at-chip'); if (!chip) return;
+    const acc = chip.getAttribute('data-acc');
+    moAtSel = moAtSel.filter(function (x) { return x.acc !== acc; });
+    paintMoAtChips();
+  };
+}
 function commentMoment(id, reply) {
   const toAcc = (reply && reply.acc) || '';
   const toName = toAcc ? peerName(toAcc) : '';
   const title = toName ? '回复 ' + toName : '评论';
+  moAtSel = [];
   openForm(title, [{ ph: title + '…（最多 200 字）', max: 200 }], async ([v]) => {
     v = String(v || '').trim(); if (!v) return '写点什么';
     const parent = reply && reply.cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reply.cid) ? reply.cid : null;
     const tmp = { id: 'tmp' + now(), moment_id: id, author_acc: ME(), body: v, created_at: new Date().toISOString(), reply_to_acc: toAcc || null, parent_id: parent };
+    const ats = moAtSel.slice();
     (MO.comments[id] = MO.comments[id] || []).push(tmp); refreshMomentReact(id);
     sb.from('moment_comments').insert({ moment_id: id, author_acc: ME(), body: v, reply_to_acc: tmp.reply_to_acc, parent_id: tmp.parent_id }).select('id,created_at').single().then(function (r) {
       if (r.error) {
         MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
         toast('评论失败：' + ((r.error && r.error.message) || '请重试'));
-      } else if (r.data) { tmp.id = r.data.id; tmp.created_at = r.data.created_at; refreshMomentReact(id); }
+      } else if (r.data) {
+        tmp.id = r.data.id; tmp.created_at = r.data.created_at; refreshMomentReact(id);
+        if (ats.length) {
+          const rows = ats.map(function (x) {
+            return { moment_id: id, comment_id: r.data.id, from_acc: ME(), to_acc: x.acc, body: v.slice(0, 120) };
+          });
+          sb.from('moment_mentions').insert(rows).then(function (rr) {
+            if (rr.error) logErr('momentMention', rr.error);
+          }, function (e) { logErr('momentMention', e); });
+        }
+      }
     }, function (e) {
       MO.comments[id] = (MO.comments[id] || []).filter(function (c) { return c !== tmp; }); refreshMomentReact(id);
       logErr('momentComment', e); toast('评论失败：' + ((e && e.message) || '请重试'));
     });
     return null;
-  }, '发送');
+  }, '发送', {
+    after: '<div class="mo-at-row"><button type="button" class="mo-at-btn" id="mo-at-pick">＠ 提醒好友</button><span class="mo-at-chips" id="mo-at-chips"></span></div>',
+    mount: function () {
+      const btn = $('mo-at-pick'); if (!btn) return;
+      btn.onclick = function () {
+        const items = (S.friends || []).map(function (a) { return { acc: a, name: peerName(a) }; });
+        if (!items.length) { toast('还没有好友'); return; }
+        openPick('提醒谁（可多选）', items, function (picked) {
+          (picked || []).forEach(function (a) {
+            if (moAtSel.some(function (x) { return x.acc === a; })) return;
+            moAtSel.push({ acc: a, name: peerName(a) });
+            const inp = $('fsf0');
+            if (inp) {
+              const tag = '@' + peerName(a);
+              if (inp.value.indexOf(tag) < 0) inp.value = (inp.value ? inp.value.replace(/\s+$/, '') + ' ' : '') + tag + ' ';
+              try { inp.focus(); } catch (e) {}
+            }
+          });
+          paintMoAtChips();
+        });
+      };
+      paintMoAtChips();
+    }
+  });
 }
 function deleteMoment(id) {
   const mm = MO.list.find(function (m) { return m.id === id; });
@@ -4422,23 +4473,36 @@ function openMomentImage(url) {
 }
 function paintMomentBadge() {
   const b = $('moment-badge'); if (!b) return;
-  const n = (MO.notices || []).length;
+  const n = (MO.notices || []).length + (MO.ats || []).length;
   b.style.display = n ? '' : 'none';
   b.textContent = n > 9 ? '9+' : n;
 }
 function renderMomentNotices() {
   const el = $('moment-notify'); if (!el) return;
-  if (!MO.notices.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const ats = MO.ats || [], nts = MO.notices || [];
+  if (!ats.length && !nts.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
-  el.innerHTML = '<div class="mo-notify-title">最近互动</div>' + MO.notices.map(function (n) {
+  const atHTML = ats.length ? '<div class="mo-notify-title">有人＠你</div>' + ats.map(function (n) {
+    return '<div class="mo-notice at" data-id="' + esc(n.moment_id) + '"><b>' + esc(peerName(n.from_acc)) + '</b> 在评论里＠了你<span>' + fmtTime(n.created_at) + '</span>' +
+      (n.body ? '<div>' + esc(n.body) + '</div>' : '') + '</div>';
+  }).join('') : '';
+  const ntHTML = nts.length ? '<div class="mo-notify-title">最近互动</div>' + nts.map(function (n) {
     return '<div class="mo-notice" data-id="' + esc(n.moment_id) + '"><b>' + esc(peerName(n.actor)) + '</b> ' +
       (n.kind === 'like' ? '赞了' : '评论了') + '你的朋友圈<span>' + fmtTime(n.created_at) + '</span>' +
       (n.kind === 'comment' ? '<div>' + esc(n.preview) + '</div>' : '') + '</div>';
-  }).join('');
+  }).join('') : '';
+  el.innerHTML = atHTML + ntHTML;
 }
 async function momentNotifyCheck() {
   if (!sb || !S.me || document.hidden) return;
   try {
+    // @ 提醒：不依赖自己有没有朋友圈，先单独查
+    let atRes = null;
+    try { atRes = await sb.from('moment_mentions').select('id,moment_id,from_acc,body,created_at').eq('to_acc', ME()).is('seen_at', null).order('created_at', { ascending: false }).limit(20); } catch (e) { logErr('momentAt', e); }
+    MO.ats = (atRes && atRes.data) ? atRes.data : [];
+    const atActors = Array.from(new Set(MO.ats.map(function (x) { return x.from_acc; })));
+    if (atActors.length) await Promise.all(atActors.map(function (a) { return fetchProfile(a); }));
+
     const { data: ms, error } = await sb.from('moments').select('id,body,created_at').eq('author_acc', ME()).order('created_at', { ascending: false }).limit(60);
     if (error || !ms || !ms.length) { MO.notices = []; paintMomentBadge(); renderMomentNotices(); return; }
     const ids = ms.map(function (m) { return m.id; }), map = {}; ms.forEach(function (m) { map[m.id] = m; });
@@ -4463,6 +4527,11 @@ async function markMomentsSeen() {
   try {
     await sb.from('profiles').update({ moments_seen_at: t }).eq('id', S.uid);
     S.me.moments_seen_at = t; saveCache(); paintMomentBadge();
+    const ids = (MO.ats || []).map(function (x) { return x.id; });
+    if (ids.length) {
+      try { await sb.from('moment_mentions').update({ seen_at: t }).in('id', ids).eq('to_acc', ME()); } catch (e) { logErr('momentAtSeen', e); }
+      MO.ats = []; paintMomentBadge(); renderMomentNotices();
+    }
   } catch (e) { logErr('momentSeen', e); }
 }
 
@@ -5955,7 +6024,7 @@ function goLink(u) {
           sb.rpc('join_group_by_link', { p_gid: gid, p_token: kTok }).then(function (r) {
             const d = r && r.data;
             if (d === 'ok' || d === 'member') { grpLoad(true).then(function () { openConv(k, k); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
+            else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : d === 'kicked' ? '你已被移出这个群，不能再加入' : '无法加入');
           }, function () { toast('加入失败，检查网络'); });
         } },
         { label: '取消', fn: null }
@@ -6162,7 +6231,7 @@ function bindUI() {
     sb.rpc('join_group_by_link', { p_gid: gid, p_token: tok }).then(function (r) {
       const d = r && r.data;
       if (d === 'ok' || d === 'member') { GL.info[gid] = Object.assign({}, info || {}, { member: true }); grpLoad(true).then(function () { openConv('g:' + gid, 'g:' + gid); }); toast(d === 'member' ? '已经在群里了' : '已加入群聊'); }
-      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : '无法加入');
+      else toast(d === 'full' ? '群人数已满' : d === 'nogroup' ? '群不存在或已解散' : d === 'approval' ? '这个群开启了入群审批，请让群成员邀请你' : d === 'badlink' ? '链接已失效，请让群成员重新发' : d === 'kicked' ? '你已被移出这个群，不能再加入' : '无法加入');
     }, function () { toast('加入失败，检查网络'); });
   });
   box.addEventListener('scroll', () => {
@@ -6881,7 +6950,7 @@ setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜�
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });
 window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); } catch (e) {} });
 boot();
