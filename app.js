@@ -1663,7 +1663,7 @@ function showMsgMenu(id) {
   $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-recall').style.display = canRecall ? '' : 'none';
-  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st && now() - ts(m) <= 60000) ? '' : 'none';
+  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st && !m.edited_at && now() - ts(m) <= 60000) ? '' : 'none';   // 只能改一次：改过就不显示编辑
   $('msg-menu-del').style.display = '';
   $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
   menuId = id; menuOpenAt = now(); $('msg-menu-backdrop').classList.add('active'); $('msg-menu').classList.add('active');
