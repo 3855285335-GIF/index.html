@@ -1687,8 +1687,23 @@ function editMsg(m) {
     return '';
   }, '保存');
 }
-function copyText(t) {
-  const done = () => { SFX.tap(); toast('已复制'); };
+async function copyImageMsg(m) {
+  try {
+    const raw = String(m.body || '');
+    const url = raw.indexOf('#') >= 0 ? raw.slice(0, raw.indexOf('#')) : raw;
+    if (!url) { toast('这张图还没传完'); return; }
+    const ab = await (await fetch(disp(url))).blob();
+    let type = ab.type || 'image/png';
+    if (type.indexOf('image/') !== 0) type = 'image/png';
+    if (!(window.ClipboardItem) || !navigator.clipboard || !navigator.clipboard.write) { toast('这台设备不支持复制图片，长按图片保存'); return; }
+    await navigator.clipboard.write([new ClipboardItem({ [type]: ab })]);
+    toast('图片已复制');
+  } catch (e) {
+    logErr('copyImage', e);
+    toast('这台设备不支持复制图片，长按图片保存');
+  }
+}
+function copyText(t) {  const done = () => { SFX.tap(); toast('已复制'); };
   try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, () => fb()); return; } } catch (e) {}
   fb();
   function fb() { try { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;left:-999px;top:0;opacity:0'; document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length); document.execCommand('copy'); ta.remove(); done(); } catch (e) { toast('复制失败'); } }
@@ -1696,7 +1711,7 @@ function copyText(t) {
 function menuAction(kind) {
   const id = menuId, m = S.msgs.find(x => x.id === id); closeMenu(); if (!m) return;
   if (kind === 'reply') setReply(m);
-  else if (kind === 'copy') copyText(parseQ(m.body).text);
+  else if (kind === 'copy') { if (m.type === 'image') copyImageMsg(m); else copyText(parseQ(m.body).text); }
   else if (kind === 'fwd') setTimeout(() => openForward(m), 50);
   else if (kind === 'stk') addToStickers(m);
   else if (kind === 'save') saveMsg(m);
@@ -6140,7 +6155,7 @@ function bindViewport() {
     }, 900);
   };
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) resumeFix(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { resumeFix(); try { if (S.typingUntil && S.typingUntil <= now()) { S.typingUntil = 0; } renderChatTitle(); } catch (e) {} } });
   window.addEventListener('pageshow', resumeFix);
   // 回到前台/切回应用时把聊天背景重新贴一次，避免偶发丢失
   window.addEventListener('pageshow', function () { try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {} });
