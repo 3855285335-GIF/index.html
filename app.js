@@ -1867,13 +1867,13 @@ async function syncEdited() {
     const since = S.editSince || new Date(Date.now() - 86400000).toISOString();
     const { data, error } = await sb.from('messages').select('*').eq('conv_key', conv).gt('edited_at', since).order('edited_at', { ascending: true }).limit(30);
     if (error || !data || !data.length || S.conv !== conv) return;
-    let changed = false;
+    let changed = false, peerEdited = null;
     data.forEach(function (r) {
       const m = S.msgs.find(function (x) { return x.id === String(r.id); });
-      if (m && r.body !== m.body) { m.body = r.body; m.edited_at = r.edited_at; changed = true; }
+      if (m && r.body !== m.body) { if (m.from_acc !== ME()) peerEdited = m.id; m.body = r.body; m.edited_at = r.edited_at; changed = true; }
       S.editSince = r.edited_at;
     });
-    if (changed) chatRender(S.stick);
+    if (changed) { chatRender(S.stick); if (peerEdited) { try { toast('对方修改了一条消息'); } catch (e) {} try { const el = msgElOf(peerEdited); if (el) el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } catch (e) {} } }
   } catch (e) {}
 }
 async function loadOlder() {
