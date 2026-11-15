@@ -845,6 +845,17 @@ function fillGlCards(root) {
     load(2);
   });
 }
+function paintPeerBubbleColor(color) {
+  try {
+    const bc = bubCss(color); if (!bc) return;
+    const rows = document.querySelectorAll('#chat-messages .msg');
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]; if (r.classList.contains('mine')) continue;
+      const b = r.querySelector('.bubble'); if (!b) continue;
+      b.style.background = bc; b.style.color = '#fff';
+    }
+  } catch (e) {}
+}
 function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
@@ -1762,7 +1773,7 @@ async function openConv(key, peer) {
   if (!isGroupKey(key) && sb && S.token) {
     const _pr = S.profiles[S.peer];
     if ((!_pr || !_pr.bubble_color) && !bubbleColorCache[S.peer]) sb.from('profiles').select('account_id,bubble_color').eq('account_id', S.peer).maybeSingle().then(function (r) {
-      if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); rememberColor(S.peer, r.data.bubble_color); if (S.conv === key && S.msgs.length) chatRender(S.stick); }
+      if (r && r.data) { S.profiles[S.peer] = Object.assign(S.profiles[S.peer] || {}, r.data); rememberColor(S.peer, r.data.bubble_color); if (S.conv === key && S.msgs.length) paintPeerBubbleColor(r.data.bubble_color); }
     }, function () {});
   }
   S.msgs = []; S.out.forEach(m => { if (m.conv === key) S.msgs.push(m); });
