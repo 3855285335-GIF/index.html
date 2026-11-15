@@ -3134,7 +3134,7 @@ function raiseSheet(sheetId, backdropId) {
 function openForm(title, fields, onOk, okText, opts) {
   raiseSheet('form-sheet', 'form-backdrop');
   $('fs-title').textContent = title; $('fs-msg').textContent = '';
-  $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">').join('') + ((opts && opts.after) || '');
+  $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">' + (f.hint ? '<div class="fs-hint">' + esc(f.hint) + '</div>' : '')).join('') + ((opts && opts.after) || '');
   $('fs-ok').textContent = okText || '确定'; $('fs-ok').disabled = false;
   if (opts && opts.mount) { try { opts.mount(); } catch (e) { logErr('formMount', e); } }
   fsOk = async () => {
@@ -3542,7 +3542,7 @@ function renderGrpNotice() {
 }
 function editGroupNotice(gid) {
   const g = GRP.list.find(function (x) { return x.id === gid; }) || {};
-  openForm('群公告', [{ ph: '最多 300 字，留空就是删除', max: 300, val: g.notice || '' }], async function (vals) {
+  openForm('群公告', [{ ph: '群公告（最多 300 字）', hint: '留空就是删除公告', max: 300, val: g.notice || '' }], async function (vals) {
     const v = String((vals && vals[0]) || '').trim();
     const r = await sb.rpc('set_group_notice', { p_gid: gid, p_text: v });
     if (r.error) return '保存失败：' + grpErr(r.error);
@@ -3930,7 +3930,7 @@ async function toggleGroupMuteAll(gid) {
 }
 function editMemberTitle(gid, acc) {
   const m = (GRP.members[gid] || []).find(function (x) { return x.account_id === acc; });
-  openForm('设置头衔（对方可选择不戴）', [{ ph: '例如：摸鱼王（最多 12 字，留空删除）', val: (m && m.title) || '', max: 12 }], async ([v]) => {
+  openForm('设置头衔（对方可选择不戴）', [{ ph: '例如：摸鱼王', hint: '最多 12 个字；留空就是删除', val: (m && m.title) || '', max: 12 }], async ([v]) => {
     v = String(v || '').trim(); if (v.length > 12) return '最多 12 个字';
     const { error } = await sb.rpc('set_member_title', { p_gid: gid, p_acc: acc, p_title: v });
     if (error) return '保存失败：' + grpErr(error);
@@ -5574,7 +5574,7 @@ async function setRemark(acc, text) {
   return null;
 }
 function editRemark(acc) {
-  openForm('给“' + nickOf(acc) + '”设置备注', [{ ph: '只有你自己看得到，最多 20 个字（留空就是删除备注）', val: remarkOf(acc), max: 20 }], ([v]) => setRemark(acc, v), '保存');
+  openForm('给“' + nickOf(acc) + '”设置备注', [{ ph: '备注（最多 20 字）', hint: '只有你自己看得到；留空就是删除备注', val: remarkOf(acc), max: 20 }], ([v]) => setRemark(acc, v), '保存');
 }
 
 /* ---- 好友资料页 ---- */
