@@ -2973,7 +2973,7 @@ async function fbLoop() {
   let next = 1000;
   try {
     const need = !S.rt.db || !S.rt.user;
-    if (need && !S.noInbox) { await pollInbox(); next = 30; }   // 长轮询：服务器一有新内容立刻返回，没有就等 2.5 秒
+    if (!S.noInbox) { await pollInbox(); next = 30; }            // 长轮询常开：实时通道“显示已连接却不来消息”时只有它能兜底（手机上 6 秒才出一条就是这个原因）
     else if (need) {                                            // 没运行 setup-v4.sql：退回普通轮询
       const t = now();
       if (!S.rt.user && !S.noSigDb && t - lastSigPoll >= 2000) { lastSigPoll = t; await pollSignals(); }
@@ -2991,7 +2991,7 @@ async function pollInbox() {
   let base = 0;
   if (!msgCursor) { S.convs.forEach(c => { base = Math.max(base, Date.parse(c.last_ts || 0) || 0); }); msgCursor = base || (now() - 60000); }
   const ctl = window.AbortController ? new AbortController() : null, tm = ctl ? setTimeout(() => ctl.abort(), 10000) : 0;   // 国内网络偶尔会让请求卡住：10 秒没回就放弃重发
-  let q = sb.rpc('poll_inbox', { p_since: new Date(msgCursor).toISOString(), p_wait_ms: base ? 0 : 2500 });
+  let q = sb.rpc('poll_inbox', { p_since: new Date(msgCursor).toISOString(), p_wait_ms: base ? 0 : 6000 });
   if (ctl && q && typeof q.abortSignal === 'function') q = q.abortSignal(ctl.signal);
   let res; try { res = await q; } finally { clearTimeout(tm); }
   const { data, error } = res || {};
