@@ -3132,17 +3132,17 @@ function startTimers() {
     if (document.hidden || !sb || !S.me) return;
     n++;
     const lp = !S.noInbox;                                         // 国内模式的长轮询在工作：新消息已经即时到达，补漏校对放慢到 18 秒
-    if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 30 秒校对一次；异常：6 秒（长轮询时 18 秒）
+    if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 15 秒校对一次；异常：3 秒（长轮询时 9 秒）
     if (S.conv && !S.rt.db && (!lp || n % 3 === 0)) syncChat();   // 实时断开时才兜底；正常时群聊由 pollConv（8 秒增量）负责
-    if (!S.rt.db || n % 2 === 0) grpPoll();                        // 群消息兜底轮询：实时通道断了 6 秒一次，正常时 12 秒一次
-    if (n % 2 === 0) grpInvitesLoad();                            // 群邀请：12 秒查一次（没开推送也能较快看到）
-    if (n % 5 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化：30 秒一次
+    if (!S.rt.db || n % 2 === 0) grpPoll();                        // 群消息兜底轮询：实时通道断了 3 秒一次，正常时 6 秒一次
+    if (n % 2 === 0) grpInvitesLoad();                            // 群邀请：6 秒查一次（没开推送也能较快看到）
+    if (n % 5 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化：15 秒一次
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
-    editWatch();                                                   // 别人改了消息：每 6 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
+    editWatch();                                                   // 别人改了消息：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
-  }, 6000);
+  }, 3000);
 }
 function teardown() {
   S.started = false;
