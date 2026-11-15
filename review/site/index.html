@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Chatter 代码审查 · 20261116p</title>
+<title>Chatter 代码审查 · 20261117z</title>
 <style>
   :root{--bg:#0f1117;--card:#171a23;--line:#262a36;--ink:#e8eaf2;--mut:#98a0b3;--accent:#8b5cf6}
   *{box-sizing:border-box}
@@ -30,7 +30,7 @@
 <body>
 <header>
   <h1>Chatter 代码审查包</h1>
-  <div class="sub">版本 v=20261116x · 页面/样式 + 主程序 + 数据库结构；点左边切换，右上可下载原文</div>
+  <div class="sub">版本 v=20261117z（2026-11-15 21:4x 重新生成）· 页面/样式 + 主程序 + 数据库结构 + 今天新增 SQL + 今天改动清单；点左边切换，右上可下载原文</div>
 </header>
 <div class="wrap">
   <nav id="nav"></nav>
@@ -41,7 +41,7 @@
       <a id="dl" class="dl" download>下载当前文件</a>
     </div>
     <pre id="out">加载中…</pre>
-    <p class="hint">说明：parts 里的旧切片（02-配置…14-启动）是 542KB 单文件时代的，已经过期；以本页 01/02 两份为准。</p>
+    <p class="hint">说明：本页五份是 2026-11-15 21:4x 按线上 v=20261117z 重新生成的；旧切片（02-配置…14-启动）是 542KB 单文件时代的，已过期。</p>
   </main>
 </div>
 <script>
@@ -49,10 +49,11 @@ const FILES = [
   { id: '01', name: '01 页面与样式（index.html）', file: 'parts/01-页面与样式.txt' },
   { id: '02', name: '02 主程序（app.js）', file: 'parts/02-主程序.txt' },
   { id: '03', name: '03 数据库结构（schema.md）', file: 'parts/03-数据库结构.md' },
-  { id: '04', name: '04 今晚新增 SQL（已执行）', file: 'parts/04-新增SQL-20261114.sql' }
+  { id: '04', name: '04 今天新增 SQL（已执行）', file: 'parts/04-新增SQL-20261115.sql' },
+  { id: '05', name: '05 今天改动清单（先看这个）', file: 'parts/05-今日改动-20261115.md' }
 ];
 const nav = document.getElementById('nav'), out = document.getElementById('out'), meta = document.getElementById('meta'), dl = document.getElementById('dl');
-let cur = FILES[1], text = '', lastIdx = -1;
+let cur = FILES[4], text = '', lastIdx = -1;
 function renderNav() {
   nav.innerHTML = '';
   FILES.forEach(function (f) {
