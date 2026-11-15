@@ -6354,6 +6354,7 @@ function bindUI() {
   $('msg-menu-reply').onclick = () => menuAction('reply'); $('msg-menu-copy').onclick = () => menuAction('copy'); $('msg-menu-del').onclick = () => menuAction('del');
   $('msg-menu-cancel').onclick = closeMenu;
   $('msg-menu-fwd').onclick = () => menuAction('fwd'); $('msg-menu-stk').onclick = () => menuAction('stk'); $('msg-menu-save').onclick = () => menuAction('save');
+  $('msg-menu-edit').onclick = () => menuAction('edit');   // 之前漏了这个按钮的绑定：菜单里有“编辑”，点了一点反应都没有
   $('reply-x').onclick = clearReply;
 
   /* 输入栏 */
