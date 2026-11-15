@@ -3096,7 +3096,9 @@ function exportSettingsCode() {
   openForm('本机设置代码（已复制）', [{ ph: '这串代码', val: code, max: 20000 }], function () { return ''; }, '关闭');
 }
 function applySettingsCode(code) {
-  const s = String(code || '').trim().replace(/\s+/g, '');
+  let s = String(code || '').trim().replace(/\s+/g, '');
+  // 手机键盘/复制粘贴常把开头弄成小写 ch2:，大小写都认
+  if (/^ch2:/i.test(s)) s = 'CH2:' + s.slice(4);
   if (!/^CH2:/.test(s)) return false;
   let d; try { d = JSON.parse(decodeURIComponent(escape(atob(s.slice(4))))); } catch (e) { return false; }
   const uid = S.uid || '', x = d.settings || {};
