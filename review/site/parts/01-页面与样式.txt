@@ -47,7 +47,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261116x">
+<link rel="preload" as="script" href="app.js?v=20261117z">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -301,6 +301,12 @@
   .mo-notice:first-of-type { border-top: 0; }
   .mo-notice b { color: var(--accent); font-weight: 600; }
   .mo-notice span { color: var(--muted); font-size: 11px; float: right; margin-left: 8px; }
+  .mo-notice.at b::after { content: ''; }
+  .mo-at-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .mo-at-btn { background: var(--surface2); color: var(--accent); font-weight: 600; font-size: 12.5px; padding: 7px 12px; border-radius: 12px; border: 0; }
+  .mo-at-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .mo-at-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; background: var(--accent); color: #fff; padding: 4px 8px; border-radius: 10px; }
+  .mo-at-chip b { cursor: pointer; font-weight: 700; opacity: .85; padding: 0 1px; }
   .mo-editor { padding: 0 14px; }
   #moment-text { width: 100%; min-height: 110px; max-height: 34vh; resize: none; border: 1.5px solid var(--line); border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.5; background: var(--surface2); color: var(--ink); font-family: inherit; }
   .mo-imgs-edit { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
@@ -322,7 +328,7 @@
   .online-dot { position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px; border-radius: 50%; background: var(--ok); border: 2.5px solid var(--surface); }
   .conv-main { flex: 1; min-width: 0; }
   .conv-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .conv-name { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-name { font-weight: 600; font-size: 16px; white-space: normal; word-break: break-word; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .conv-time { font-size: 11px; color: var(--muted); flex-shrink: 0; }
   .conv-sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
   .preview { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -345,7 +351,7 @@
   .btn-danger { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
   .btn-ok { background: var(--ok); color: #fff; }
   .btn-soft { background: var(--surface2); color: var(--ink); }
-  .section-title { font-size: 12px; color: var(--muted); letter-spacing: 1px; padding: 6px 6px 8px; }
+  .section-title { font-size: 12px; color: var(--muted); letter-spacing: 1px; padding: 6px 6px 8px; font-weight: 700; }
   .sec-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px 4px; }
   .sec-head .section-title { padding: 0 4px 0 6px; }
   .sec-act { background: none; color: var(--accent); font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 10px; }
@@ -369,7 +375,7 @@
   .exact-tag { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); font-size: 10px; font-weight: 600; vertical-align: 2px; }
   .me-sec { margin-bottom: 4px; }
   .me-box .btns.me-grid { display: flex; flex-direction: column; gap: 0; margin: 0 14px 12px; background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
-  .me-box .btns.me-grid button { width: 100%; padding: 14px 16px; font-size: 14.5px; font-weight: 600; text-align: left; background: transparent; box-shadow: none; border-radius: 0; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .me-box .btns.me-grid button { width: 100%; padding: 14px 16px; font-size: 15.5px; font-weight: 500; text-align: left; background: transparent; box-shadow: none; border-radius: 0; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .me-box .btns.me-grid button:last-child { border-bottom: 0; }
   .me-box .btns.me-grid button:active { background: var(--surface2); }
   .me-diag { margin: 4px 14px 12px; background: var(--surface); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); }
@@ -635,7 +641,7 @@
   .bub-custom-row input[type=color] { width: 46px; height: 34px; border: 0; background: none; padding: 0; }
   .bub-custom-row .btn-primary { margin-left: auto; padding: 8px 18px; border-radius: 10px; }
   .msg.mine .bubble { text-shadow: 0 1px 2px rgba(0,0,0,.22); }
-  .edited-tag { font-size: 11px; opacity: .55; margin-left: 4px; font-style: italic; }
+  .edited-tag { display: inline-block; font-size: 12.5px; line-height: 1.1; margin-left: 6px; color: inherit; opacity: .55; font-style: normal; white-space: nowrap; vertical-align: 1px; }
   .gl-cards { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
   .gl-card { display: flex; align-items: center; gap: 10px; background: #fff; color: #1b1b22; border-radius: 14px; padding: 10px 12px; min-width: 210px; box-shadow: 0 2px 8px rgba(0,0,0,.10); }
   .gl-av { width: 38px; height: 38px; flex: none; border-radius: 12px; background: linear-gradient(135deg,#6c5ce7,#c94fa8); color: #fff; font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: center; }
@@ -651,6 +657,8 @@
   .sheet .menu-item:active { background: var(--surface2); }
   #fs-fields { padding: 14px 16px 4px; display: flex; flex-direction: column; gap: 10px; }
   #fs-fields input { width: 100%; padding: 12px 14px; border-radius: 14px; background: var(--surface2); border: 1.5px solid var(--line); font-size: 16px; }
+  #fs-fields input::placeholder { font-size: 13px; }
+  .fs-hint { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 6px 4px 0; }
   #fs-msg { min-height: 20px; padding: 6px 18px 0; font-size: 13px; color: var(--danger); text-align: center; }
   .fs-btns { display: flex; border-top: 1px solid var(--line); margin-top: 8px; }
   .fs-btns button { flex: 1; padding: 15px; background: none; font-size: 16px; font-weight: 600; border-radius: 0; color: var(--muted); }
@@ -1043,6 +1051,20 @@
 
   <div id="app-view" class="view">
     <div id="banner"></div>
+<style>
+  #msg-banner{position:fixed;left:50%;top:calc(env(safe-area-inset-top, 0px) + 10px);transform:translate(-50%,-140%);z-index:2600;max-width:min(92vw,420px);
+    background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 10px 30px rgba(0,0,0,.22);padding:10px 14px;display:flex;gap:8px;align-items:baseline;
+    font-size:13px;line-height:1.45;transition:transform .22s cubic-bezier(.2,.8,.3,1),opacity .22s;opacity:0;pointer-events:none;cursor:pointer}
+  #msg-banner.on{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+  #msg-banner b{flex:none;font-weight:600;color:var(--accent)}
+  #msg-banner span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+  #msg-banner .mb-av{flex:none;align-self:center}
+  #msg-banner .mb-av .avatar-wrapper{width:26px;height:26px}
+  #msg-banner .mb-av .avatar{width:26px;height:26px;border-radius:9px;font-size:11px}
+  #msg-banner .mb-av .online-dot{display:none}
+</style>
+<div id="msg-banner"></div>
     <header class="app-header">
       <div class="brand"><svg class="logo"><use href="#logo"/></svg><span>Chatter</span></div>
       <div class="me-info"><span id="me-name">加载中…</span><span id="me-acc"></span></div>
@@ -1354,6 +1376,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261116x" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261116x&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261117z" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261117z&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>
