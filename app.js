@@ -6958,8 +6958,18 @@ setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜�
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
 }
 if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
-window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });
-window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); } catch (e) {} });
+window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); } catch (e) {} });
+// 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）
+document.addEventListener('pointerdown', function (e) {
+  try {
+    const p = $('emoji-panel');
+    if (!p || !p.classList.contains('active')) return;
+    if (e.target.closest('#emoji-panel')) return;      // 点在面板里：正常操作
+    if (e.target.closest('#chat-input-bar')) return;   // 输入栏 / 表情按钮：它们自己开关
+    p.classList.remove('active');
+    if (typeof hideSuggest === 'function') hideSuggest();
+  } catch (err) {}
+}, true);
 boot();
 })();
 
