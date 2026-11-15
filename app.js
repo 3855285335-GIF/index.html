@@ -1013,6 +1013,7 @@ async function checkConvMention(key) {
   } catch (e) {}
 }
 function onIncoming(m, noInc) {
+  if (window.__TEST__) console.log('OI', Date.now(), m.id, m.type);
   if (S.recalledEarly.has(m.id) && m.type !== 'recalled') { m = Object.assign({}, m, { type: 'recalled', body: '' }); }
   const first = !S.seen.has(m.id); S.seen.add(m.id);
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
@@ -2973,7 +2974,7 @@ async function fbLoop() {
   let next = 1000;
   try {
     const need = !S.rt.db || !S.rt.user;
-    if (!S.noInbox) { await pollInbox(); next = 30; }            // 长轮询常开：实时通道“显示已连接却不来消息”时只有它能兜底（手机上 6 秒才出一条就是这个原因）
+    if (need && !S.noInbox) { await pollInbox(); next = 30; }    // 长轮询：实时通道断了才跑（常开会每 0.4 秒打一次服务器，流量扛不住，已回退）
     else if (need) {                                            // 没运行 setup-v4.sql：退回普通轮询
       const t = now();
       if (!S.rt.user && !S.noSigDb && t - lastSigPoll >= 2000) { lastSigPoll = t; await pollSignals(); }
@@ -3007,6 +3008,7 @@ function handleSigRows(rows) {
   });
 }
 function handleMsgRows(rows, base) {
+  if (window.__TEST__) console.log('PD', Date.now(), 'rows=' + rows.length, rows.map(r => Date.parse(r.created_at)).join(','));
   rows.forEach(r => {
     const m = rowToMsg(r); const t = Date.parse(m.created_at) || 0; if (t > msgCursor) msgCursor = t;
     if (pollTypes.get(m.id) === m.type) return;
