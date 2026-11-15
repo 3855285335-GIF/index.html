@@ -833,7 +833,7 @@ function bubCss(v) {
   if (/^#[0-9a-f]{6}$/i.test(v)) return 'linear-gradient(135deg,' + v + ' 0%,' + v + ' 100%)';
   return BUB_CSS[v] || '';
 }
-const GL = { info: {}, busy: {}, fail: {} };
+const GL = { info: {}, busy: {}, fail: {}, link: {} };
 function glGids(text) {
   const out = [], re = /#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/ig;
   let m; while ((m = re.exec(String(text || '')))) out.push(m[1].toLowerCase());
@@ -1038,7 +1038,7 @@ let msgBannerT = 0;
 function inAppBanner(m) {
   try {
     const el = $('msg-banner'); if (!el || !m) return;
-    const who = m.from_acc === ME() ? '我' : peerName(m.from_acc);
+    const who = m.from_acc === ME() ? '我' : (m.conv && isGroupKey(m.conv) ? (grpName(m.conv) || '群聊') + ' · ' + peerName(m.from_acc) : peerName(m.from_acc));
     const txt = previewOf(m) || '';
     const pf = S.profiles[m.from_acc] || {};
     const av = avatarHTML(who, pf.avatar_url, false, m.from_acc || '');
@@ -4137,10 +4137,13 @@ function openGroupSettings(gid) {
   }
   if (mine && mine.title) items.push({ label: mine.title_on ? '我的头衔：戴上（点一下收起）' : '我的头衔：已收起（点一下戴上）', fn: function () { setMyTitleVisible(gid, !mine.title_on); } });
   if (owner) items.push({ label: '转让群主', fn: function () { transferOwner(gid); } });
+  if (!GL.link[gid]) { try { sb.rpc('ensure_group_link', { p_gid: gid }).then(function (r) { GL.link[gid] = r && r.data; }, function () {}); } catch (e) {} }
   items.unshift({ label: '复制邀请链接（发给好友）', fn: function () {
+    const t = GL.link[gid];
+    if (t) { copyText(location.origin + location.pathname + '#g=' + gid + '&k=' + t); return; }   // 有缓存就同步复制：Safari 要求点击当下就写剪贴板
     sb.rpc('ensure_group_link', { p_gid: gid }).then(function (r) {
-      const t = r && r.data;
-      copyText(location.origin + location.pathname + '#g=' + gid + (t ? ('&k=' + t) : ''));
+      const tt = r && r.data; GL.link[gid] = tt;
+      copyText(location.origin + location.pathname + '#g=' + gid + (tt ? ('&k=' + tt) : ''));
     }, function () { toast('生成链接失败，检查网络'); });
   } });
   if (!items.length) { toast('这里还没有可设置的'); return; }
@@ -4371,7 +4374,8 @@ function momentCardHTML(m, i) {
   const imgs = Array.isArray(m.images) ? m.images.filter(Boolean) : [];
   const cls = imgs.length === 1 ? ' one' : imgs.length === 2 ? ' two' : '';
   const grid = imgs.length ? '<div class="mo-imgs' + cls + '">' + imgs.map(function (u) { const _s = String(u || ''); const _d = /#w=(\d+)&h=(\d+)/.exec(_s); let _at = ''; if (_d) { const _W = +_d[1], _H = +_d[2]; const _k = Math.min(1, 420 / _W, 420 / _H); _at = ' width="' + Math.round(_W * _k) + '" height="' + Math.round(_H * _k) + '"'; } return '<img src="' + esc(disp(_s)) + '" data-url="' + esc(disp(_s)) + '" alt="" loading="lazy"' + _at + '>'; }).join('') + '</div>' : '';
-  const vid = (typeof m.video === 'string' && m.video) ? '<div class="mo-video"><video src="' + esc(disp(m.video)) + '"' + (m.cover ? ' poster="' + esc(disp(m.cover)) + '"' : '') + ' controls preload="metadata" playsinline webkit-playsinline></video></div>' : '';
+  const _cov = (typeof m.cover === 'string' && m.cover.indexOf(SUPABASE_URL + '/storage/v1/object/public/chat-media/') === 0) ? m.cover : '';
+  const vid = (typeof m.video === 'string' && m.video) ? '<div class="mo-video"><video src="' + esc(disp(m.video)) + '"' + (_cov ? ' poster="' + esc(disp(_cov)) + '"' : '') + ' controls preload="metadata" playsinline webkit-playsinline></video></div>' : '';
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
@@ -5549,7 +5553,7 @@ async function logout() {
   try { if (typeof pushLogout === 'function') await pushLogout(); } catch (e) {}
   try { teardown(); } catch (e) {}
   try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ch2') === 0) localStorage.removeItem(k); }); } catch (e) {}
-  try { if (sb) await sb.auth.signOut(); } catch (e) {}
+  try { if (sb) await sb.auth.signOut({ scope: 'local' }); } catch (e) {}   // 只退这一台：以前是全局退出，别人点个踢人自己也会掉线
   location.reload();
 }
 function devId() { let d = LS.get('ch2dev', ''); if (!d) { d = 'd' + Math.random().toString(36).slice(2, 10); LS.set('ch2dev', d); } return d; }
@@ -5564,7 +5568,8 @@ function checkKick() {
   if (!sb || !S.uid) return;
   sb.from('profiles').select('kick_at').eq('id', S.uid).maybeSingle().then(function (r) {
     const k = r && r.data && r.data.kick_at; if (!k) return;
-    if (String(k) === String(LS.get('ch2kickAt', ''))) { LS.set('ch2loginAt', Date.now()); return; }   // 这次是本机发起的，不踢自己
+    const mine = LS.get('ch2kickAt', '') || 0;
+    if (mine && Math.abs(Date.parse(k) - Date.parse(mine)) < 5000) { LS.set('ch2loginAt', Date.now()); return; }   // 本机发起的踢人：时间差 5 秒内算自己，不踢自己
     const la = LS.get('ch2loginAt', 0) || 0;
     if (Date.parse(k) > la + 1500) {
       LS.set('ch2loginAt', Date.now());
@@ -6386,13 +6391,13 @@ function bindUI() {
     let sx = 0, sy = 0, edge = false;
     document.addEventListener('touchstart', function (e) {
       const t = e.touches && e.touches[0]; if (!t) return;
-      edge = t.clientX <= 22; sx = t.clientX; sy = t.clientY;
+      edge = t.clientX <= 14; sx = t.clientX; sy = t.clientY;
     }, { passive: true });
     document.addEventListener('touchmove', function (e) {
       if (!edge) return;
       const t = e.touches && e.touches[0]; if (!t) return;
       const dx = t.clientX - sx, dy = Math.abs(t.clientY - sy);
-      if (dx > 6 && dy < 45) { try { e.preventDefault(); } catch (x) {} }   // 只拦“从左边缘往里横滑”
+      if (dx > 12 && dy < 30) { try { e.preventDefault(); } catch (x) {} }   // 只拦贴着左边缘、明显横向的那一段
     }, { passive: false });
     document.addEventListener('touchend', function () { edge = false; }, { passive: true });
     document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
