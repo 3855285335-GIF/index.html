@@ -1947,16 +1947,22 @@ async function syncEdited() {
     if (changed) { chatRender(S.stick); if (peerEdited) { try { toast('对方修改了一条消息'); } catch (e) {} try { const el = msgElOf(peerEdited); if (el) el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } catch (e) {} } }
   } catch (e) {}
 }
-let editWatchAt = 0;
+let editWatchAt = 0; const editSeen = new Set();
 async function editWatch() {   // 别人改了消息：不管你在不在那个会话里，都要有反应（以前只在打开的那个会话里查，等于“软件内也不提示”）
   if (!sb || !S.me || document.hidden) return;
-  const since = new Date(editWatchAt || (Date.now() - 120000)).toISOString();
+  // 用「上次时间 - 60 秒」当窗口，不拿本机时钟直接当边界（手机时间快一点就会把新编辑全漏掉，这就是“第二次没横幅”）
+  const from = editWatchAt ? (editWatchAt - 60000) : (Date.now() - 180000);
+  const since = new Date(from).toISOString();
   editWatchAt = Date.now();
   try {
-    const { data, error } = await sb.from('messages').select('*').gt('edited_at', since).order('edited_at', { ascending: true }).limit(30);
+    const { data, error } = await sb.from('messages').select('*').gt('edited_at', since).order('edited_at', { ascending: true }).limit(50);
     if (error || !data || !data.length) return;
     data.forEach(function (row) {
       if (!row || row.from_acc === ME()) return;          // 自己改的不提醒自己
+      const sig = String(row.id) + '@' + String(row.edited_at);   // 同一条同一次编辑只提示一次（窗口重叠会重复查到）
+      if (editSeen.has(sig)) return;
+      editSeen.add(sig);
+      if (editSeen.size > 300) editSeen.delete(editSeen.values().next().value);
       const key = row.conv_key;
       if (key === S.conv) {                               // 正看着这个会话：就地更新 + 闪一下
         const id = String(row.id), m = S.msgs.find(function (x) { return x.id === id; });
@@ -3134,7 +3140,7 @@ function startTimers() {
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
-    if (n % 2 === 0) editWatch();                                  // 别人改了消息：列表也提醒（12 秒一次，很轻）
+    editWatch();                                                   // 别人改了消息：每 6 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 6000);
 }
