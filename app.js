@@ -1823,7 +1823,12 @@ async function openConv(key, peer) {
   }
 }
 function closeChat() {
-  recAbort(); stopAudio(); saveMsgsNow(); if (S.conv) draftSave(S.conv, $('chat-input').value); closeSearch(); closeActs(); exitMulti();
+  recAbort(); stopAudio();
+  var _ck = S.conv, _cms = (S.msgs || []).slice();
+  if (_ck) draftSave(_ck, $('chat-input') ? $('chat-input').value : '');
+  closeSearch(); closeActs(); exitMulti();
+  // 原来这里当场把整段聊天写进 IndexedDB：会话一长（200 条）就要卡几秒。现在页面先切走，写盘延后一帧。
+  setTimeout(function () { try { if (_ck) msgCacheSave(_ck, _cms); } catch (e) {} }, 0);
   clearInterval(GRP.chatT); GRP.chatT = 0;
   clearInterval(GRP.muteT); GRP.muteT = 0;
   clearInterval(GC.tipT); GC.tipT = 0; gcTipHide();
