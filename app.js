@@ -1947,6 +1947,32 @@ async function syncEdited() {
     if (changed) { chatRender(S.stick); if (peerEdited) { try { toast('对方修改了一条消息'); } catch (e) {} try { const el = msgElOf(peerEdited); if (el) el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } catch (e) {} } }
   } catch (e) {}
 }
+let editWatchAt = 0;
+async function editWatch() {   // 别人改了消息：不管你在不在那个会话里，都要有反应（以前只在打开的那个会话里查，等于“软件内也不提示”）
+  if (!sb || !S.me || document.hidden) return;
+  const since = new Date(editWatchAt || (Date.now() - 120000)).toISOString();
+  editWatchAt = Date.now();
+  try {
+    const { data, error } = await sb.from('messages').select('*').gt('edited_at', since).order('edited_at', { ascending: true }).limit(30);
+    if (error || !data || !data.length) return;
+    data.forEach(function (row) {
+      if (!row || row.from_acc === ME()) return;          // 自己改的不提醒自己
+      const key = row.conv_key;
+      if (key === S.conv) {                               // 正看着这个会话：就地更新 + 闪一下
+        const id = String(row.id), m = S.msgs.find(function (x) { return x.id === id; });
+        if (m) {
+          m.body = row.body; m.edited_at = row.edited_at;
+          try { chatRender(S.stick); } catch (e) {}
+          try { const el = msgElOf(id); if (el) { el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } } catch (e) {}
+        }
+        return;
+      }
+      const m = rowToMsg(row);
+      touchConv(key, '（已编辑）' + previewOf(m), row.created_at, false);   // 列表预览跟着变
+      if (!isMuted(key)) { try { inAppBanner(m); } catch (e) {} try { SFX.recv(false); } catch (e) {} }
+    });
+  } catch (e) {}
+}
 async function loadOlder() {
   if (S.loadingOlder || !S.hasMore || !S.conv || !S.msgs.length) return;
   S.loadingOlder = true; const conv = S.conv;
@@ -3108,6 +3134,7 @@ function startTimers() {
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
+    if (n % 2 === 0) editWatch();                                  // 别人改了消息：列表也提醒（12 秒一次，很轻）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 6000);
 }
@@ -6341,6 +6368,23 @@ function bindUI() {
     } catch (e) {}
   }
   armGuard(2);
+  // 边缘滑退：iOS 的系统手势拦不住，但 Safari 有一部分版本会被 preventDefault 拦下，先尽力拦；
+  // 真拦不住也没关系——上面的历史守卫保证滑回去还是本页，不会离开应用。
+  (function () {
+    let sx = 0, sy = 0, edge = false;
+    document.addEventListener('touchstart', function (e) {
+      const t = e.touches && e.touches[0]; if (!t) return;
+      edge = t.clientX <= 22; sx = t.clientX; sy = t.clientY;
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      if (!edge) return;
+      const t = e.touches && e.touches[0]; if (!t) return;
+      const dx = t.clientX - sx, dy = Math.abs(t.clientY - sy);
+      if (dx > 6 && dy < 45) { try { e.preventDefault(); } catch (x) {} }   // 只拦“从左边缘往里横滑”
+    }, { passive: false });
+    document.addEventListener('touchend', function () { edge = false; }, { passive: true });
+    document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
+  })();
   window.addEventListener('popstate', () => {
     if (S.call) { armGuard(1); return; }
     if (S.conv) { S.hist = false; closeChat(); return; }
