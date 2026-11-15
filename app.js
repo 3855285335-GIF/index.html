@@ -3146,7 +3146,7 @@ function startTimers() {
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
-    if (n % 2 === 0) editWatch();                                  // 别人改了消息（6 秒一次；3 秒太费请求）：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
+    if (n % 2 === 0 && (!S.rt.db || n % 4 === 0)) editWatch();     // 别人改了消息：实时正常 12 秒一次，实时断了 6 秒一次：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 3000);
 }
