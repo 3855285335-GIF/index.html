@@ -373,11 +373,13 @@ function hydrate(c) {
   if (S.me) S.profiles[S.me.account_id] = S.me;
   try { GRP.list = LS.get('ch2grp:' + (S.uid || ''), []) || GRP.list || []; } catch (e) {}   // 群名先用缓存，列表不会先显示“群聊”
 }
+function cacheList(msgs) {   // 写进本机缓存的消息：只要服务器上已有的，最多 80 条；带上编辑时间/封面/@，重开后“已编辑”等标记不丢
+  return (msgs || []).filter(m => !m._st && !m._blob).slice(-80).map(m => ({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, created_at: m.created_at, edited_at: m.edited_at || null, cover: m.cover || null, mentions: m.mentions || null }));
+}
 function saveMsgsNow() {
   clearTimeout(saveMT);
   if (!S.uid || !S.conv) return;
-  const list = S.msgs.filter(m => !m._st && !m._blob).slice(-80).map(m => ({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, created_at: m.created_at }));
-  msgCacheSave(S.conv, list);
+  msgCacheSave(S.conv, cacheList(S.msgs));
 }
 let saveConv = null;
 function saveMsgsSoon() { clearTimeout(saveMT); saveConv = S.conv; saveMT = setTimeout(function () { if (saveConv && saveConv === S.conv) saveMsgsNow(); }, 700); }
@@ -839,38 +841,41 @@ function glGids(text) {
   let m; while ((m = re.exec(String(text || '')))) out.push(m[1].toLowerCase());
   return Array.from(new Set(out));
 }
-function glCardHTML(gid) {
-  if (GL.fail[gid] && Date.now() - GL.fail[gid] < 300000) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button></div>';
+function glFailed(gid) { return !!(GL.fail[gid] && Date.now() - GL.fail[gid] < 300000); }
+function glCardInner(gid) {   // 卡片里面的内容：失败 / 已取到 / 加载中，三种状态共用一套结构
+  if (glFailed(gid)) return '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button>';
   const i = GL.info[gid];
-  if (i) return '<div class="gl-card" data-gid="' + gid + '" data-done="1"><div class="gl-av">' + esc((i.name || '群').slice(0, 1)) + '</div><div class="gl-info"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div></div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button></div>';
-  return '<div class="gl-card" data-gid="' + gid + '"><div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div></div>';
+  if (i) return '<div class="gl-av">' + esc((i.name || '群').slice(0, 1)) + '</div><div class="gl-info"><div class="gl-name">' + esc(i.name || '群聊') + '</div><div class="gl-meta">' + (i.count || 0) + ' 人</div></div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (i.member ? '进入' : '加入') + '</button>';
+  return '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">加载中…</div></div>';
+}
+function glCardHTML(gid) {
+  const done = glFailed(gid) || !!GL.info[gid];
+  return '<div class="gl-card" data-gid="' + gid + '"' + (done ? ' data-done="1"' : '') + '>' + glCardInner(gid) + '</div>';
 }
 function fillGlCards(root) {
   if (!root || !sb) return;
   root.querySelectorAll('.gl-card[data-gid]').forEach(function (el) {
-    const gid = el.dataset.gid; if (!gid) return; if (el.dataset.done === '1' && el.querySelector('.gl-go')) return;
-    const paint = function (info) {
-      if (!info) {   // 取不到就定格，别再每帧重试（以前 30 秒能打 38 次，还把翻历史的人拽回底部）
-        GL.fail[gid] = Date.now(); delete GL.busy[gid]; el.dataset.done = '1';
-        el.innerHTML = '<div class="gl-av">群</div><div class="gl-info"><div class="gl-name">群聊</div><div class="gl-meta">信息没取到</div></div><button type="button" class="gl-retry btn-primary" data-gid="' + gid + '">重试</button>';
-        return;
-      }
-      el.dataset.member = info.member ? '1' : '';
-      el.innerHTML = '<div class="gl-name">' + esc(info.name || '群聊') + '</div><div class="gl-meta">' + (info.count || 0) + ' 人</div><button type="button" class="gl-go btn-primary" data-gid="' + gid + '">' + (info.member ? '进入' : '加入') + '</button>';
-      el.dataset.done = '1';
+    const gid = el.dataset.gid; if (!gid) return;
+    if (el.dataset.done === '1' && (el.querySelector('.gl-go') || glFailed(gid))) return;   // 已显示好 / 刚失败过：不再重复请求
+    // 画到「现在页面上」所有这个群的卡片：取信息期间聊天重绘过，旧的那张已经不在页面上了，只画它会让新卡片一直“加载中…”
+    const paint = function () {
+      const live = Array.from(document.querySelectorAll('#chat-messages .gl-card[data-gid="' + gid + '"]'));
+      if (live.indexOf(el) < 0) live.push(el);
+      const info = GL.info[gid];
+      live.forEach(function (c) { c.innerHTML = glCardInner(gid); c.dataset.done = '1'; c.dataset.member = info && info.member ? '1' : ''; });
     };
-    if (GL.info[gid]) { paint(GL.info[gid]); return; }
+    if (GL.info[gid]) { paint(); return; }
     if (GL.busy[gid]) return;
     GL.busy[gid] = 1;
     const load = function (tries) {
       sb.rpc('group_link_info', { p_gid: gid }).then(function (r) {
         const d = r && r.data;
-        if (d) { GL.info[gid] = d; delete GL.busy[gid]; paint(d); try { if (S.conv) chatRender(true); } catch (x) {} return; }
+        if (d) { GL.info[gid] = d; delete GL.fail[gid]; delete GL.busy[gid]; paint(); return; }
         if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
-        delete GL.busy[gid]; paint(null);
-      }, function (e) {
+        GL.fail[gid] = Date.now(); delete GL.busy[gid]; paint();
+      }, function () {
         if (tries > 0) { setTimeout(function () { load(tries - 1); }, 1200); return; }
-        delete GL.busy[gid]; paint(null);
+        GL.fail[gid] = Date.now(); delete GL.busy[gid]; paint();
       });
     };
     load(2);
@@ -1052,7 +1057,9 @@ function inAppBanner(m) {
     };
   } catch (e) {}
 }
-function onDbMsg(row, kind) {  const m = rowToMsg(row);
+function onDbMsg(row, kind) {
+  if (kind === 'upd' && row && row.edited_at && row.type === 'text' && row.from_acc !== ME()) { onEditedRow(row); return; }   // 对方改了消息：实时到达就提示
+  const m = rowToMsg(row);
   if (kind === 'ins') { if (m.from_acc !== ME()) onIncoming(m); }
   else if (S.conv === m.conv) upsertMsg(m);
 }
@@ -1770,7 +1777,7 @@ async function copyImageMsg(m) {
 function copyText(t) {  const done = () => { SFX.tap(); toast('已复制'); };
   try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, () => fb()); return; } } catch (e) {}
   fb();
-  function fb() { try { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;left:-999px;top:0;opacity:0'; document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length); document.execCommand('copy'); ta.remove(); done(); } catch (e) { toast('复制失败'); } }
+  function fb() { try { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;left:-999px;top:0;opacity:0'; document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length); const ok = document.execCommand('copy'); ta.remove(); if (ok) done(); else toast('复制失败，请长按手动复制'); } catch (e) { toast('复制失败，请长按手动复制'); } }
 }
 function menuAction(kind) {
   const id = menuId, m = S.msgs.find(x => x.id === id); closeMenu(); if (!m) return;
@@ -1899,7 +1906,8 @@ async function openConv(key, peer) {
 }
 function closeChat() {
   recAbort(); stopAudio();
-  var _ck = S.conv, _cms = (S.msgs || []).slice();
+  clearTimeout(saveMT);
+  var _ck = S.conv, _cms = cacheList(S.msgs);   // 先挑好（很快），真正写盘放到下一轮
   if (_ck) draftSave(_ck, $('chat-input') ? $('chat-input').value : '');
   closeSearch(); closeActs(); exitMulti();
   // 原来这里当场把整段聊天写进 IndexedDB：会话一长（200 条）就要卡几秒。现在页面先切走，写盘延后一帧。
@@ -1961,28 +1969,30 @@ async function editWatch() {   // 别人改了消息：不管你在不在那个�
   try {
     const { data, error } = await sb.from('messages').select('*').gt('edited_at', since).order('edited_at', { ascending: true }).limit(50);
     if (error || !data || !data.length) return;
-    data.forEach(function (row) {
-      if (!row || row.from_acc === ME()) return;          // 自己改的不提醒自己
-      const sig = String(row.id) + '@' + String(row.edited_at);   // 同一条同一次编辑只提示一次（窗口重叠会重复查到）
-      if (editSeen.has(sig)) return;
-      editSeen.add(sig); try { LS.set('ch2eds:' + (S.uid || ''), Array.from(editSeen).slice(-200)); } catch (e) {}
-      if (editSeen.size > 300) editSeen.delete(editSeen.values().next().value);
-      const key = row.conv_key;
-      if (key === S.conv) {                               // 正看着这个会话：就地更新 + 闪一下
-        const id = String(row.id), m = S.msgs.find(function (x) { return x.id === id; });
-        if (m) {
-          m.body = row.body; m.edited_at = row.edited_at;
-          try { chatRender(S.stick); } catch (e) {}
-          try { const el = msgElOf(id); if (el) { el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } } catch (e) {}
-        }
-        return;
-      }
-      const m = rowToMsg(row);
-      const c0 = convOf(key); const latest = !c0 || (Date.parse(row.created_at) >= Date.parse(c0.last_ts || 0));
-      if (latest) touchConv(key, '（已编辑）' + previewOf(m), row.created_at, false);   // 只有改的是最新一条才动预览，否则会把最新消息顶掉
-      if (!isMuted(key)) { try { inAppBanner(m); } catch (e) {} try { SFX.recv(false); } catch (e) {} }
-    });
+    data.forEach(onEditedRow);
   } catch (e) {}
+}
+function onEditedRow(row) {   // 一条“别人改过的消息”：轮询查到的、实时通道推来的都走这里，用 id@编辑时间 去重，只提示一次
+  if (!row || row.from_acc === ME() || !row.edited_at || row.type !== 'text') return;
+  const sig = String(row.id) + '@' + String(row.edited_at);
+  if (editSeen.has(sig)) return;
+  editSeen.add(sig);
+  if (editSeen.size > 300) editSeen.delete(editSeen.values().next().value);
+  try { LS.set('ch2eds:' + (S.uid || ''), Array.from(editSeen).slice(-200)); } catch (e) {}
+  const key = row.conv_key;
+  if (key === S.conv) {                               // 正看着这个会话：就地更新 + 闪一下
+    const id = String(row.id), m = S.msgs.find(function (x) { return x.id === id; });
+    if (m) {
+      m.body = row.body; m.edited_at = row.edited_at;
+      try { chatRender(S.stick); } catch (e) {}
+      try { const el = msgElOf(id); if (el) { el.classList.add('just-edited'); setTimeout(function () { try { el.classList.remove('just-edited'); } catch (e) {} }, 2200); } } catch (e) {}
+    }
+    return;
+  }
+  const m = rowToMsg(row);
+  const c0 = convOf(key); const latest = !c0 || (Date.parse(row.created_at) >= Date.parse(c0.last_ts || 0));
+  if (latest) touchConv(key, '（已编辑）' + previewOf(m), row.created_at, false);   // 只有改的是最新一条才动预览，否则会把最新消息顶掉
+  if (!isMuted(key)) { try { inAppBanner(m); } catch (e) {} if (!nightOnAt(new Date())) { try { SFX.recv(false); } catch (e) {} } }   // 免打扰时段不响
 }
 async function loadOlder() {
   if (S.loadingOlder || !S.hasMore || !S.conv || !S.msgs.length) return;
@@ -3085,7 +3095,12 @@ function handleMsgRows(rows, base) {
     if (pollTypes.get(m.id) === m.type) return;
     pollTypes.set(m.id, m.type); if (pollTypes.size > 500) pollTypes.delete(pollTypes.keys().next().value);
     if (base && t <= base) { S.seen.add(m.id); return; }   // 第一次：会话列表里已有的消息，只登记、不当新消息提醒
-    if (m.from_acc === ME()) return;   // 自己发的（本机或另一台设备）不算新消息：不弹横幅、不响铃、不加未读
+    if (m.from_acc === ME()) {   // 自己发的（本机或另一台设备）不算新消息：不弹横幅、不响铃、不加未读；但要显示出来
+      if (S.conv === m.conv) { const ex = S.msgs.find(function (x) { return x.id === m.id; }); if (!ex || (m.type === 'recalled' && ex.type !== 'recalled')) upsertMsg(m); }
+      const c0 = convOf(m.conv);
+      if (!c0 || t > (Date.parse(c0.last_ts || 0) || 0)) touchConv(m.conv, previewOf(m), m.created_at, false);   // 只有比列表里那条新才改预览
+      return;
+    }
     if (m.type === 'recalled' && S.seen.has(m.id)) { if (S.conv === m.conv) upsertMsg(m); return; }
     onIncoming(m);
   });
@@ -3146,7 +3161,7 @@ function startTimers() {
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
     retryFailed();
     if (S.conv && n % 3 === 0) syncEdited();
-    if (n % 2 === 0) editWatch();                                  // 别人改了消息（6 秒一次；3 秒太费请求）：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
+    if (n % 2 === 0 && (!S.rt.db || n % 4 === 0)) editWatch();     // 别人改了消息：实时正常 12 秒一次，实时断了 6 秒一次：每 3 秒查一次，列表和横幅都能看到（查询很轻，只取 edited_at 变过的几行）
     if (S.conv && !isGroupKey(S.conv) && n % 5 === 0) fetchPeerRead(S.conv);
   }, 3000);
 }
@@ -3162,6 +3177,7 @@ function teardown() {
   S.incoming = null; hideCallUI(); $('incoming-ui').classList.remove('active');
   recAbort(); stopAudio();
   document.body.classList.remove('chat-open');
+  S.bootInited = false; editWatchAt = 0;
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
   S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
@@ -4143,7 +4159,9 @@ function openGroupSettings(gid) {
     if (t) { copyText(location.origin + location.pathname + '#g=' + gid + '&k=' + t); return; }   // 有缓存就同步复制：Safari 要求点击当下就写剪贴板
     sb.rpc('ensure_group_link', { p_gid: gid }).then(function (r) {
       const tt = r && r.data; GL.link[gid] = tt;
-      copyText(location.origin + location.pathname + '#g=' + gid + (tt ? ('&k=' + tt) : ''));
+      const lk = location.origin + location.pathname + '#g=' + gid + (tt ? ('&k=' + tt) : '');
+      copyText(lk);
+      openForm('邀请链接', [{ ph: '邀请链接', val: lk, max: 400, hint: 'iPhone 如果提示复制失败，长按上面的链接手动复制' }], function () { return ''; }, '关闭');
     }, function () { toast('生成链接失败，检查网络'); });
   } });
   if (!items.length) { toast('这里还没有可设置的'); return; }
@@ -6412,7 +6430,11 @@ function bindUI() {
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
     const rt = e.target.closest('.gl-retry');
-    if (rt) { const gid = rt.dataset.gid; delete GL.fail[gid]; delete GL.busy[gid]; try { if (S.conv) chatRender(true); } catch (x) {} if (S.conv) setTimeout(function () { fillGlCards(box); }, 50); return; }
+    if (rt) {   // 点“重试”：只把这个群的卡片改回加载中再取一次，不整页重绘（以前会把翻历史的人拽回底部）
+      const gid = rt.dataset.gid; delete GL.fail[gid]; delete GL.busy[gid];
+      box.querySelectorAll('.gl-card[data-gid="' + gid + '"]').forEach(function (c) { c.dataset.done = ''; c.innerHTML = glCardInner(gid); });
+      fillGlCards(box); return;
+    }
     const b = e.target.closest('.gl-go'); if (!b) return;
     const gid = b.dataset.gid; if (!gid) return;
     const info = GL.info[gid];
