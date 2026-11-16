@@ -278,6 +278,7 @@ const peerName = a => {
 };
 const avatarOf = a => (S.profiles[a] && S.profiles[a].avatar_url) || '';
 const isOnline = a => S.online.has(a) || (S.fbOnline && S.fbOnline.has(a));
+const peerActiveAt = {};   // 好友最近一次“确实在看和我的聊天”的时间（服务器确认的已读）
 const convOf = k => S.convs.find(c => c.convKey === k);
 
 /* ================= 本地缓存（秒开的关键）================= */
@@ -478,14 +479,14 @@ function renderList() {
   const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   const gh = '';
   if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
-  el.innerHTML = gh + shown.map(c => {
+  patchKids(el, shown.map(c => ({ k: 'c:' + c.convKey, h: (function () {
     const selfConv = c.convKey === SELF_KEY();
     const name = selfConv ? (nickOf(ME()) || '我') : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
     const at = c.convKey !== S.conv && atMeOf(c.convKey);
     return '<div class="conv-item' + (isPinned(c.convKey) ? ' pinned' : '') + (gp ? ' grp' : '') + '" data-key="' + esc(c.convKey) + '" data-peer="' + esc(c.peer_acc) + '">' + avatarHTML(selfConv ? (nickOf(ME()) || '我') : (gp ? name : nickOf(c.peer_acc)), selfConv ? avatarOf(ME()) : (gp ? ((gg && gg.avatar_url) || '') : avatarOf(c.peer_acc)), gp ? false : (selfConv ? false : isOnline(c.peer_acc)), c.peer_acc) +
       '<div class="conv-main"><div class="conv-top"><span class="conv-name">' + esc(name) + (gp ? '<span class="grp-mark">群</span>' : '') + (mu ? '<svg class="mute-ic" viewBox="0 0 24 24" aria-label="免打扰"><path d="M6 16.5h12l-1.6-2.2V10a4.4 4.4 0 0 0-8.8 0v4.3zM10.2 19.2a2 2 0 0 0 3.6 0M4 4l16 16"/></svg>' : '') + '</span><span class="conv-time">' + fmtListTime(c.last_ts) + '</span></div>' +
       '<div class="conv-sub"><span class="preview">' + (draftOf(c.convKey) && c.convKey !== S.conv ? '<span class="draft">[草稿] </span>' + esc(draftOf(c.convKey).slice(0, 60)) : (at ? '<span class="at-tag">[有人@你] </span>' : '') + esc(String(selfConv && !c.last_body ? '点这里写点什么' : convPreview(c)).slice(0, 120))) + '</span>' + ((un || at) ? '<span class="badge' + (at ? ' at' : (mu ? ' mute' : '')) + '">' + (at ? '@' : (un > 99 ? '99+' : un)) + '</span>' : '') + '</div></div>' + '</div>';
-  }).join('');
+  })() })));
 }
 function renderContacts() {
   const el = $('friend-list');
@@ -617,7 +618,7 @@ async function fetchPeerRead(conv) {
     const { data, error } = await sb.rpc('peer_read', { p_conv: conv });
     if (error) { if (isMissingFn(error)) S.noPR = true; return; }
     const t = data ? Date.parse(data) : 0;
-    if (t > 0 && t > peerReadOf(conv)) { S.peerRead[conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); if (S.conv === conv) refreshReads(); }
+    if (t > 0 && t > peerReadOf(conv)) { S.peerRead[conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); if (S.conv === conv) refreshReads(); if (Date.now() - t < 60000) peerActiveAt[peerOf(conv, ME())] = now(); }   // 服务器确认对方刚读过：说明人就在这个聊天里
   } catch (e) { logErr('peerRead', e); }
 }
 function markReadSoon(key) {
@@ -942,6 +943,55 @@ function dayLabel(t) {
   if (d.getFullYear() === n.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日';
   return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
 }
+/* ---- 只改变化的部分（不闪）：以前每次刷新都把整片 innerHTML 重写，所有气泡重新弹一遍动画、图片头像重新解码，看起来就是“闪一下” ---- */
+const _tpl = document.createElement('template');
+function sameImgSrc(a, b) { return String(a || '').replace(/[?&]r=\d+$/, '') === String(b || ''); }
+function morphEl(a, b) {   // 把旧节点 a 改成新节点 b 的样子，能留的节点都留着（图片不重新加载）
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(b); return b; }
+  if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return a; }
+  if (a.nodeType !== 1) return a;
+  if (a.classList.contains('playing') && a.classList.contains('video')) return a;   // 正在播放的视频别动
+  const ba = b.attributes;
+  for (let i = 0; i < ba.length; i++) {
+    const n = ba[i].name, v = ba[i].value, o = a.getAttribute(n);
+    if (o === v) continue;
+    if (n === 'src' && a.nodeName === 'IMG' && sameImgSrc(o, v)) continue;   // 自动重试过的图片地址（带 r=）算同一张
+    a.setAttribute(n, v);
+  }
+  const aa = Array.from(a.attributes);
+  for (let i = 0; i < aa.length; i++) { const n = aa[i].name; if (!b.hasAttribute(n) && n !== 'data-rty' && n !== 'data-member') a.removeAttribute(n); }
+  let ac = a.firstChild, bc = b.firstChild;
+  while (bc) {
+    const nb = bc.nextSibling;
+    if (!ac) a.appendChild(bc); else { const na = ac.nextSibling; morphEl(ac, bc); ac = na; }
+    bc = nb;
+  }
+  while (ac) { const na = ac.nextSibling; a.removeChild(ac); ac = na; }
+  return a;
+}
+function patchKids(box, items) {   // items: [{k: 唯一键, h: 这一项的 HTML（一个元素）}]
+  const kids = Array.from(box.children);
+  if (!kids.length || !kids.every(function (el) { return el._k; })) {   // 第一次画 / 里面是“加载中”之类的占位：直接整片写
+    box.innerHTML = items.map(function (x) { return x.h; }).join('');
+    const nk = box.children; for (let i = 0; i < nk.length && i < items.length; i++) { nk[i]._k = items[i].k; nk[i]._h = items[i].h; }
+    return;
+  }
+  const old = new Map(); kids.forEach(function (el) { if (!old.has(el._k)) old.set(el._k, el); });
+  const used = new Set();
+  let ref = box.firstElementChild;
+  items.forEach(function (it) {
+    let el = old.get(it.k); if (el && used.has(el)) el = null;
+    if (!el || el._h !== it.h) {
+      _tpl.innerHTML = it.h; const nb = _tpl.content.firstElementChild;
+      if (!nb) return;
+      if (el && el.nodeName === nb.nodeName) el = morphEl(el, nb); else el = nb;
+      el._k = it.k; el._h = it.h;
+    }
+    used.add(el);
+    if (el === ref) ref = ref.nextElementSibling; else box.insertBefore(el, ref);
+  });
+  kids.forEach(function (el) { if (!used.has(el) && el.parentNode === box) el.remove(); });
+}
 function chatRender(stick) {
   const b = $('chat-messages');
   const vis = S.msgs.filter(m => !isHidden(m));
@@ -949,12 +999,13 @@ function chatRender(stick) {
   const limit = Math.min(S.renderLimit || 200, vis.length);
   const shown = vis.slice(vis.length - limit);   // 只渲染最近 N 条，往上翻再扩，几百条也不卡
   let prevDay = '';
-  b.innerHTML = shown.map(function (m) {
+  const items = [];
+  shown.forEach(function (m) {
     const day = new Date(m.created_at).toDateString();
-    let sep = '';
-    if (day !== prevDay) { prevDay = day; sep = '<div class="day-sep"><span>' + dayLabel(m.created_at) + '</span></div>'; }
-    return sep + msgHTML(m);
-  }).join('');
+    if (day !== prevDay) { prevDay = day; items.push({ k: 'd:' + day, h: '<div class="day-sep"><span>' + dayLabel(m.created_at) + '</span></div>' }); }
+    items.push({ k: 'm:' + m.id, h: msgHTML(m) });
+  });
+  patchKids(b, items);
   S.rendered = shown.length;
   fillGlCards(b);
   setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
@@ -963,7 +1014,9 @@ function chatRender(stick) {
 function chatAppend(m, force) {
   if (isHidden(m)) return;
   const b = $('chat-messages'), e = b.querySelector('.empty'); if (e) e.remove();
-  b.insertAdjacentHTML('beforeend', msgHTML(m));
+  const h = msgHTML(m);
+  b.insertAdjacentHTML('beforeend', h);
+  const nel = b.lastElementChild; if (nel) { nel._k = 'm:' + m.id; nel._h = h; nel.classList.add('new'); }   // 只有新来的这条弹一下
   fillGlCards(b);
   setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
   if (force || S.stick) b.scrollTop = b.scrollHeight;
@@ -973,7 +1026,9 @@ function chatReplace(m) {
   if (isHidden(m)) return;
   const el = msgElOf(m.id);
   if (!el) { chatRender(S.stick); return; }
-  el.outerHTML = msgHTML(m);
+  const h = msgHTML(m); if (el._h === h) return;
+  _tpl.innerHTML = h; const nb = _tpl.content.firstElementChild; if (!nb) return;
+  const ne = morphEl(el, nb); ne._k = 'm:' + m.id; ne._h = h;   // 就地改，不整条换掉（图片不重新加载）
 }
 function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
@@ -3037,6 +3092,7 @@ function startRealtime() {
         if (st === 'CHANNEL_ERROR' && /unauthori|permission|denied|policy|not allowed/i.test(why)) showBanner('实时通道没有权限：请重新执行最新的 setup.sql（含 realtime.messages 策略）');
       }
     });
+  S.chGrpSig = ''; try { startGrpRealtime(); } catch (e) {}
 }
 const rtFailSeen = {};
 function rtFailLog(tag, e) { if (rtFailSeen[tag]) return; rtFailSeen[tag] = 1; logErr(tag, (e && (e.message || e)) || e); }   // 国内网络会反复失败：只记一次，避免刷屏
@@ -3155,7 +3211,8 @@ function startTimers() {
     const lp = !S.noInbox;                                         // 国内模式的长轮询在工作：新消息已经即时到达，补漏校对放慢到 18 秒
     if (S.rt.db && S.rt.user ? n % 5 === 0 : (!lp || n % 3 === 0)) resync();   // 实时正常：每 15 秒校对一次；异常：3 秒（长轮询时 9 秒）
     if (S.conv && !S.rt.db && (!lp || n % 3 === 0)) syncChat();   // 实时断开时才兜底；正常时群聊由 pollConv（8 秒增量）负责
-    if (S.rt.db ? (n % 2 === 0) : S.noInbox) grpPoll();            // 实时正常 6 秒一次；实时断了且有长轮询（它已经带群消息）就不重复轮
+    if (S.rt.db ? (n % (S.rt.grp ? 5 : 2) === 0) : S.noInbox) grpPoll();   // 群消息实时通道正常：15 秒兜底一次；只有主通道：6 秒；国内模式长轮询已经带群消息就不重复轮
+    if (n % 40 === 0) momentNotifyCheck();                         // 朋友圈的赞、评论、@：App 开着时 2 分钟查一次（以前只有打开 App / 切到朋友圈才查）
     if (n % 2 === 0) grpInvitesLoad();                            // 群邀请：6 秒查一次（没开推送也能较快看到）
     if (n % 5 === 0 && S.conv && isGroupKey(S.conv)) grpOpenMeta(S.conv);   // 群人数/成员变化：15 秒一次
     if (n % 10 === 0) grpLoad();                                   // 群名/成员有变化时刷新
@@ -3169,8 +3226,8 @@ function teardown() {
   S.started = false;
   clearInterval(S.tm); clearTimeout(resyncT); clearTimeout(S.incTimer); fbStop(); if (S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } lastPr = null;
   S.rtGen++; S.presGen++;
-  [S.chDb, S.chUser, S.presCh].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
-  S.chDb = S.chUser = S.presCh = null; S.rt.db = S.rt.user = false;
+  [S.chDb, S.chUser, S.presCh, S.chGrp].forEach(c => { if (c && sb) { try { sb.removeChannel(c); } catch (e) {} } });
+  S.chDb = S.chUser = S.presCh = S.chGrp = null; S.chGrpSig = ''; S.rt.db = S.rt.user = S.rt.grp = false;
   wakeOff(); SFX.stopAll(); SFX.hold(false);
   if (S.call) { const c = S.call; S.call = null; c.ended = true; clearTimers(c); clearInterval(c.clock); clearInterval(c.statsT); try { c.pc && c.pc.close(); } catch (e) {} stopStream(c.local); stopStream(c.remote); }
   if (GC.on) gcEnd();   // 退出登录：人先离开语音，别把房间卡住
@@ -3649,6 +3706,7 @@ async function grpLoad(force) {
       } catch (e) {}
     }
     GRP.list = list; grpCacheSave();
+    try { startGrpRealtime(); } catch (e) {}   // 群变了（新进群/退群）：重新订阅
     const set = new Set(ids);
     const keep = S.convs.filter(function (c) { return !isGroupKey(c.convKey) || set.has(gidOf(c.convKey)); });
     if (keep.length !== S.convs.length) S.convs = keep;
@@ -4287,20 +4345,42 @@ async function grpPoll() {
       .order('created_at', { ascending: true }).limit(200);
     if (error) throw error;
     let fresh = 0;
-    (data || []).forEach(function (r) {
-      const m = rowToMsg(r), t = Date.parse(m.created_at) || 0;
-      if (GRP.done.has(m.id)) return;
-      GRP.done.add(m.id); if (GRP.done.size > 1600) GRP.done = new Set(Array.from(GRP.done).slice(-800));
-      const cur = GRP.cursor[m.conv] || 0;
-      if (t && t <= cur) return;                          // 打开 App 前就有的消息：不当作新消息
-      if (t > cur) GRP.cursor[m.conv] = t;
-      if (m.from_acc === ME()) { if (S.conv === m.conv && !S.msgs.some(function (x) { return x.id === m.id; })) upsertMsg(m); return; }
-      if (S.conv === m.conv && S.msgs.some(function (x) { return x.id === m.id; })) return;
-      fresh++;
-      onIncoming(m, true);                                // 未读数交给数据库的会话行，避免重复 +1
-    });
+    (data || []).forEach(function (r) { if (grpRow(r)) fresh++; });
     if (fresh) resyncSoon();
   } catch (e) { logErr('grpPoll', e); }
+}
+function grpRow(r) {   // 一条群消息：轮询查到的、实时通道推来的都走这里（GRP.done 去重）；返回 true = 是别人发的新消息
+  const m = rowToMsg(r), t = Date.parse(m.created_at) || 0;
+  if (GRP.done.has(m.id)) return false;
+  GRP.done.add(m.id); if (GRP.done.size > 1600) GRP.done = new Set(Array.from(GRP.done).slice(-800));
+  const cur = GRP.cursor[m.conv] || 0;
+  if (t && t <= cur) return false;                    // 打开 App 前就有的消息：不当作新消息
+  if (t > cur) GRP.cursor[m.conv] = t;
+  if (m.from_acc === ME()) { if (S.conv === m.conv && !S.msgs.some(function (x) { return x.id === m.id; })) upsertMsg(m); return false; }
+  if (S.conv === m.conv && S.msgs.some(function (x) { return x.id === m.id; })) return false;
+  onIncoming(m, true);                                // 未读数交给数据库的会话行，避免重复 +1
+  return true;
+}
+let grpRtN = 0;
+function startGrpRealtime() {   // 订阅“我所在的群”的新消息；连不上也没关系，轮询照样兜底
+  if (!sb || !S.me) return;
+  const keys = (GRP.list || []).map(function (g) { return 'g:' + g.id; }).filter(function (k) { return /^g:[0-9a-f-]{36}$/i.test(k); }).sort().slice(0, 100);
+  const sig = keys.join(',');
+  if (S.chGrp && S.chGrpSig === sig) return;
+  if (S.chGrp) { try { sb.removeChannel(S.chGrp); } catch (e) {} S.chGrp = null; }
+  S.chGrpSig = sig; S.rt.grp = false;
+  if (!keys.length) return;
+  const gen = S.rtGen, filt = 'conv_key=in.(' + keys.join(',') + ')';
+  S.chGrp = sb.channel('grp-' + ME() + '-' + (++grpRtN))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: filt }, function (p) { try { grpRow(p.new); } catch (e) { logErr('grp-ins', e); } })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: filt }, function (p) {
+      try { const r = p.new; if (!r) return; if (r.edited_at && r.type === 'text' && r.from_acc !== ME()) onEditedRow(r); else if (S.conv === r.conv_key) upsertMsg(rowToMsg(r)); } catch (e) { logErr('grp-upd', e); }
+    })
+    .subscribe(function (st, err) {
+      if (gen !== S.rtGen) return;
+      S.rt.grp = st === 'SUBSCRIBED';
+      if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') rtFailLog('rt-grp', err || st);
+    });
 }
 /* ================= 朋友圈 ================= */
 const MV = {};
@@ -4406,7 +4486,9 @@ function momentCardHTML(m, i) {
 function renderMoments() {
   const el = $('moment-list'); if (!el) return;
   if (!MO.list.length) { el.innerHTML = emptyHTML('还没有朋友圈<br>点右上角发一条'); $('moment-more').style.display = 'none'; return; }
-  el.innerHTML = MO.list.map(momentCardHTML).join('') + (!MO.has ? '<div class="mo-end">— 就这些了 —</div>' : '');
+  const items = MO.list.map(function (m, i) { return { k: 'mo:' + m.id, h: momentCardHTML(m, i) }; });
+  if (!MO.has) items.push({ k: 'mo-end', h: '<div class="mo-end">— 就这些了 —</div>' });
+  patchKids(el, items);   // 只改变化的卡片：不再每次刷新都把所有卡片的入场动画重播一遍
   $('moment-more').style.display = MO.has ? '' : 'none';
 }
 function paintMomentsHead() {
@@ -6007,12 +6089,29 @@ function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求�
   if (m && m.to_acc === ME()) return;   // 自己给自己（备忘）不用推
   if (!m || m.type === 'call' || m.type === 'recalled' || pushBlocked()) return;
   const gp = isGroupKey(m.conv);
-  if (!gp && isOnline(m.to_acc)) return;
+  // 以前：本机觉得对方“在线”就不推。可这个“在线”可能是几十秒前的旧消息（国内模式 40 秒才刷新一次，
+  // 对方刚切到后台也还算在线）→ 这条消息永远没有通知。现在交给服务器判断，只有对方 20 秒内刚读过这个聊天才确定不用推。
+  if (!gp && now() - (peerActiveAt[m.to_acc] || 0) < 20000) return;
   const key = gp ? m.conv : m.to_acc;
   const q = PUSH.q[key] || (PUSH.q[key] = {});
   q.kind = gp ? 'gmsg' : 'msg'; q.to = key; q.ref = m.id;
   clearTimeout(q.t);
-  q.t = setTimeout(() => { delete PUSH.q[key]; firePush(q.kind, q.to, q.ref); }, 300);
+  q.t = setTimeout(() => { delete PUSH.q[key]; firePushRetry(q.kind, q.to, q.ref, m); }, 300);
+}
+function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”就先不推；对方其实刚离开的话，30 秒、80 秒后再问一次（已读了就不推）
+  firePush(kind, to, ref).then(function (j) {
+    if (!j || j.skip !== 'online') return;
+    let n = 0;
+    const again = function () {
+      n++; if (n > 2) return;
+      setTimeout(function () {
+        if (!S.me || pushBlocked()) return;
+        if (m && !isGroupKey(m.conv) && (isRead(m) || now() - (peerActiveAt[to] || 0) < 20000)) return;
+        firePush(kind, to, ref).then(function (j2) { if (j2 && j2.skip === 'online') again(); });
+      }, n === 1 ? 30000 : 50000);
+    };
+    again();
+  });
 }
 function flushPush() {   // 发完消息马上切走 App：等不了 1.2 秒，立刻把还没发出的推送请求发掉（手机切到后台后几秒内还能发请求）
   Object.keys(PUSH.q).forEach(k => { const q = PUSH.q[k]; clearTimeout(q.t); delete PUSH.q[k]; firePush(q.kind || 'msg', q.to || k, q.ref); });
