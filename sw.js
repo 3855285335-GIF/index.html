@@ -1,13 +1,72 @@
-/* Chatter 的后台小助手（service worker）：只做两件事——收到推送时弹通知、点通知时打开对应的聊天。
-   不缓存任何页面（以前那种“先给缓存、后台更新”的做法会让新版本要打开两次才生效，这里不用），
-   所以它不会影响网页更新。构建时会把下面的版本号换成当前 build。 */
-const SW_BUILD = '4.0';
+/* Chatter 的后台小助手（service worker）：
+   1) 收到推送时弹通知、点通知打开对应的聊天；
+   2) 加速打开：带版本号的程序文件（app.js?v=…）和依赖库存在手机里，第二次打开不用再下载；
+      页面本身先联网取，2.5 秒取不到才用手机里存的（所以新版本照样第一次打开就生效，网不好时也能秒开）；
+   3) 聊天和朋友圈的图片存在手机里（最多 300 张），看过的图再打开不用重新下载。 */
+const SW_BUILD = '4.1';
+const SHELL = 'chatter-shell-v1', IMG = 'chatter-img-v1', IMG_MAX = 300;
+const IMG_PREFIX = 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
-  try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (x) {}   // 清掉旧版本可能留下的页面缓存
+  try { const ks = await caches.keys(); await Promise.all(ks.filter(k => k !== SHELL && k !== IMG).map(k => caches.delete(k))); } catch (x) {}   // 只清旧版本留下的缓存
   await self.clients.claim();
 })()));
+
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = req.url;
+  if (url.indexOf(IMG_PREFIX) === 0) {   // 图片（不碰视频/语音：它们要分段加载）
+    if (req.destination === 'image' && !req.headers.get('range')) e.respondWith(imgFirst(req));
+    return;
+  }
+  let u; try { u = new URL(url); } catch (x) { return; }
+  if (u.origin !== self.location.origin) return;
+  const scope = new URL(self.registration.scope);
+  if (u.pathname.indexOf(scope.pathname) !== 0 || u.pathname.indexOf('/review/') >= 0) return;
+  if (req.mode === 'navigate') { e.respondWith(pageFirst(req, u)); return; }
+  if (u.searchParams.has('retry')) return;
+  if (u.searchParams.has('v') || u.pathname.indexOf('/vendor/') >= 0) e.respondWith(keepFirst(req));
+});
+
+async function pageFirst(req, u) {   // 页面：联网优先；2.5 秒没回来、或者断网，就先用存着的
+  const c = await caches.open(SHELL);
+  const key = u.origin + u.pathname;
+  const net = fetch(req).then(r => { if (r && r.ok) { try { c.put(key, r.clone()); } catch (x) {} } return r; });
+  const saved = await c.match(key);
+  if (!saved) return net;
+  return Promise.race([
+    net.then(r => (r && r.ok) ? r : saved, () => saved),
+    new Promise(res => setTimeout(() => res(saved), 2500))
+  ]);
+}
+async function keepFirst(req) {   // 带版本号的文件内容不会变：有就直接用
+  const c = await caches.open(SHELL);
+  const hit = await c.match(req);
+  if (hit) return hit;
+  const r = await fetch(req);
+  if (r && r.ok) { try { await c.put(req, r.clone()); } catch (x) {} }
+  return r;
+}
+let imgPuts = 0;
+async function imgFirst(req) {
+  const c = await caches.open(IMG);
+  const key = req.url.replace(/[?&]r=\d+$/, '');
+  const hit = await c.match(key);
+  if (hit) return hit;
+  let r;
+  try { r = await fetch(req.url, { mode: 'cors', credentials: 'omit' }); }
+  catch (x) { return fetch(req); }   // 跨域取不了就按原样取（不存）
+  if (r && r.ok) {
+    try { await c.put(key, r.clone()); } catch (x) {}
+    if (++imgPuts % 20 === 0) trimImgs(c);
+  }
+  return r;
+}
+async function trimImgs(c) {   // 超过 300 张就删最早存的
+  try { const ks = await c.keys(); for (let i = 0; i < ks.length - IMG_MAX; i++) await c.delete(ks[i]); } catch (x) {}
+}
 
 function readPush(e) {
   if (!e.data) return {};
