@@ -6,7 +6,7 @@ const ROOT = process.argv[2] || path.resolve(__dirname, '..');
 const SHOTS = process.argv[3] || fs.mkdtempSync(path.join(os.tmpdir(), 'chatter-shots-'));
 let mode = 'ok', navs = 0;
 const CUR = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), CURV = /app\.js\?v=([\w.-]+)/.exec(CUR)[1];
-const NEW = CUR.split(CURV).join('20261118d9');
+const NEW = CUR.split(CURV).join('20991231a1');
 const srv = http.createServer((q, r) => {
   const u = new URL(q.url, 'http://x'); let f = u.pathname === '/' ? '/index.html' : u.pathname;
   const nav = q.headers['sec-fetch-mode'] === 'navigate';
@@ -97,8 +97,8 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   await pg.waitForURL(/\?v=\d{10,}/, { timeout: 9000 }).catch(() => {});
   const toasted = await pg.waitForFunction(() => document.body && document.body.innerText.indexOf('已更新到新版本') >= 0, null, { timeout: 6000 }).then(() => true, () => false);
   await pg.waitForTimeout(500);
-  let u9 = await pg.evaluate(async () => ({ v: __chUpd.v(), url: location.search, cached: !!(await caches.open('chatter-shell-v1').then(c => c.match(location.origin + location.pathname)).then(r => r && r.text()).then(t => t && t.indexOf('20261118d9') > 0)), ver: (document.getElementById('app-ver') || {}).textContent }));
-  ok(u9.v === '20261118d9' && navs === 1 && u9.cached && toasted && /d9/.test(u9.ver), '自动更新：刚打开发现新版，自动换上一次并提示 ' + JSON.stringify(u9) + ' 重开次数=' + navs);
+  let u9 = await pg.evaluate(async () => ({ v: __chUpd.v(), url: location.search, cached: !!(await caches.open('chatter-shell-v1').then(c => c.match(location.origin + location.pathname)).then(r => r && r.text()).then(t => t && t.indexOf('20991231a1') > 0)), ver: (document.getElementById('app-ver') || {}).textContent }));
+  ok(u9.v === '20991231a1' && navs === 1 && u9.cached && toasted && /20991231a1/.test(u9.ver), '自动更新：刚打开发现新版，自动换上一次并提示 ' + JSON.stringify(u9) + ' 重开次数=' + navs);
   // 10 网络那头一直给旧页面：最多换两次，不会无限刷新
   await pg.evaluate(() => localStorage.removeItem('ch2updTry'));
   mode = 'stale'; navs = 0; await pg.goto('http://localhost:8766/?v=7'); navs = 0;
@@ -114,7 +114,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   await pg.evaluate(() => { __chUpd.link('#c=abc'); document.dispatchEvent(new Event('visibilitychange')); });
   await pg.waitForTimeout(3500); pg.off('framenavigated', onNav);
   const u11 = await pg.evaluate(() => ({ v: __chUpd.v(), url: location.search })); u11.hash = (urls.find(x => /#/.test(x)) || '').replace(/^[^#]*/, '');
-  ok(n11a === 0 && p11 === '20261118d9' && navs === 1 && u11.v === '20261118d9' && u11.hash === '#c=abc', '正在用时发现新版：当时不刷新，回到前台才换（并带上刚点的通知 ' + u11.hash + '）' + JSON.stringify(u11));
+  ok(n11a === 0 && p11 === '20991231a1' && navs === 1 && u11.v === '20991231a1' && u11.hash === '#c=abc', '正在用时发现新版：当时不刷新，回到前台才换（并带上刚点的通知 ' + u11.hash + '）' + JSON.stringify(u11));
   // 12 手动检查：已经是最新
   mode = 'newver'; await pg.waitForTimeout(8000); await pg.evaluate(() => { __chUpd.check('manual'); });
   const t12 = await pg.waitForFunction(() => document.body.innerText.indexOf('已经是最新版本') >= 0, null, { timeout: 4000 }).then(() => true, () => false);
@@ -139,11 +139,25 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
     await p2.evaluate(() => __chUpd.check('manual'));
     const told = await p2.waitForFunction(() => document.body.innerText.indexOf('发现新版本') >= 0, null, { timeout: 4000 }).then(() => true, () => false);
     await p2.waitForURL(/\?v=\d{10,}/, { timeout: 6000 }).catch(() => {});
-    const done = await p2.waitForFunction(() => document.body.innerText.indexOf('已更新到新版本（20261118d9）') >= 0, null, { timeout: 6000 }).then(() => true, () => false);
+    const done = await p2.waitForFunction(() => document.body.innerText.indexOf('已更新到新版本（20991231a1）') >= 0, null, { timeout: 6000 }).then(() => true, () => false);
     const tab = await p2.evaluate(() => { const b = document.querySelector('.app-nav button.active'); return b && b.dataset.tab; });
     const ver1 = await p2.evaluate(() => document.getElementById('app-ver').textContent);
-    ok(/版本 20261118d\d/.test(ver0) && told && done && tab === 'me' && /d9/.test(ver1), '在“我”页手动更新：先提示、换完回到“我”页、提示已更新到哪个版本 ' + JSON.stringify({ ver0, told, done, tab, ver1 }));
+    ok(/版本 20261118d\d/.test(ver0) && told && done && tab === 'me' && /20991231a1/.test(ver1), '在“我”页手动更新：先提示、换完回到“我”页、提示已更新到哪个版本 ' + JSON.stringify({ ver0, told, done, tab, ver1 }));
     await ctx2.close();
+  }
+  // 14 不是由程序自己换的新版（比如彻底关掉重开时拿到了新页面）：打开后也提示一次“已更新到新版本”，再打开不重复提示
+  {
+    const ctx3 = await br.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    await ctx3.route(/supabase\.co/, r => r.abort());
+    const p3 = await ctx3.newPage();
+    mode = 'ok'; await p3.goto('http://localhost:8766/?v=30'); await p3.waitForTimeout(1500);
+    mode = 'newver'; await p3.evaluate(() => localStorage.removeItem('ch2updTry'));
+    await p3.goto('http://localhost:8766/?v=31');
+    const t1 = await p3.waitForFunction(() => document.body.innerText.indexOf('已更新到新版本（20991231a1）') >= 0, null, { timeout: 5000 }).then(() => true, () => false);
+    await p3.goto('http://localhost:8766/?v=32'); await p3.waitForTimeout(2500);
+    const t2 = await p3.evaluate(() => document.body.innerText.indexOf('已更新到新版本') >= 0);
+    ok(t1 && !t2, '彻底关掉重开拿到新版：提示一次已更新到哪个版本，之后不重复 ' + JSON.stringify({ t1, t2 }));
+    await ctx3.close();
   }
  console.log(res.every(x => x[0] === '✅') ? '\n✅ 启动和更新全部通过（截图在 ' + SHOTS + '）' : '\n❌ 有没通过的');
   await br.close(); srv.close(); process.exit(res.every(x => x[0] === '✅') ? 0 : 1);

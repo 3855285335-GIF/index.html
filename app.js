@@ -7475,15 +7475,19 @@ async function verCheck(why) {
 }
 window.__chUpd = { v: () => APP_V, pend: () => verPend, check: why => verCheck(why || 'manual'), link: h => { verLink = { h: h, at: now() }; } };   // 诊断/测试用
 function verBoot() {
-  const t = LS.get('ch2updTry', null);
+  const t = LS.get('ch2updTry', null), lastV = LS.get('ch2lastV', '');
+  let told = false;
   if (t && t.v) {
     const just = now() - (t.at || 0) < 60000;   // 刚刚换版本重开的
-    if (!verNewer(t.v, APP_V)) { LS.del('ch2updTry'); if (t.from !== APP_V) setTimeout(() => toast('已更新到新版本（' + APP_V + '）'), 1200); }
+    if (!verNewer(t.v, APP_V)) { LS.del('ch2updTry'); if (t.from !== APP_V) { told = true; setTimeout(() => toast('已更新到新版本（' + APP_V + '）'), 1200); } }
     else if (just && t.manual && t.from === APP_V) setTimeout(() => toast('新版本还在发布中，过几分钟再点一次“检查更新”'), 1200);
     if (just && t.tab && t.tab !== 'convs') setTimeout(function () {   // 回到更新前那一页（比如“我”）
       try { const b = document.querySelector('.app-nav button[data-tab="' + t.tab + '"]'); if (b && !S.conv) b.click(); } catch (e) {}
     }, 300);
   }
+  // 不管新版是怎么换上的（自动换、手动点、还是彻底关掉重开），只要比上次打开的版本新，就提示一次
+  if (!told && APP_V && lastV && verNewer(APP_V, lastV)) setTimeout(() => toast('已更新到新版本（' + APP_V + '）'), 1200);
+  if (APP_V) LS.set('ch2lastV', APP_V);
   const el = $('app-ver');
   if (el) { el.textContent = '版本 ' + (APP_V || '?') + ' · 点这里检查更新'; el.onclick = () => verCheck('manual'); }
   verFg = now();
