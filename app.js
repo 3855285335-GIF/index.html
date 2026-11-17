@@ -1105,7 +1105,6 @@ async function checkConvMention(key) {
   } catch (e) {}
 }
 function onIncoming(m, noInc) {
-  if (window.__TEST__) console.log('OI', Date.now(), m.id, m.type);
   if (S.recalledEarly.has(m.id) && m.type !== 'recalled') { m = Object.assign({}, m, { type: 'recalled', body: '' }); }
   const first = !S.seen.has(m.id); S.seen.add(m.id);
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
@@ -3190,7 +3189,6 @@ function handleSigRows(rows) {
   });
 }
 function handleMsgRows(rows, base) {
-  if (window.__TEST__) console.log('PD', Date.now(), 'rows=' + rows.length, rows.map(r => Date.parse(r.created_at)).join(','));
   rows.forEach(r => {
     const m = rowToMsg(r); const t = Date.parse(m.created_at) || 0; if (t > msgCursor) msgCursor = t;
     if (pollTypes.get(m.id) === m.type) return;
@@ -6344,6 +6342,7 @@ function noteRequest(r) {
 let linkWait = '';
 function goLink(u) {
   let h = ''; try { h = new URL(u, location.href).hash; } catch (e) { h = String(u || ''); }
+  verLink = { h: /^#[\w=&:-]{1,120}$/.test(h) ? h : '', at: now() };
   const gm = /^#g=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&k=([0-9a-f]{18}))?$/i.exec(h);
   if (gm) {
     if (!S.started || !S.me) { linkWait = h; return; }
@@ -7320,19 +7319,94 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
     momentNotifyCheck();
     if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { try { verCheck('fg'); } catch (e) {} heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
   window.addEventListener('pagehide', () => { flushPush(); if (GC.on && GC.cid) restRpc('group_call_leave', { p_cid: GC.cid }); if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
+}
+
+/* ================= 自动更新 =================
+   iPhone 桌面 App 切到后台不会真正关掉，再打开还是旧页面，拿不到新版。
+   回到前台时（最多 10 分钟一次）问一下线上页面的版本号：没变服务器只回一个很小的“没改过”；
+   有新版就先把新页面存进手机，刚打开、没在通话/录音/打字/发送时直接换上，否则等下次打开再换。 */
+const APP_V = (function () { try { const el = document.querySelector('script[src*="app.js?v="]'); const m = el && /[?&]v=([\w.-]+)/.exec(el.getAttribute('src')); return m ? m[1] : ''; } catch (e) { return ''; } })();
+const verNewer = (a, b) => !!a && !!b && a.localeCompare(b, 'en', { numeric: true }) > 0;   // a 比 b 新（d10 也比 d9 新）
+let verAt = 0, verBusy = false, verFg = 0, verPend = '';
+function verSafe() {   // 现在换页面会不会打断正在做的事
+  try {
+    if (S.call || GC.on || rec.state !== 'idle' || exporting || playingId) return false;
+    const i = $('chat-input'); if (i && i.value.trim()) return false;
+    if ((S.msgs || []).some(m => m && m._st === 'sending')) return false;
+    if (document.querySelector('#lightbox.open, #lightbox.active, #call-ui.active, #incoming-ui.active')) return false;
+    return true;
+  } catch (e) { return false; }
+}
+function verGo(v, manual) {
+  const t = LS.get('ch2updTry', null) || {};
+  const n = t.v === v && now() - (t.at || 0) < 3600e3 ? (t.n || 0) : 0;
+  if (n >= 2 && !manual) return false;   // 换了两次还是旧的（多半是网络那头还没更新）：先不折腾，过一小时再试
+  LS.set('ch2updTry', { v: v, n: n + 1, at: now(), from: APP_V });
+  location.replace(location.pathname + '?v=' + Date.now() + verHash());
+  return true;
+}
+var verLink = { h: '', at: 0 };   // 刚点过的通知/链接（换新版后接着打开它）
+function verHash() {   // 换新版后回到原来的地方：刚点的通知、或者正开着的聊天
+  try {
+    if (verLink.h && now() - verLink.at < 8000) return verLink.h;
+    if (S.conv && isGroupKey(S.conv)) return '#g=' + S.conv.slice(2);
+    if (S.conv && S.peer && /^[a-z0-9_-]{1,40}$/.test(S.peer)) return '#c=' + S.peer;
+  } catch (e) {}
+  return '';
+}
+async function verCheck(why) {
+  const manual = why === 'manual';
+  if (verBusy && manual) { toast('正在检查更新，请稍等几秒'); return; }
+  if (!APP_V || verBusy || (window.__TEST__ && !window.__verTest)) return;
+  if (why === 'fg') verFg = now();
+  if (verPend && !manual) {   // 上次已经发现新版并存好了：这次一打开就换（稍等一下，点通知进来的话先收到要打开哪个聊天）
+    if (why === 'fg') setTimeout(() => { if (!document.hidden && verSafe()) verGo(verPend); }, 700);
+    return;
+  }
+  if (!manual && now() - verAt < 600e3) return;
+  verBusy = true; verAt = now();
+  let html = '';
+  try {
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
+    const tm = ac ? setTimeout(() => ac.abort(), 10000) : 0;
+    const r = await fetch(location.pathname, { cache: 'no-cache', credentials: 'same-origin', signal: ac ? ac.signal : undefined });
+    clearTimeout(tm);
+    if (r.ok) html = await r.text();
+  } catch (e) {}
+  verBusy = false;
+  const m = /app\.js\?v=([\w.-]+)/.exec(html);
+  if (!m || !/<\/html>\s*$/i.test(html)) { if (manual) toast('检查失败：网络不好，等会儿再试'); return; }
+  const v = m[1];
+  if (!verNewer(v, APP_V)) { if (manual) toast('已经是最新版本（' + APP_V + '）'); return; }
+  try { const c = await caches.open('chatter-shell-v1'); await c.put(location.origin + location.pathname, new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })); } catch (e) {}   // 下次打开网络再慢也是新版
+  verPend = v;
+  const fresh = now() - verFg < 8000 && !/[?&](?!v=)\w+=/.test(location.search);   // 刚打开不久（还没开始用），网址里也没有邀请链接之类的参数
+  if (manual) { if (verSafe()) verGo(v, true); else openActs('有新版本（' + v + '）', [{ label: '现在更新', fn: () => verGo(v, true) }, { label: '稍后（下次打开自动更新）', fn: null }]); return; }
+  if (fresh && verSafe()) verGo(v);
+}
+window.__chUpd = { v: () => APP_V, pend: () => verPend, check: why => verCheck(why || 'manual'), link: h => { verLink = { h: h, at: now() }; } };   // 诊断/测试用
+function verBoot() {
+  const t = LS.get('ch2updTry', null);
+  if (t && t.v) {
+    if (!verNewer(t.v, APP_V)) { LS.del('ch2updTry'); if (t.from !== APP_V) setTimeout(() => toast('已更新到新版本'), 1200); }
+  }
+  const el = $('app-ver');
+  if (el) { el.textContent = '版本 ' + (APP_V || '?') + ' · 点这里检查更新'; el.onclick = () => verCheck('manual'); }
+  verFg = now();
+  setTimeout(() => verCheck('boot'), 2500);
 }
 
 /* ================= 启动 ================= */
 function boot() {
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
   ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
+  window.addEventListener('pageshow', function () { try { hideSplash(); } catch (e) {} });
+  setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜底：启动图 4 秒内必须消失（以前错放在失败分支里，正常情况下不生效）
   ready.catch(e => {
-hideSplash();
-window.addEventListener('pageshow', function () { try { hideSplash(); } catch (e) {} });
-setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜底：启动图 4 秒内必须消失
+    hideSplash();
     logErr('lib', e);
     var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
   });
@@ -7347,6 +7421,8 @@ setTimeout(function () { try { hideSplash(); } catch (e) {} }, 4000);   // 兜�
     if (c && c.me) { S.uid = uid; hydrate(c); }
     showApp(); renderAll();            // 已登录过：直接进主界面，不闪登录页
   } else { showAuth(); msgAuth('⏳ 正在加载依赖库…（首次约需几秒到几十秒）'); requestAnimationFrame(hideSplash); }
+  try { verBoot(); } catch (e) {}
+  window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
 if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
