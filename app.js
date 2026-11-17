@@ -5748,35 +5748,30 @@ async function showA2HS(auto) {
     return;
   }
   const e = a2hsEnv();
-  let title = '把 Chatter 添加到桌面', steps = [], arrow = '', link = false, note = '';
+  let title = '把 Chatter 添加到桌面', steps = [], link = false, note = '';
   if (e.inapp) {
     title = '先用浏览器打开'; link = true;
     steps = ['点右上角的「···」', e.android ? '选「在浏览器打开」' : '选「在 Safari 中打开」', '在浏览器里再点一次“添加到桌面”'];
     note = '微信、QQ 里打开的网页不能添加到桌面，也收不到通知。';
-    arrow = 'tr';
   } else if (e.otherIOS) {
     link = true;
     steps = ['复制下面的网址', '打开 iPhone 自带的 Safari，粘贴打开', '在 Safari 里点“添加到桌面”'];
     note = '这个浏览器添加到桌面不一定好用，Safari 最稳。';
-  } else if (e.ipad) {
-    steps = ['点地址栏右边的分享按钮（方框加向上的箭头）', '点「添加到主屏幕」', '右上角点「添加」'];
-    arrow = 'tr';
   } else if (e.ios) {
-    if (e.safariV >= 26) { steps = ['点屏幕右下角的「···」', '点「分享」（有的版本这里直接就有「添加到主屏幕」）', '往下滑，点「添加到主屏幕」', '右上角点「添加」']; arrow = 'br'; }
-    else { steps = ['点屏幕底部中间的分享按钮（方框加向上的箭头）', '往下滑，点「添加到主屏幕」', '右上角点「添加」']; arrow = 'bc'; }
-    note = '添加后从桌面图标打开：像手机应用一样全屏，能收通知，也不会被浏览器的左右滑手势带走。';
+    steps = ['在 Safari 的工具栏里找到分享按钮（方框加向上的箭头）。新版 Safari 要先点「···」才看得到「分享」', '点「分享」后往下滑，点「添加到主屏幕」', '右上角点「添加」'];
+    note = '工具栏可能在屏幕底部，也可能在顶部（看你 Safari 的设置）。添加后从桌面图标打开：像手机应用一样全屏，能收通知，也不会被浏览器的滑动手势带走。';
   } else if (e.android) {
-    steps = ['点浏览器右上角的「⋮」菜单', '选「添加到主屏幕」或「安装应用」'];
-    arrow = 'tr';
+    steps = ['打开浏览器的菜单：一般是「⋮」「≡」或「···」按钮，有的在右上角，有的在底部中间或右下角', '找「添加到桌面」「添加到主屏幕」「发送到桌面」或「安装应用」（有的浏览器放在「工具箱」里）', '按提示确认'];
+    note = '点了以后桌面上没有图标：到手机「设置」→「应用」→ 你用的浏览器 →「权限」，打开「桌面快捷方式」，再添加一次。';
   } else {
-    steps = ['用手机打开这个网址', '按提示添加到桌面']; link = true;
+    steps = ['用手机打开这个网址', '在浏览器菜单里找「添加到桌面」或「添加到主屏幕」']; link = true;
   }
   const old = $('a2hs'); if (old) old.remove();
   const d = document.createElement('div'); d.id = 'a2hs';
   d.innerHTML = '<div class="a2hs-card"><div class="a2hs-t">' + esc(title) + '</div><ol>' + steps.map(t => '<li>' + esc(t) + '</li>').join('') + '</ol>' +
     (note ? '<div class="a2hs-n">' + esc(note) + '</div>' : '') +
     (link ? '<button type="button" class="a2hs-copy">复制网址</button>' : '') +
-    '<button type="button" class="a2hs-ok">知道了</button></div>' + (arrow ? '<div class="a2hs-arrow a2hs-' + arrow + '">' + (arrow === 'tr' ? '⬆' : '⬇') + '</div>' : '');
+    '<button type="button" class="a2hs-ok">知道了</button></div>';
   d.addEventListener('click', function (ev) {
     if (ev.target.closest('.a2hs-copy')) { copyText(location.origin + location.pathname); return; }
     if (ev.target === d || ev.target.closest('.a2hs-ok')) d.remove();
@@ -6670,11 +6665,14 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  // 历史记录：只在打开聊天时加一条，所以在聊天里从左边缘滑 = 回到列表。
-  // 以前主页面也垫了两条“守卫”历史：结果在主页面边缘一滑，iOS 先显示一张旧截图（假的消息页，点不动），一秒多才弹回来。现在主页面不垫了，滑了什么都不发生。
-  function armGuard(n) {   // 只在通话中用：通话界面不让滑走
-    try { for (let i = 0; i < (n || 1); i++) history.pushState({ call: 1 }, '', location.href); } catch (e) {}
-  }
+  // 历史记录：
+  // ① 打开聊天时加一条，所以在聊天里边缘滑 / 按安卓返回键 = 回到消息列表；
+  // ② 主页面：在浏览器里打开时（安卓的返回手势、浏览器的边缘滑会直接离开网站 → 白屏），或者这次打开前已经有别的历史（比如刚自动更新过），
+  //    垫一条“守卫”历史，被吃掉马上补一条，保证滑了也留在 Chatter；
+  //    从桌面图标新打开的（前面没有页面）不垫——垫了以后 iOS 边缘滑会先显示一张点不动的旧截图，一秒多才弹回来。
+  const needGuard = !isStandaloneApp() || history.length > 1;
+  function armGuard() { try { history.pushState({ app: 1 }, '', location.href); } catch (e) {} }
+  if (needGuard && !(history.state && (history.state.app || history.state.chat))) armGuard();
   // 边缘滑退：iOS 的系统手势拦不住，但 Safari 有一部分版本会被 preventDefault 拦下，先尽力拦；
   // 真拦不住也没关系——上面的历史守卫保证滑回去还是本页，不会离开应用。
   (function () {
@@ -6693,12 +6691,13 @@ function bindUI() {
     document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
   })();
   window.addEventListener('popstate', (e) => {
-    if (S.call) { armGuard(1); return; }
+    if (S.call) { armGuard(); return; }   // 通话界面不让滑走
     if (S.conv) { S.hist = false; closeChat(); return; }
     const st = (e && e.state) || history.state;
     // 关掉聊天后浏览器会留一条“前进”记录：从右边缘往左滑（前进）时，真的把刚才那个聊天打开，
     // 不再显示一张点不动的截图、过一秒多又弹回来
-    if (st && st.chat && lastChat && lastChat.key) { S.hist = true; openConv(lastChat.key, lastChat.peer).catch(function (x) { logErr('fwd', x); }); }
+    if (st && st.chat && lastChat && lastChat.key) { S.hist = true; openConv(lastChat.key, lastChat.peer).catch(function (x) { logErr('fwd', x); }); return; }
+    if (needGuard && !(st && st.app)) armGuard();   // 主页面的守卫被吃掉了：马上补一条，不让离开网站
   });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {

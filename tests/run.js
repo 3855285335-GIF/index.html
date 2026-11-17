@@ -357,17 +357,19 @@ test('注册：直接注册不先查重；网络失败自动重试并说清哪�
   } finally { env.close(); }
 });
 
-test('添加到桌面：iPhone Safari 给出步骤和指向箭头；微信里先叫用浏览器打开；已是桌面应用不弹', async () => {
+test('添加到桌面：iPhone Safari、安卓各家浏览器给出通用步骤（不画可能指错的箭头）；微信里先叫用浏览器打开；已是桌面应用不弹', async () => {
   const env = makeEnv({ db: baseDb(Date.now()) });
   try {
     await env.login(); await sleep(300);
     const set = ua => Object.defineProperty(env.w.navigator, 'userAgent', { value: ua, configurable: true });
     set('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1');
     await env.T.showA2HS(false); let d = env.$('a2hs');
-    ok(d && /添加到主屏幕/.test(d.textContent) && /右下角/.test(d.textContent) && d.querySelector('.a2hs-br'), 'iOS 26 Safari 指引不对：' + (d && d.textContent));
+    ok(d && /添加到主屏幕/.test(d.textContent) && /「···」/.test(d.textContent) && !d.querySelector('[class*=arrow]'), 'iOS Safari 指引不对：' + (d && d.textContent));
     d.querySelector('.a2hs-ok').click(); ok(!env.$('a2hs'), '点“知道了”没关掉');
     set('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1');
-    await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /底部中间/.test(d.textContent) && d.querySelector('.a2hs-bc'), '旧版 Safari 指引不对'); d.remove();
+    await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /分享按钮/.test(d.textContent), '旧版 Safari 指引不对'); d.remove();
+    set('Mozilla/5.0 (Linux; Android 14; V2309A) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 VivoBrowser/20.1');
+    await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /底部中间/.test(d.textContent) && /桌面快捷方式/.test(d.textContent), '安卓浏览器指引没说菜单可能在别处、没提权限'); d.remove();
     set('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.50(0x18003237) NetType/WIFI Language/zh_CN');
     await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /在 Safari 中打开/.test(d.textContent) && d.querySelector('.a2hs-copy'), '微信里没先叫用 Safari 打开'); d.remove();
     env.w.navigator.standalone = true; env.toasts.length = 0;
@@ -375,23 +377,32 @@ test('添加到桌面：iPhone Safari 给出步骤和指向箭头；微信里先
   } finally { env.close(); }
 });
 
-test('返回手势：主页面不再垫假历史；聊天里返回关聊天；关掉后“前进”真的重新打开刚才的聊天', async () => {
-  const t = Date.now(), db = baseDb(t);
-  const env = makeEnv({ db });
+test('返回手势：浏览器里主页面垫一条守卫（滑了不离开网站、被吃掉马上补）；桌面图标打开的不垫；聊天里返回关聊天；“前进”重开刚才的聊天', async () => {
+  const t = Date.now(), key = 'bob::me';
+  let env = makeEnv({ db: baseDb(t) });
   try {
     await env.login(); await sleep(400);
-    const st0 = env.w.history.state, len0 = env.w.history.length;
-    ok(!(st0 && st0.app) && len0 === 1, '主页面还垫着守卫历史：state=' + JSON.stringify(st0) + ' length=' + len0);
-    const key = 'bob::me';
+    const H = env.w.history;
+    ok(H.length === 2 && H.state && H.state.app, '浏览器里主页面没垫守卫：length=' + H.length + ' state=' + JSON.stringify(H.state));
+    H.back(); await sleep(300);
+    ok(H.state && H.state.app && !env.T.S.conv, '主页面滑退后守卫没补回来（会离开网站白屏）：' + JSON.stringify(H.state));
     await env.T.openConv(key, 'bob'); await sleep(300);
-    ok(env.T.S.conv === key && env.w.history.length === 2, '打开聊天没加一条历史：' + env.w.history.length);
-    env.w.history.back(); await sleep(300);
-    ok(!env.T.S.conv, '返回后聊天没关');
-    env.w.history.forward(); await sleep(500);
+    ok(env.T.S.conv === key && H.state && H.state.chat, '打开聊天没加历史');
+    H.back(); await sleep(300);
+    ok(!env.T.S.conv && H.state && H.state.app, '聊天里返回没回到消息列表');
+    H.forward(); await sleep(500);
     ok(env.T.S.conv === key, '“前进”没有重新打开刚才的聊天：' + env.T.S.conv);
-    ok(env.w.history.length === 2, '“前进”打开时又多加了历史：' + env.w.history.length);
-    env.w.history.back(); await sleep(300);
-    ok(!env.T.S.conv, '再返回又关不掉了');
+    H.back(); await sleep(300);
+    ok(!env.T.S.conv, '再返回关不掉聊天');
+  } finally { env.close(); }
+  env = makeEnv({ db: baseDb(t), before: w => { Object.defineProperty(w.navigator, 'standalone', { value: true, configurable: true }); } });
+  try {
+    await env.login(); await sleep(400);
+    const H = env.w.history;
+    ok(H.length === 1 && !(H.state && H.state.app), '桌面图标打开的还垫了守卫（iOS 会出现点不动的假页面）：length=' + H.length);
+    await env.T.openConv(key, 'bob'); await sleep(300);
+    H.back(); await sleep(300);
+    ok(!env.T.S.conv, '桌面应用里聊天返回没关聊天');
   } finally { env.close(); }
 });
 
