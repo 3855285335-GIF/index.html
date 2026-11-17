@@ -174,6 +174,69 @@ test('推送：本机以为对方在线也照样问服务器（以前直接不�
   } finally { env.close(); }
 });
 
+test('群消息补推：推了一部分就过一会儿再问，服务器说“都推过了”就停；私聊推出去后不再问', async () => {
+  const t = Date.now(), db = baseDb(t); const calls = []; let seq = [];
+  const env = makeEnv({ db, before: w => { const of = w.fetch; w.fetch = async (u, o) => { if (/chatter-push/.test(String(u))) { const b = JSON.parse(o.body); calls.push(b); const r = seq.shift() || { ok: true, skip: 'done' }; return { ok: true, status: 200, json: async () => r }; } return of(u, o); }; } });
+  try {
+    await env.login(); await sleep(300);
+    env.T.PUSH.retryMs = [150, 150];
+    const n = () => calls.filter(c => c.op === 'push').length;
+    seq = [{ ok: true, sent: 1 }, { ok: true, skip: 'online' }, { ok: true, sent: 1 }];
+    env.T.firePushRetry('gmsg', 'g:x', 'r1', { conv: 'g:x' }); await sleep(900);
+    ok(n() === 3, '群：推了一部分 → 还有人在线 → 补推，应该一共问 3 次，实际 ' + n());
+    calls.length = 0; seq = [{ ok: true, sent: 2 }, { ok: true, skip: 'done' }];
+    env.T.firePushRetry('gmsg', 'g:x', 'r2', { conv: 'g:x' }); await sleep(900);
+    ok(n() === 2, '群：第二次服务器说“都推过了”还在问：' + n());
+    calls.length = 0; seq = [{ ok: true, sent: 1 }, { ok: true, skip: 'dup' }];
+    env.T.firePushRetry('gmsg', 'g:x', 'r3', { conv: 'g:x' }); await sleep(900);
+    ok(n() === 2, '群：还没运行新 SQL（服务器回“已经推过”）时没停：' + n());
+    calls.length = 0; seq = [{ ok: true, sent: 1 }];
+    env.T.firePushRetry('msg', 'bob', 'r4', { conv: 'bob::me', to_acc: 'bob' }); await sleep(600);
+    ok(n() === 1, '私聊已经推出去了还在补推：' + n());
+  } finally { env.close(); }
+});
+
+test('退出其他设备：服务器删推送登记并给出时间，本机作废其他登录凭证；本机不会把自己踢掉；被踢的设备回登录页', async () => {
+  const t = Date.now(), db = baseDb(t); let alive = true, kickAt = '2026-11-17T12:00:00.123456+00:00';
+  db.profiles[0].kick_at = null;
+  const env = makeEnv({ db, onRpc: (n) => n === 'kick_others' ? { data: kickAt, error: null } : n === 'session_alive' ? { data: alive, error: null } : null });
+  try {
+    await env.login(); await sleep(300);
+    const outs = []; env.T.sb.auth.signOut = async o => { outs.push(o); return {}; };
+    env.toasts.length = 0;
+    await env.T.kickOthers(); await sleep(100);
+    const kr = env.rpcLog.find(x => x.name === 'kick_others');
+    ok(kr && 'p_keep' in kr.args, '没调用 kick_others');
+    ok(outs.length === 1 && outs[0] && outs[0].scope === 'others', '没有作废其他设备的登录凭证：' + JSON.stringify(outs));
+    ok(JSON.parse(env.w.localStorage.getItem('ch2kickAt')) === kickAt, '本机没记下服务器给的时间');
+    ok(env.toasts.some(x => /马上收不到通知/.test(x)), '提示不对：' + JSON.stringify(env.toasts));
+    // 服务器那边的 kick_at 就是刚才这个时间（6 位小数秒）：本机检查时不能把自己踢掉
+    db.profiles.find(p => p.account_id === ME).kick_at = kickAt; env.toasts.length = 0;
+    env.T.checkKick(); await sleep(400);
+    ok(!env.toasts.some(x => /退出登录/.test(x)), '发起踢人的这台把自己也踢了');
+    // 被踢的设备：服务器说这次登录已作废
+    alive = false; env.T.checkKick(); await sleep(1500);
+    ok(env.toasts.some(x => /已在其他设备退出登录/.test(x)), '服务器说登录已作废，但没回登录页：' + JSON.stringify(env.toasts));
+    ok(!Object.keys(env.w.localStorage).some(k => /^ch2:/.test(k)), '退出后本机缓存没清');
+  } finally { env.close(); }
+});
+
+test('退出其他设备：还没运行新 SQL 时照旧（只记时间）；服务器查不到时不误踢', async () => {
+  const t = Date.now(), db = baseDb(t);
+  const env = makeEnv({ db, onRpc: (n) => n === 'kick_others' ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.kick_others' } } : n === 'session_alive' ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } } : null });
+  try {
+    await env.login(); await sleep(300);
+    env.T.sb.auth.signOut = async () => ({});
+    env.toasts.length = 0;
+    await env.T.kickOthers(); await sleep(150);
+    const me = db.profiles.find(p => p.account_id === ME);
+    ok(me.kick_at && JSON.parse(env.w.localStorage.getItem('ch2kickAt')) === me.kick_at, '旧办法没写 kick_at');
+    ok(env.toasts.some(x => /下次联网时会自动退出/.test(x)), '提示不对：' + JSON.stringify(env.toasts));
+    env.toasts.length = 0; env.T.checkKick(); await sleep(1200);
+    ok(!env.toasts.some(x => /已在其他设备退出登录/.test(x)), 'session_alive 不存在时把人踢了');
+  } finally { env.close(); }
+});
+
 // ---------------- 群 ----------------
 test('群消息：实时通道到达立刻有横幅（带群名），同一条重复到达不重复提示', async () => {
   const t = Date.now(), db = baseDb(t); const env = makeEnv({ db });

@@ -718,7 +718,7 @@ function applyBoot(b) {
     } catch (e) {}
   }, 5000);
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
-  if (!window.__kickT) window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 60000);
+  if (!window.__kickT) { window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 60000); setTimeout(function () { try { checkKick(); } catch (e) {} }, 4000); }
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
@@ -3236,15 +3236,10 @@ async function pollSeen() {
 let resyncT = 0;
 function resyncSoon() { clearTimeout(resyncT); resyncT = setTimeout(resync, 300); }
 function setupPresence() {
-  if (!sb || !S.me) return;
-  const gen = ++S.presGen, acc = ME();
-  if (S.presCh) { try { sb.removeChannel(S.presCh); } catch (e) {} }
-  const ch = sb.channel('presence:online', { config: { presence: { key: acc } } }); S.presCh = ch;
-  ch.on('presence', { event: 'sync' }, () => {
-    if (gen !== S.presGen) return;
-    try { S.online = new Set(Object.keys(ch.presenceState() || {})); } catch (e) {}
-    sched('list'); sched('contacts'); sched('title');
-  }).subscribe(async st => { if (gen === S.presGen && st === 'SUBSCRIBED') { try { await ch.track({ t: now() }); } catch (e) {} } });
+  // 不再用全局 presence:online 频道：它是公开频道，任何人都能冒充任何账号“在线”，也能看到所有用户在不在线。
+  // 好友在线状态改由“上线/下线”广播（只有好友能发）+ 服务器心跳 friends_seen 提供。
+  if (S.presCh && sb) { try { sb.removeChannel(S.presCh); } catch (e) {} S.presCh = null; }
+  if (S.online && S.online.size) { S.online = new Set(); sched('list'); sched('contacts'); sched('title'); }
 }
 function startTimers() {
   clearInterval(S.tm); let n = 0;
@@ -5719,18 +5714,43 @@ function recordDevice() {
     sb.from('user_devices').upsert({ account: ME(), device_id: devId(), ua: ua, last_at: new Date().toISOString() }, { onConflict: 'account,device_id' }).then(function () {}, function () {});
   } catch (e) {}
 }
+const tsOf = v => Date.parse(String(v || '').replace(/\.(\d+)/, (x, d) => '.' + (d + '00').slice(0, 3)));   // 服务器时间带 6 位小数秒，iPhone 的 Date.parse 不一定认：统一成 3 位
+let kickedOut = false, kickAt = 0;
+function beKicked() {
+  if (kickedOut) return; kickedOut = true;
+  LS.set('ch2loginAt', Date.now());
+  toast('已在其他设备退出登录');
+  setTimeout(function () { try { logout(); } catch (e) { location.reload(); } }, 900);
+}
+async function kickOthers() {   // 退出其他设备：服务器删掉它们的推送登记、登录失效；它们联网后自己回到登录页
+  try {
+    let ep = null;
+    try { const reg = await swReg(); const sub = reg && reg.pushManager ? await reg.pushManager.getSubscription() : null; ep = sub ? sub.endpoint : null; } catch (e) {}
+    const r = await sb.rpc('kick_others', { p_keep: ep });
+    if (r && r.error && !isMissingFn(r.error)) { toast('操作失败：' + (r.error.message || r.error.code)); return; }
+    const srv = !!(r && !r.error && r.data);
+    let t = srv ? r.data : null;
+    if (!srv) {   // 还没运行 11-17 的 SQL：用以前的办法（只记个时间，其他设备自己退出）
+      t = new Date().toISOString();
+      const r2 = await sb.from('profiles').update({ kick_at: t }).eq('id', S.uid);
+      if (r2 && r2.error) { toast('操作失败：' + r2.error.message); return; }
+    }
+    LS.set('ch2kickAt', t); LS.set('ch2loginAt', Date.now());
+    try { await sb.auth.signOut({ scope: 'others' }); } catch (e) {}   // 其他设备的登录凭证作废（本机不受影响）
+    toast(srv ? '已退出其他设备：它们马上收不到通知，联网后会回到登录页' : '其他设备下次联网时会自动退出');
+    if (srv && !ep) { try { pushSync(); } catch (e) {} }
+  } catch (e) { toast('网络失败，没发出去'); }
+}
 function checkKick() {
-  if (!sb || !S.uid) return;
+  if (!sb || !S.uid || kickedOut) return;
+  kickAt = now();
+  sb.rpc('session_alive').then(function (r) { if (r && !r.error && r.data === false) beKicked(); }, function () {});   // 服务器确认这次登录已被“退出其他设备”作废
   sb.from('profiles').select('kick_at').eq('id', S.uid).maybeSingle().then(function (r) {
     const k = r && r.data && r.data.kick_at; if (!k) return;
     const mine = LS.get('ch2kickAt', '') || 0;
-    if (mine && Math.abs(Date.parse(k) - Date.parse(mine)) < 5000) { LS.set('ch2loginAt', Date.now()); return; }   // 本机发起的踢人：时间差 5 秒内算自己，不踢自己
+    if (mine && Math.abs(tsOf(k) - tsOf(mine)) < 5000) { LS.set('ch2loginAt', Date.now()); return; }   // 本机发起的踢人：时间差 5 秒内算自己，不踢自己
     const la = LS.get('ch2loginAt', 0) || 0;
-    if (Date.parse(k) > la + 1500) {
-      LS.set('ch2loginAt', Date.now());
-      toast('已在其他设备退出登录');
-      try { logout(); } catch (e) { location.reload(); }
-    }
+    if (tsOf(k) > la + 1500) beKicked();
   }, function () {});
 }
 async function syncMyBubble() {
@@ -6133,7 +6153,7 @@ async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（
   if (!S.me || pushBlocked()) return null;
   try {
     const j = await fnCall({ op: 'push', kind, to: to || null, ref: ref || null });
-    PUSH.last = kind + (j.skip ? '：没推（' + ({ online: '对方在线', read: '对方已经看过', nosub: '对方没开通知', dup: '已经推过', ref: '找不到这条', friend: '不是好友', member: '不是群成员', type: '这种消息不推', to: '目标不对', auth: '登录失效' }[j.skip] || j.skip) + '）' : '：已推送到 ' + (j.sent || 0) + ' 台手机');
+    PUSH.last = kind + (j.skip ? '：没推（' + ({ online: '对方在线', read: '对方已经看过', nosub: '对方没开通知', dup: '已经推过', done: '都推过了', ref: '找不到这条', friend: '不是好友', member: '不是群成员', type: '这种消息不推', to: '目标不对', auth: '登录失效' }[j.skip] || j.skip) + '）' : '：已推送到 ' + (j.sent || 0) + ' 台手机');
     return j;
   } catch (e) {
     if (e.status === 404 || e.net) { PUSH.srv = false; PUSH.srvAt = now() - (e.net ? 9 * 60000 : 0); }   // 没部署：10 分钟内不再试；网络不通：1 分钟后再试
@@ -6154,8 +6174,11 @@ function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求�
   q.t = setTimeout(() => { delete PUSH.q[key]; firePushRetry(q.kind, q.to, q.ref, m); }, 300);
 }
 function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”就先不推；对方其实刚离开的话，30 秒、80 秒后再问一次（已读了就不推）
+  // 群消息：服务器按成员记录推没推过。推出去一部分时，可能还有当时在线的成员，也要过一会儿再问（服务器回“都推过了”就停）
+  const grp = kind === 'gmsg';
+  const more = j => !!j && (j.skip === 'online' || (grp && !j.skip && !j.error));
   firePush(kind, to, ref).then(function (j) {
-    if (!j || j.skip !== 'online') return;
+    if (!more(j)) return;
     let n = 0;
     const again = function () {
       n++; if (n > 2) return;
@@ -6165,8 +6188,8 @@ function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”�
           try { await fetchPeerRead(m.conv); } catch (e) {}   // 先问服务器对方读到哪了：读过就不补推（以前会在“已编辑”通知之外又补一条旧消息通知）
           if (isRead(m) || now() - (peerActiveAt[to] || 0) < 20000) return;
         }
-        firePush(kind, to, ref).then(function (j2) { if (j2 && j2.skip === 'online') again(); });
-      }, n === 1 ? 30000 : 50000);
+        firePush(kind, to, ref).then(function (j2) { if (more(j2)) again(); });
+      }, (PUSH.retryMs || [30000, 50000])[n - 1]);
     };
     again();
   });
@@ -7244,15 +7267,7 @@ if ($('btn-devices')) $('btn-devices').onclick = async function () {
       return { label: (x.device_id === devId() ? '📱 本机 · ' : '') + String(x.ua || '未知设备').slice(0, 28) + ' · ' + (x.last_at ? fmtTime(x.last_at) : ''), fn: null };
     });
     if (!items.length) items.push({ label: '还没有记录', fn: null });
-    items.push({ label: '⬅ 退出其他设备', danger: true, fn: function () {
-      const t = new Date().toISOString();
-      sb.from('profiles').update({ kick_at: t }).eq('id', S.uid).then(function (r) {
-        if (r && r.error) { toast('操作失败：' + r.error.message); return; }
-        LS.set('ch2kickAt', t);
-        LS.set('ch2loginAt', Date.now());
-        toast('其他设备下次联网时会自动退出');
-      }, function () { toast('网络失败，没发出去'); });
-    } });
+    items.push({ label: '⬅ 退出其他设备', danger: true, fn: function () { kickOthers(); } });
     items.push({ label: '关闭', fn: null });
     openActs('登录设备（' + rows.length + '）', items);
   } catch (e) { toast('读取设备失败'); }
@@ -7313,13 +7328,12 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
   const wake = () => {
     if (document.hidden || !sb || !S.me) return;
     if (!S.rt.db || !S.rt.user) startRealtime();
-    if (!S.presCh || S.presCh.state !== 'joined') setupPresence(); else { try { S.presCh.track({ t: now() }); } catch (e) {} }
     resyncSoon(); retryFailed();
     grpLoad(true); grpInvitesLoad(true); grpPoll().catch(() => {});
     momentNotifyCheck();
     if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { try { verCheck('fg'); } catch (e) {} heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { try { verCheck('fg'); } catch (e) {} try { if (now() - kickAt > 20000) checkKick(); } catch (e) {} heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
   window.addEventListener('pagehide', () => { flushPush(); if (GC.on && GC.cid) restRpc('group_call_leave', { p_cid: GC.cid }); if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
 }
@@ -7424,7 +7438,7 @@ function boot() {
   try { verBoot(); } catch (e) {}
   window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
 document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { retryBadImgs(); } catch (e) {} } });
 // 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）
