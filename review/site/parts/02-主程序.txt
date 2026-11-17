@@ -7427,8 +7427,11 @@ function verGo(v, manual) {
   const t = LS.get('ch2updTry', null) || {};
   const n = t.v === v && now() - (t.at || 0) < 3600e3 ? (t.n || 0) : 0;
   if (n >= 2 && !manual) return false;   // 换了两次还是旧的（多半是网络那头还没更新）：先不折腾，过一小时再试
-  LS.set('ch2updTry', { v: v, n: n + 1, at: now(), from: APP_V });
-  location.replace(location.pathname + '?v=' + Date.now() + verHash());
+  let tab = ''; try { const b = document.querySelector('.app-nav button.active'); tab = (b && b.dataset.tab) || ''; } catch (e) {}
+  LS.set('ch2updTry', { v: v, n: n + 1, at: now(), from: APP_V, tab: tab, manual: !!manual });   // 记下在哪一页，换完回到这一页
+  const url = location.pathname + '?v=' + Date.now() + verHash();
+  toast('发现新版本（' + v + '），正在更新…');   // 以前不提示直接刷新，看起来像“版本检测消失了、跳回消息页”
+  setTimeout(function () { location.replace(url); }, 800);
   return true;
 }
 var verLink = { h: '', at: 0 };   // 刚点过的通知/链接（换新版后接着打开它）
@@ -7474,7 +7477,12 @@ window.__chUpd = { v: () => APP_V, pend: () => verPend, check: why => verCheck(w
 function verBoot() {
   const t = LS.get('ch2updTry', null);
   if (t && t.v) {
-    if (!verNewer(t.v, APP_V)) { LS.del('ch2updTry'); if (t.from !== APP_V) setTimeout(() => toast('已更新到新版本'), 1200); }
+    const just = now() - (t.at || 0) < 60000;   // 刚刚换版本重开的
+    if (!verNewer(t.v, APP_V)) { LS.del('ch2updTry'); if (t.from !== APP_V) setTimeout(() => toast('已更新到新版本（' + APP_V + '）'), 1200); }
+    else if (just && t.manual && t.from === APP_V) setTimeout(() => toast('新版本还在发布中，过几分钟再点一次“检查更新”'), 1200);
+    if (just && t.tab && t.tab !== 'convs') setTimeout(function () {   // 回到更新前那一页（比如“我”）
+      try { const b = document.querySelector('.app-nav button[data-tab="' + t.tab + '"]'); if (b && !S.conv) b.click(); } catch (e) {}
+    }, 300);
   }
   const el = $('app-ver');
   if (el) { el.textContent = '版本 ' + (APP_V || '?') + ' · 点这里检查更新'; el.onclick = () => verCheck('manual'); }

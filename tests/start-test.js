@@ -119,6 +119,32 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   mode = 'newver'; await pg.waitForTimeout(8000); await pg.evaluate(() => { __chUpd.check('manual'); });
   const t12 = await pg.waitForFunction(() => document.body.innerText.indexOf('已经是最新版本') >= 0, null, { timeout: 4000 }).then(() => true, () => false);
   ok(t12, '设置里点“检查更新”：已是最新时提示');
+  // 13 已登录、停在“我”页时手动检查更新：先提示“发现新版本”，换完回到“我”页并提示已更新到哪个版本
+  {
+    const ctx2 = await br.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    await ctx2.route(/supabase\.co/, r => r.abort());
+    await ctx2.addInitScript(() => {
+      const uid = '11111111-1111-4111-8111-111111111111';
+      if (!localStorage.getItem('sb-uaoiqbxptnbrvkzjwguc-auth-token')) {
+        localStorage.setItem('sb-uaoiqbxptnbrvkzjwguc-auth-token', JSON.stringify({ access_token: 'x', user: { id: uid } }));
+        localStorage.setItem('ch2:' + uid, JSON.stringify({ me: { id: uid, account_id: 'me', nickname: '我' }, friends: [], profiles: {}, convs: [], requests: [] }));
+        localStorage.setItem('ch2a2hs', String(Date.now()));
+      }
+    });
+    const p2 = await ctx2.newPage();
+    mode = 'ok'; await p2.goto('http://localhost:8766/?v=20'); await p2.waitForTimeout(3500);
+    await p2.click('.app-nav button[data-tab="me"]'); await p2.waitForTimeout(400);
+    const ver0 = await p2.evaluate(() => document.getElementById('app-ver').textContent);
+    mode = 'newver';
+    await p2.evaluate(() => __chUpd.check('manual'));
+    const told = await p2.waitForFunction(() => document.body.innerText.indexOf('发现新版本') >= 0, null, { timeout: 4000 }).then(() => true, () => false);
+    await p2.waitForURL(/\?v=\d{10,}/, { timeout: 6000 }).catch(() => {});
+    const done = await p2.waitForFunction(() => document.body.innerText.indexOf('已更新到新版本（20261118d9）') >= 0, null, { timeout: 6000 }).then(() => true, () => false);
+    const tab = await p2.evaluate(() => { const b = document.querySelector('.app-nav button.active'); return b && b.dataset.tab; });
+    const ver1 = await p2.evaluate(() => document.getElementById('app-ver').textContent);
+    ok(/版本 20261118d\d/.test(ver0) && told && done && tab === 'me' && /d9/.test(ver1), '在“我”页手动更新：先提示、换完回到“我”页、提示已更新到哪个版本 ' + JSON.stringify({ ver0, told, done, tab, ver1 }));
+    await ctx2.close();
+  }
  console.log(res.every(x => x[0] === '✅') ? '\n✅ 启动和更新全部通过（截图在 ' + SHOTS + '）' : '\n❌ 有没通过的');
   await br.close(); srv.close(); process.exit(res.every(x => x[0] === '✅') ? 0 : 1);
 })().catch(e => { console.error(e); process.exit(1); });
