@@ -158,6 +158,7 @@ returns jsonb language plpgsql security definer set search_path = public as $fn$
 declare
   me text; gid uuid; m record; gname text; sender text; b text; h text;
   subs jsonb; accs text[]; n_on integer;
+  zw text := chr(8291);   -- 引用回复正文前面的隐形分隔符（U+2063）
 begin
   select account_id into me from public.profiles where id = p_uid;
   if me is null then return jsonb_build_object('skip', 'auth'); end if;
@@ -211,7 +212,7 @@ begin
 
   sender := coalesce(nullif(btrim((select nickname from public.profiles where account_id = me)), ''), me);
   b := case m.type
-         when 'text'    then left(btrim(regexp_replace(regexp_replace(coalesce(m.body, ''), '^\u2063Q[^\u2063]*\u2063[^\u2063]*\u2063', ''), '[\s\u2063]+', ' ', 'g')), 120)
+         when 'text'    then left(btrim(regexp_replace(regexp_replace(coalesce(m.body, ''), '^' || zw || 'Q[^' || zw || ']*' || zw || '[^' || zw || ']*' || zw, ''), '[\s' || zw || ']+', ' ', 'g')), 120)
          when 'image'   then '[图片]'
          when 'voice'   then '[语音]'
          when 'sticker' then '[表情]'
