@@ -111,6 +111,12 @@ await db.exec(`delete from public.push_log; update public.presence set last_seen
 j = await push(); ok(j.subs && j.subs.length === 1, '重来：先推 Bob');
 await db.exec(`insert into public.conversations values ('carol', 'g:${G}', now()); update public.presence set last_seen = now() - interval '5 minutes' where account_id = 'carol'`);
 j = await push(); ok(j.skip === 'done', 'Carol 在 App 里看过这条才离开：不补推 → ' + JSON.stringify(j));
+// 引用回复的群消息：通知里去掉引用前缀
+const QM = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+await db.query(`insert into public.messages values ($1, 'g:${G}', 'me', null, 'text', $2, now())`, [QM, '\u2063Qabc\u2063原话\u2063我的回复']);
+await db.exec(`delete from public.push_log`);
+j = (await db.query(`select public.push_job('${ME}', 'gmsg', '${QM}', 'g:${G}') r`)).rows[0].r;
+ok(j.body === '我：我的回复', '引用回复：通知里只有回复内容 → ' + JSON.stringify(j.body));
 // 其他种类不受影响
 ok(JSON.stringify((await db.query(`select public.push_job('${ME}', 'msg', 'x', 'bob') r`)).rows[0].r) === '{"x":"base"}', '私聊推送照旧走原来的函数');
 ok(JSON.stringify((await db.query(`select public.push_job('${ME}', 'edit', 'x', 'bob') r`)).rows[0].r) === '{"x":"edit"}', '编辑推送照旧');

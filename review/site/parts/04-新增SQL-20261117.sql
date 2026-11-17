@@ -211,7 +211,7 @@ begin
 
   sender := coalesce(nullif(btrim((select nickname from public.profiles where account_id = me)), ''), me);
   b := case m.type
-         when 'text'    then left(btrim(regexp_replace(regexp_replace(coalesce(m.body, ''), '^⁣Q[^⁣]*⁣[^⁣]*⁣', ''), '[\s⁣]+', ' ', 'g')), 120)
+         when 'text'    then left(btrim(regexp_replace(regexp_replace(coalesce(m.body, ''), '^\u2063Q[^\u2063]*\u2063[^\u2063]*\u2063', ''), '[\s\u2063]+', ' ', 'g')), 120)
          when 'image'   then '[图片]'
          when 'voice'   then '[语音]'
          when 'sticker' then '[表情]'
