@@ -334,6 +334,67 @@ test('登录：网络失败自动重试（第 3 次成功）；密码错不重�
   } finally { env.close(); }
 });
 
+test('注册：直接注册不先查重；网络失败自动重试并说清哪一步；太频繁、重名都说中文；重名但密码对就直接登录', async () => {
+  const env = makeEnv({ db: { profiles: [prof(ME, '我')] }, before: w => { try { w.localStorage.clear(); } catch (e) {} } });
+  try {
+    await env.T.getReady(); await sleep(200);
+    const fill = () => { env.$('reg-acc').value = 'newbie'; env.$('reg-pass').value = '123456'; env.$('reg-name').value = '新人'; };
+    const sub = async ms => { env.$('register-form').dispatchEvent(new env.w.Event('submit', { cancelable: true })); await sleep(ms); return env.$('auth-msg').textContent; };
+    const net = () => ({ data: null, error: Object.assign(new Error('Failed to fetch'), { status: 0, name: 'AuthRetryableFetchError' }) });
+    let n = 0, li = 0; env.rpcLog.length = 0;
+    env.T.sb.auth.signUp = async () => { n++; return net(); };
+    fill(); let m = await sub(4200);
+    ok(n === 3, '网络失败时注册试了 ' + n + ' 次（应为 3）');
+    ok(/注册这一步没连上/.test(m), '没说清是哪一步：' + m);
+    ok(!env.rpcLog.some(x => x.name === 'account_exists'), '还在单独查重（网络差时多一次失败）');
+    env.T.sb.auth.signUp = async () => ({ data: null, error: Object.assign(new Error('Request rate limit reached'), { status: 429 }) });
+    m = await sub(500); ok(/太频繁/.test(m), '429 没翻成中文：' + m);
+    env.T.sb.auth.signUp = async () => ({ data: null, error: Object.assign(new Error('User already registered'), { status: 422 }) });
+    env.T.sb.auth.signInWithPassword = async () => { li++; return { data: null, error: Object.assign(new Error('Invalid login credentials'), { status: 400 }) }; };
+    m = await sub(500); ok(/账号已存在/.test(m) && li === 1, '重名提示不对：' + m);
+    env.T.sb.auth.signInWithPassword = async () => ({ data: { session: {} }, error: null });
+    m = await sub(500); ok(m === '', '重名但密码对（上次其实注册成功了）没直接登录：' + m);
+  } finally { env.close(); }
+});
+
+test('添加到桌面：iPhone Safari 给出步骤和指向箭头；微信里先叫用浏览器打开；已是桌面应用不弹', async () => {
+  const env = makeEnv({ db: baseDb(Date.now()) });
+  try {
+    await env.login(); await sleep(300);
+    const set = ua => Object.defineProperty(env.w.navigator, 'userAgent', { value: ua, configurable: true });
+    set('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1');
+    await env.T.showA2HS(false); let d = env.$('a2hs');
+    ok(d && /添加到主屏幕/.test(d.textContent) && /右下角/.test(d.textContent) && d.querySelector('.a2hs-br'), 'iOS 26 Safari 指引不对：' + (d && d.textContent));
+    d.querySelector('.a2hs-ok').click(); ok(!env.$('a2hs'), '点“知道了”没关掉');
+    set('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1');
+    await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /底部中间/.test(d.textContent) && d.querySelector('.a2hs-bc'), '旧版 Safari 指引不对'); d.remove();
+    set('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.50(0x18003237) NetType/WIFI Language/zh_CN');
+    await env.T.showA2HS(false); d = env.$('a2hs'); ok(d && /在 Safari 中打开/.test(d.textContent) && d.querySelector('.a2hs-copy'), '微信里没先叫用 Safari 打开'); d.remove();
+    env.w.navigator.standalone = true; env.toasts.length = 0;
+    await env.T.showA2HS(false); ok(!env.$('a2hs') && env.toasts.some(x => /已经是桌面应用/.test(x)), '已经是桌面应用还弹指引');
+  } finally { env.close(); }
+});
+
+test('返回手势：主页面不再垫假历史；聊天里返回关聊天；关掉后“前进”真的重新打开刚才的聊天', async () => {
+  const t = Date.now(), db = baseDb(t);
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await sleep(400);
+    const st0 = env.w.history.state, len0 = env.w.history.length;
+    ok(!(st0 && st0.app) && len0 === 1, '主页面还垫着守卫历史：state=' + JSON.stringify(st0) + ' length=' + len0);
+    const key = 'bob::me';
+    await env.T.openConv(key, 'bob'); await sleep(300);
+    ok(env.T.S.conv === key && env.w.history.length === 2, '打开聊天没加一条历史：' + env.w.history.length);
+    env.w.history.back(); await sleep(300);
+    ok(!env.T.S.conv, '返回后聊天没关');
+    env.w.history.forward(); await sleep(500);
+    ok(env.T.S.conv === key, '“前进”没有重新打开刚才的聊天：' + env.T.S.conv);
+    ok(env.w.history.length === 2, '“前进”打开时又多加了历史：' + env.w.history.length);
+    env.w.history.back(); await sleep(300);
+    ok(!env.T.S.conv, '再返回又关不掉了');
+  } finally { env.close(); }
+});
+
 test('登录设备：菜单能打开', async () => {
   const env = makeEnv({ db: { profiles: [prof(ME, '我')], friendships: [], conversations: [], user_devices: [{ account: ME, device_id: 'dabc', ua: 'iPhone', last_at: iso(Date.now()) }] } });
   try {

@@ -718,6 +718,7 @@ function applyBoot(b) {
     } catch (e) {}
   }, 5000);
   if (!window.__bubSyncT) window.__bubSyncT = setInterval(function () { try { syncMyBubble(); } catch (e) {} }, 120000);
+  try { a2hsNudge(); } catch (e) {}
   if (!window.__kickT) { window.__kickT = setInterval(function () { try { checkKick(); } catch (e) {} }, 60000); setTimeout(function () { try { checkKick(); } catch (e) {} }, 4000); }
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
@@ -2002,7 +2003,9 @@ async function openConv(key, peer) {
     }
   }
 }
+let lastChat = null;   // 刚关掉的聊天（“前进”手势用）
 function closeChat() {
+  if (S.conv) lastChat = { key: S.conv, peer: S.peer };
   recAbort(); stopAudio();
   clearTimeout(saveMT);
   var _ck = S.conv, _cms = cacheList(S.msgs);   // 先挑好（很快），真正写盘放到下一轮
@@ -3324,7 +3327,7 @@ function initClient() {
   const authFetch = function (input, init) {
     const u = String((input && input.url) || input || '');
     if (u.indexOf('/auth/v1/') < 0 || !window.AbortController) return fetch(input, init);
-    const ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 12000), o = Object.assign({}, init || {});
+    const ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, u.indexOf('/auth/v1/signup') >= 0 ? 20000 : 12000), o = Object.assign({}, init || {});   // 注册服务器要多做事，多等一会儿
     if (o.signal) { try { if (o.signal.aborted) ctl.abort(); else o.signal.addEventListener('abort', function () { ctl.abort(); }); } catch (e) {} }
     o.signal = ctl.signal;
     return fetch(input, o).then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
@@ -5722,6 +5725,73 @@ function beKicked() {
   toast('已在其他设备退出登录');
   setTimeout(function () { try { logout(); } catch (e) { location.reload(); } }, 900);
 }
+/* ================= 添加到桌面 ================= */
+let pwaEvt = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); pwaEvt = e; });
+const isStandaloneApp = () => { try { return navigator.standalone === true || !!(window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches)); } catch (e) { return false; } };
+function a2hsEnv() {
+  const ua = navigator.userAgent || '';
+  const ipad = /ipad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const ios = ipad || /iphone|ipod/i.test(ua);
+  const sv = /Version\/(\d+)/.exec(ua);
+  return {
+    ios: ios, ipad: ipad, android: /android/i.test(ua),
+    inapp: /MicroMessenger|QQ\/|Weibo|DingTalk|AlipayClient|Lark|Feishu|FBAN|FBAV|Instagram|Line\//i.test(ua),   // 微信、QQ 等 App 里打开的网页
+    otherIOS: ios && /CriOS|FxiOS|EdgiOS|OPiOS|UCBrowser|Quark|MQQBrowser|baiduboxapp|SogouMobile/i.test(ua),
+    safariV: sv ? +sv[1] : 0
+  };
+}
+async function showA2HS(auto) {
+  if (isStandaloneApp()) { if (!auto) toast('已经是桌面应用了'); return; }
+  if (pwaEvt) {   // 安卓 Chrome 等：真的能一键添加
+    try { pwaEvt.prompt(); const r = await pwaEvt.userChoice; pwaEvt = null; toast(r && r.outcome === 'accepted' ? '正在添加…' : '已取消'); } catch (e) {}
+    return;
+  }
+  const e = a2hsEnv();
+  let title = '把 Chatter 添加到桌面', steps = [], arrow = '', link = false, note = '';
+  if (e.inapp) {
+    title = '先用浏览器打开'; link = true;
+    steps = ['点右上角的「···」', e.android ? '选「在浏览器打开」' : '选「在 Safari 中打开」', '在浏览器里再点一次“添加到桌面”'];
+    note = '微信、QQ 里打开的网页不能添加到桌面，也收不到通知。';
+    arrow = 'tr';
+  } else if (e.otherIOS) {
+    link = true;
+    steps = ['复制下面的网址', '打开 iPhone 自带的 Safari，粘贴打开', '在 Safari 里点“添加到桌面”'];
+    note = '这个浏览器添加到桌面不一定好用，Safari 最稳。';
+  } else if (e.ipad) {
+    steps = ['点地址栏右边的分享按钮（方框加向上的箭头）', '点「添加到主屏幕」', '右上角点「添加」'];
+    arrow = 'tr';
+  } else if (e.ios) {
+    if (e.safariV >= 26) { steps = ['点屏幕右下角的「···」', '点「分享」（有的版本这里直接就有「添加到主屏幕」）', '往下滑，点「添加到主屏幕」', '右上角点「添加」']; arrow = 'br'; }
+    else { steps = ['点屏幕底部中间的分享按钮（方框加向上的箭头）', '往下滑，点「添加到主屏幕」', '右上角点「添加」']; arrow = 'bc'; }
+    note = '添加后从桌面图标打开：像手机应用一样全屏，能收通知，也不会被浏览器的左右滑手势带走。';
+  } else if (e.android) {
+    steps = ['点浏览器右上角的「⋮」菜单', '选「添加到主屏幕」或「安装应用」'];
+    arrow = 'tr';
+  } else {
+    steps = ['用手机打开这个网址', '按提示添加到桌面']; link = true;
+  }
+  const old = $('a2hs'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'a2hs';
+  d.innerHTML = '<div class="a2hs-card"><div class="a2hs-t">' + esc(title) + '</div><ol>' + steps.map(t => '<li>' + esc(t) + '</li>').join('') + '</ol>' +
+    (note ? '<div class="a2hs-n">' + esc(note) + '</div>' : '') +
+    (link ? '<button type="button" class="a2hs-copy">复制网址</button>' : '') +
+    '<button type="button" class="a2hs-ok">知道了</button></div>' + (arrow ? '<div class="a2hs-arrow a2hs-' + arrow + '">' + (arrow === 'tr' ? '⬆' : '⬇') + '</div>' : '');
+  d.addEventListener('click', function (ev) {
+    if (ev.target.closest('.a2hs-copy')) { copyText(location.origin + location.pathname); return; }
+    if (ev.target === d || ev.target.closest('.a2hs-ok')) d.remove();
+  });
+  document.body.appendChild(d);
+}
+function a2hsNudge() {   // 在浏览器里用手机打开时，每 7 天最多主动提示一次
+  try {
+    if (isStandaloneApp()) return;
+    const e = a2hsEnv(); if (!e.ios && !e.android) return;
+    if (now() - (LS.get('ch2a2hs', 0) || 0) < 7 * 864e5) return;
+    LS.set('ch2a2hs', now());
+    setTimeout(function () { if (!$('a2hs') && !S.call) showA2HS(true); }, 2500);
+  } catch (e) {}
+}
 async function kickOthers() {   // 退出其他设备：服务器删掉它们的推送登记、登录失效；它们联网后自己回到登录页
   try {
     let ep = null;
@@ -6491,6 +6561,16 @@ function bindViewport() {
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
 const isNetErr = e => { if (!e) return false; if (e.status === 0 || e.name === 'AuthRetryableFetchError' || e.name === 'AbortError') return true; return /Failed to fetch|Load failed|NetworkError|fetch failed|Network request failed/i.test(String(e.message || e)); };
 const NET_MSG = '❌ 连不上服务器：这台手机现在访问不到 Supabase（网络拦截或不稳定），不是账号密码的问题。请再试一次，或换个网络（Wi-Fi / 流量）、换个浏览器';
+function authErrText(err, what) {   // 把网络/服务器错误翻成中文，带上是哪一步出的错，方便截图排查
+  const m = String((err && (err.message || err.error_description || err.msg)) || err || '');
+  const st = err && err.status;
+  if (isNetErr(err)) return NET_MSG + '（' + what + '这一步没连上）';
+  if (st === 429 || /rate limit|too many/i.test(m)) return '❌ ' + what + '太频繁：同一个网络几分钟内试了太多次，请过几分钟再试，或换个网络';
+  if (/already|registered|exists/i.test(m)) return '❌ 账号已存在';
+  if (/database error/i.test(m)) return '❌ 服务器' + what + '时出错（数据库），请把这句截图发给管理员';
+  if (/password/i.test(m) && /short|weak|least|characters/i.test(m)) return '❌ 密码太简单，换一个长一点的';
+  return '❌ ' + what + '失败：' + (m || '未知错误') + (st ? '（' + st + '）' : '');
+}
 async function authTry(fn) {   // 登录/注册遇到网络问题自动再试两次（0.8 秒、2 秒后）；账号密码不对之类的不重试
   let r = null;
   for (let i = 0; i < 3; i++) {
@@ -6527,19 +6607,21 @@ function bindUI() {
     if (!name) { msgAuth('❌ 请输入昵称'); return; }
     btn.disabled = true; msgAuth('注册中…');
     try {
+      if (!sb) msgAuth('⏳ 正在下载程序组件（第一次打开要等一会儿）…');
       await ready;
-      const ex = await authTry(() => sb.rpc('account_exists', { p_acc: acc }));
-      if (ex.error) { msgAuth(isNetErr(ex.error) ? NET_MSG : '❌ 检查账号失败：' + ex.error.message + (isMissingFn(ex.error) ? '（后端还没建好：请在 Supabase 运行 1-setup.sql）' : '')); return; }
-      if (ex.data) { msgAuth('❌ 账号已存在'); return; }
+      msgAuth('注册中…');
+      // 以前先单独问一次“账号存不存在”，网络差时多一次失败机会；现在直接注册，重名由服务器回“已注册”
       let { data: up, error } = await authTry(() => sb.auth.signUp({ email: acc + '@chatter.local', password: pass, options: { data: { account_id: acc, nickname: name } } }));
-      if (error && /already|registered|exists/i.test(String(error.message || ''))) {   // 上一次其实注册成功了、只是回应丢了：直接用这组账号密码登录
+      if (error && /already|registered|exists/i.test(String(error.message || ''))) {   // 重名，或者上一次其实注册成功了、只是回应丢了：用这组账号密码试着登录
         const li = await authTry(() => sb.auth.signInWithPassword({ email: acc + '@chatter.local', password: pass }));
-        if (!li.error) { msgAuth(''); return; }
+        if (!li.error) { LS.set('ch2loginAt', Date.now()); msgAuth(''); return; }
+        msgAuth(isNetErr(li.error) ? authErrText(li.error, '登录') : '❌ 账号已存在'); return;
       }
-      if (error) { msgAuth(isNetErr(error) ? NET_MSG : '❌ ' + error.message); return; }
-      if (!up || !up.user) { msgAuth('❌ 注册失败'); return; }
+      if (error) { msgAuth(authErrText(error, '注册')); return; }
+      if (!up || !up.user) { msgAuth('❌ 注册失败：服务器没有返回账号信息'); return; }
+      if (up.session) LS.set('ch2loginAt', Date.now());
       msgAuth(up.session ? '' : '⚠️ 请到邮箱确认后再登录（或在 Supabase 关闭邮箱确认）');
-    } catch (err) { msgAuth(isNetErr(err) ? NET_MSG : '❌ 注册失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
+    } catch (err) { msgAuth(!sb ? '❌ 程序组件没下载下来（网络不好），请刷新页面再试' : isNetErr(err) ? authErrText(err, '注册') : '❌ 注册失败：' + (err.message || '网络异常')); } finally { btn.disabled = false; }
   });
 
   /* 顶部导航 */
@@ -6588,15 +6670,11 @@ function bindUI() {
 
   /* 聊天窗口 */
   $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  // 历史守卫：iOS 边缘滑退会把「上一条历史」整页滑出来（就是白屏）。做法是始终在自己页面里垫 2 条同文档历史，
-  // 被吃掉一条马上补一条，保证滑退只会退回本页，不会退到真正的前一页。
-  function armGuard(n) {
-    try {
-      let k = (history.state && history.state.app) || 0;
-      for (let i = 0; i < (n || 1); i++) { k++; history.pushState({ app: k }, '', location.href); }
-    } catch (e) {}
+  // 历史记录：只在打开聊天时加一条，所以在聊天里从左边缘滑 = 回到列表。
+  // 以前主页面也垫了两条“守卫”历史：结果在主页面边缘一滑，iOS 先显示一张旧截图（假的消息页，点不动），一秒多才弹回来。现在主页面不垫了，滑了什么都不发生。
+  function armGuard(n) {   // 只在通话中用：通话界面不让滑走
+    try { for (let i = 0; i < (n || 1); i++) history.pushState({ call: 1 }, '', location.href); } catch (e) {}
   }
-  armGuard(2);
   // 边缘滑退：iOS 的系统手势拦不住，但 Safari 有一部分版本会被 preventDefault 拦下，先尽力拦；
   // 真拦不住也没关系——上面的历史守卫保证滑回去还是本页，不会离开应用。
   (function () {
@@ -6614,13 +6692,14 @@ function bindUI() {
     document.addEventListener('touchend', function () { edge = false; }, { passive: true });
     document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
   })();
-  window.addEventListener('popstate', () => {
+  window.addEventListener('popstate', (e) => {
     if (S.call) { armGuard(1); return; }
     if (S.conv) { S.hist = false; closeChat(); return; }
-    armGuard(1);   // 已经在根页面还想退：立刻补一条，别让 iOS 把 App 滑成空白
+    const st = (e && e.state) || history.state;
+    // 关掉聊天后浏览器会留一条“前进”记录：从右边缘往左滑（前进）时，真的把刚才那个聊天打开，
+    // 不再显示一张点不动的截图、过一秒多又弹回来
+    if (st && st.chat && lastChat && lastChat.key) { S.hist = true; openConv(lastChat.key, lastChat.peer).catch(function (x) { logErr('fwd', x); }); }
   });
-  window.addEventListener('pageshow', function (e) { if (!S.conv) armGuard(1); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && !S.conv && (!history.state || !history.state.app)) armGuard(1); });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
     const rt = e.target.closest('.gl-retry');
@@ -7246,17 +7325,8 @@ $('gi-members').onclick = function (e) {
 };
 if ($('me-avatar')) $('me-avatar').onclick = function (e) { e.stopPropagation(); showSelfCard(''); };
 if (document.querySelector('.me-card')) document.querySelector('.me-card').addEventListener('click', function (e) { if (e.target.closest('button')) return; showSelfCard(''); });
-let pwaEvt = null;
-window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); pwaEvt = e; });
-if ($('btn-install')) $('btn-install').onclick = async function () {
-  try {
-    if (pwaEvt) { pwaEvt.prompt(); const r = await pwaEvt.userChoice; pwaEvt = null; toast(r && r.outcome === 'accepted' ? '正在添加…' : '已取消'); return; }
-    const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
-    if (standalone) { toast('已经是桌面应用了'); return; }
-    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    toast(ios ? 'Safari：点分享 → 添加到主屏幕' : '浏览器菜单 → 安装应用 / 添加到主屏幕');
-  } catch (e) { toast('这个浏览器不支持一键添加，用菜单里的“添加到主屏幕”'); }
-};
+if ($('btn-install')) $('btn-install').onclick = function () { showA2HS(false); };
+if ($('auth-install')) { $('auth-install').onclick = function () { showA2HS(false); }; if (isStandaloneApp()) $('auth-install').style.display = 'none'; }
 if ($('btn-exp')) $('btn-exp').onclick = exportSettingsCode;
 if ($('btn-imp')) $('btn-imp').onclick = importSettingsCode;
 if ($('btn-devices')) $('btn-devices').onclick = async function () {
@@ -7422,7 +7492,7 @@ function boot() {
   ready.catch(e => {
     hideSplash();
     logErr('lib', e);
-    var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 依赖库加载失败，请检查网络后刷新页面' + (why ? '（' + why.slice(0, 300) + '）' : '')); } else showBanner('依赖库未加载，当前为离线缓存');
+    var why = (window.__libErr || []).join('；'); if (!S.me) { showAuth(); msgAuth('❌ 程序组件没下载下来（网络不好），请换个网络或稍后刷新页面再试'); LOG && LOG.push && LOG.push('lib: ' + why.slice(0, 300)); } else showBanner('依赖库未加载，当前为离线缓存');
   });
   bindSW(); bindUI(); bindViewport(); setupManifest();
   try {
@@ -7438,7 +7508,7 @@ function boot() {
   try { verBoot(); } catch (e) {}
   window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
 document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { retryBadImgs(); } catch (e) {} } });
 // 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）

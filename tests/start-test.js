@@ -54,7 +54,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   mode = 'nolib'; await pg.evaluate(() => { try { Object.keys(localStorage).forEach(k => /^ch2lib/.test(k) && localStorage.removeItem(k)); } catch (e) {} });
   await pg.goto('http://localhost:8766/?v=3'); await pg.waitForTimeout(16500);
   s = await st(); const am = await pg.evaluate(() => (document.getElementById('auth-msg') || {}).textContent || '');
-  ok(s.view === 'auth-view' && !s.splash && (/依赖库/.test(am)), '依赖库下载不到：进登录页并说明原因「' + am.slice(0, 40) + '」' + JSON.stringify(s));
+  ok(s.view === 'auth-view' && !s.splash && (/程序组件没下载下来/.test(am)), '程序组件下载不到：进登录页并用中文说明原因「' + am.slice(0, 40) + '」' + JSON.stringify(s));
   // 5 页面空白（程序跑了但什么视图都没显示）→ 15 秒后救援层
   mode = 'ok'; await pg.goto('http://localhost:8766/?v=4'); await pg.waitForTimeout(800);
   await pg.evaluate(() => { const off = () => document.querySelectorAll('#auth-view.active, #app-view.active').forEach(e => e.classList.remove('active')); off(); new MutationObserver(off).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); });
