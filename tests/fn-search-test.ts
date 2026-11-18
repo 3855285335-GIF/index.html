@@ -10,7 +10,7 @@ Deno.env.set('TAVILY_API_KEY', 'tvly-test-key');
 // deno-lint-ignore no-explicit-any
 type Any = any;
 const UID = '11111111-1111-4111-8111-111111111111', TOK = 'aaa.bbb.ccc', ALL = '00000000-0000-0000-0000-000000000000';
-let CONF: Any = {};
+let CONF: Any = {}, DBKEYS: Any[] = [];
 const cache = new Map<string, Any>(), counts = new Map<string, number>();
 let rpcMissing = false, siteCalls: string[] = [], exaBodies: Any[] = [], tavBodies: Any[] = [];
 const calls: Record<string, number> = {};
@@ -39,6 +39,7 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     if (u.pathname === '/auth/v1/user') return H.get('authorization') === 'Bearer ' + TOK ? J({ id: UID }) : J({ msg: 'bad jwt' }, 403);
     if (H.get('authorization') !== 'Bearer service.jwt.key') return J({ msg: 'no auth' }, 401);
     if (u.pathname === '/rest/v1/app_config') return J([{ value: CONF }]);
+    if (u.pathname === '/rest/v1/search_keys') return J(DBKEYS);
     if (u.pathname === '/rest/v1/search_cache') {
       if (m === 'GET') {
         const f = u.searchParams.get('k') || '';
@@ -74,8 +75,8 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     hitc('tavily'); const b = JSON.parse(init.body); tavBodies.push(b);
     if (H.get('authorization') !== 'Bearer tvly-test-key') return J({ detail: { error: 'Unauthorized' } }, 401);
     if (tavMode === 'empty') return J({ detail: { error: "This request exceeds your plan's set usage limit." } }, 432);
-    if (b.include_images) return J({ results: [{ title: '极光页', url: 'https://travel.example.org/a', content: 'x', images: [{ url: 'https://img.example/1.jpg', description: '极光一' }, { url: 'https://img.example/2.jpg', description: '极光二' }] }], images: [{ url: 'https://img.example/2.jpg', description: '重复' }, { url: 'https://img.example/3.jpg', description: '极光三' }] });
-    return J({ results: [{ title: 'Tavily 的结果', url: 'https://t.example.com/1', content: '来自 Tavily', score: 0.9, published_date: '2026-11-10' }] });
+    if (b.include_images) return J({ results: [{ title: '极光页', url: 'https://travel.example.org/a', content: 'x', images: [{ url: 'https://img.example/1.jpg', description: '极光一' }, { url: 'https://img.example/2.jpg', description: '极光二' }] }], images: [{ url: 'https://img.example/2.jpg', description: '重复' }, { url: 'https://img.example/3.jpg', title: '想看极光来这里', description: 'Green aurora over a lake.' }] });
+    return J({ results: [{ title: 'Tavily 的结果', url: 'https://t.example.com/1', content: 'Title: 页面标题\n### 入门视频 (从这里开始！)\n\n1. **第一条** [链接](https://x.example/) 来自 Tavily [...] 后面', score: 0.9, published_date: '2026-11-10' }] });
   }
   if (u.host === 'zh.wikipedia.org' || u.host === 'en.wikipedia.org') {
     hitc('wiki');
@@ -135,6 +136,12 @@ const reset = (c: Any = {}) => { __test.reset(); CONF = c; };
 
 let r = await call({ op: 'ping' }, null);
 ok(r.j.ok && r.j.keys.exa && r.j.keys.tavily && r.cors === '*', '检查服务器（不用登录）：两家密钥都填了 → ' + JSON.stringify(r.j));
+Deno.env.set('TAVILY_API_KEY', ''); DBKEYS = [{ name: 'TAVILY_API_KEY', value: ' tvly-test-key ' }]; __test.reset();
+r = await call({ op: 'ping' }, null);
+ok(r.j.keys.tavily === true, '环境变量里没有、数据库 search_keys 表里有：照样读得到');
+r = await call({ op: 'search', q: '数据库里的密钥', type: 'web', src: 'tavily' });
+ok(r.j.ok && r.j.src === 'tavily', '用数据库里的 Tavily 密钥能搜（前后空格去掉）');
+Deno.env.set('TAVILY_API_KEY', 'tvly-test-key'); DBKEYS = []; __test.reset(); counts.clear(); cache.clear();
 r = await call({ op: 'search', q: '天气' }, null);
 ok(r.st === 401 && r.j.code === 'auth', '没登录：拒绝 → ' + r.j.msg);
 r = await call({ op: 'search', q: '天气' }, 'sb_publishable_x');
@@ -151,13 +158,14 @@ const eb = exaBodies[exaBodies.length - 1];
 ok(eb.type === 'lite' && eb.numResults === 10 && eb.contents && eb.startPublishedDate && Date.now() - Date.parse(eb.startPublishedDate) > 6 * 86400000, 'Exa 请求：简版、10 条、带摘要、“一周内”换成起始日期');
 ok(r.j.items[0].s === '量子计算是…… … 第二句' && r.j.items[0].d === '2025-01-02', '摘要和日期整理好了 → ' + r.j.items[0].s);
 ok(r.j.wiki && r.j.wiki.t === '量子计算' && r.j.wiki.s.length <= 290 && r.j.wiki.u.includes('zh.m.wikipedia.org'), '百科卡片：标题对得上才显示、摘要截短、链到手机版');
-ok(r.j.used === 1 && r.j.left === 299, '记下 Exa 本月用了 1 次、今天还能搜 299 次（默认每人每天 300 次）');
+ok(r.j.used === 1 && r.j.left === undefined, '记下 Exa 本月用了 1 次；默认不限次数，所以不报还剩几次');
 await settle();
 const e1 = calls.exa;
 r = await call({ op: 'search', q: '量子计算', type: 'web', tbs: 'week' });
 ok(r.j.ok && r.j.cached && calls.exa === e1, '再搜一次同样的词：直接用缓存，不花额度');
 r = await call({ op: 'search', q: '量子计算', type: 'web', src: 'tavily' });
 ok(r.j.ok && r.j.src === 'tavily' && r.j.items[0].t === 'Tavily 的结果', '点“换 Tavily”：用 Tavily 重搜');
+ok(r.j.items[0].s === '入门视频 (从这里开始！) 1. 第一条 链接 来自 Tavily … 后面', 'Tavily 的摘要去掉排版符号 → ' + r.j.items[0].s);
 const tb = tavBodies[tavBodies.length - 1];
 ok(tb.language === 'zh-cn' && tb.search_depth === 'basic' && tb.topic === 'general', 'Tavily 请求：中文优先、基础档（1 次额度）');
 r = await call({ op: 'search', q: '别的词', type: 'web', pref: 'tavily' });
@@ -183,6 +191,7 @@ r = await call({ op: 'search', q: '量子 视频', type: 'videos' });
 ok(r.j.ok && exaBodies[exaBodies.length - 1].includeDomains.includes('bilibili.com') && r.j.items[0].img && r.j.items[0].ch === '频道', '视频：只在 YouTube、B 站、Vimeo 里搜，带封面');
 r = await call({ op: 'search', q: '极光', type: 'images' });
 ok(r.j.ok && r.j.src === 'tavily' && tavBodies[tavBodies.length - 1].include_images, '图片：先用 Tavily（它能从网页里找图）');
+ok(r.j.items.find((x: Any) => x.img === 'https://img.example/3.jpg').t === '想看极光来这里', '图片文字优先用中文网页标题，不用英文描述');
 ok(r.j.items.length === 4 && r.j.items[0].u === 'https://travel.example.org/a' && r.j.items.some((x: Any) => x.src === '维基共享资源' && x.w === 4000), '图片：去重、带来源网页，再加上维基共享资源的图（PDF 不要） → ' + r.j.items.length + ' 张');
 
 // ---- 用完自动换 ----
@@ -221,6 +230,9 @@ r = await call({ op: 'usage' });
 ok(r.j.ok && r.j.used.exa >= 1 && r.j.used.tavily >= 1 && r.j.free.exa === 2500 && r.j.free.tavily === 1000, '查本月用量 → ' + JSON.stringify(r.j.used));
 
 // ---- 上限 ----
+reset({ per_user_day: 1000000000 }); counts.clear(); cache.clear();
+r = await call({ op: 'search', q: '不限次数' });
+ok(r.j.ok && r.j.left === undefined, '不限次数时：不报“今天还剩几次”');
 reset({ per_user_day: 2 }); counts.clear(); cache.clear();
 await call({ op: 'search', q: 'a1' }); await call({ op: 'search', q: 'a2' });
 const e3 = calls.exa;

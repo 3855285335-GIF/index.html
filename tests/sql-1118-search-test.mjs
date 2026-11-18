@@ -29,7 +29,8 @@ ok(stopped && !(await wrong.query(`select to_regclass('public.search_cache') r`)
 
 const sql = fs.readFileSync(FILE, 'utf8');
 let r = await db.exec(sql); console.log('第一遍：', JSON.stringify(r[r.length - 1].rows));
-ok(r[r.length - 1].rows.length === 4 && r[r.length - 1].rows.every(x => x.结果 !== '否'), '检查表四行都不是“否”');
+ok(r[r.length - 1].rows.length === 5 && r[r.length - 1].rows.every(x => x.结果 !== '否'), '检查表五行都不是“否”');
+ok(r[r.length - 1].rows[3].结果.startsWith('每人每天不限次数'), '默认不限次数');
 // 用户改过上限后再跑一遍，不能被冲掉
 await db.exec(`update public.app_config set value = jsonb_set(value, '{per_user_day}', '5') where key = 'search'`);
 r = await db.exec(sql); console.log('第二遍：', JSON.stringify(r[r.length - 1].rows));
@@ -75,6 +76,17 @@ const p5 = await as('authenticated', ME, `insert into public.search_prefs(prefs)
 ok(p5.rows && p5.rows[0].prefs.pin[0] === 'a.com', '再存一次是覆盖（手机上用的就是这个写法）');
 const p6 = await as('anon', null, `select * from public.search_prefs`);
 ok(!!p6.err || p6.rows.length === 0, '没登录看不到任何人的规则');
+// 密钥表：手机上（登录、未登录）读不到也写不进；服务器能存能读
+await db.exec(`insert into public.search_keys (name, value) values ('TAVILY_API_KEY', 'tvly-test') on conflict (name) do update set value = excluded.value, updated_at = now()`);
+for (const role of ['anon', 'authenticated']) {
+  const a = await as(role, role === 'authenticated' ? ME : null, `select * from public.search_keys`);
+  const b = await as(role, role === 'authenticated' ? ME : null, `insert into public.search_keys (name, value) values ('EXA_API_KEY', 'x')`);
+  ok(!!a.err && !!b.err, role + '：读不到密钥表、也写不进去');
+}
+const sk = await as('service_role', null, `select value from public.search_keys where name = 'TAVILY_API_KEY'`);
+ok(sk.rows && sk.rows[0].value === 'tvly-test', '服务器：能读密钥');
+r = await db.exec(sql);
+ok((await db.query(`select value from public.search_keys where name = 'TAVILY_API_KEY'`)).rows[0].value === 'tvly-test', '再跑一遍 SQL 不会删掉已存的密钥');
 const cfg = await as('anon', null, `select value from public.app_config where key = 'search'`);
 ok(cfg.rows && cfg.rows[0].value.farms.length > 5, '默认名单谁都能读（手机上要用来显示）');
 

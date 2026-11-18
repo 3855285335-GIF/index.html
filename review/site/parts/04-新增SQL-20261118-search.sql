@@ -2,6 +2,7 @@
 --   1. search_cache：搜索结果缓存 24 小时，同样的搜索不重复花额度（只有服务器能读写）
 --   2. search_usage：每人每天搜索次数、每家搜索服务每月用了多少次（只有服务器能读写）
 --   3. search_prefs：每个人自己的搜索规则（置顶网站、不想看的网站、开关），换手机也在
+--   3b. search_keys：搜索服务的密钥（只有服务器能读）
 --   4. app_config 里的 'search'：先用哪家、每人每天上限、营销号名单、优先网站名单——以后改只要运行 SQL
 -- 整份在一个事务里，出错会全部撤销。最后列一张检查表。
 
@@ -63,12 +64,26 @@ create policy search_prefs_own on public.search_prefs for all to authenticated
   using (uid = auth.uid()) with check (uid = auth.uid());
 grant select, insert, update on public.search_prefs to authenticated;
 
+-- ========== 3b. 搜索服务的密钥（Exa、Tavily 等）==========
+-- 不放 app_config：那张表谁都能读。这张表开了行级安全、收回了手机端的全部权限，只有服务器函数能读。
+-- 这里只建表，不写任何密钥；密钥用下面这种语句单独存（改了 1 分钟内生效，不用重新部署）：
+--   insert into public.search_keys (name, value) values ('EXA_API_KEY', '你的密钥')
+--   on conflict (name) do update set value = excluded.value, updated_at = now();
+create table if not exists public.search_keys (
+  name       text primary key,
+  value      text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.search_keys enable row level security;
+revoke all on public.search_keys from public, anon, authenticated;
+grant select, insert, update, delete on public.search_keys to service_role;
+
 -- ========== 4. 默认名单和上限（已经有就不覆盖，你改过的不会被冲掉） ==========
 insert into public.app_config (key, value, updated_at) select 'search', jsonb_build_object(
   'enabled', true,
-  'per_user_day', 300,           -- 每人每天最多搜几次（网页、图片、视频、新闻；搜过的词 24 小时内再搜不算）
-  'read_per_user_day', 300,      -- 每人每天最多打开几次简洁阅读（含看存档）
-  'deep_per_user_day', 200,      -- 每人每天最多“深挖”几次（含查历史版本；这些都免费，上限只是防止被滥用）
+  'per_user_day', 1000000000,    -- 每人每天最多搜几次（10 亿 = 不限）（网页、图片、视频、新闻；搜过的词 24 小时内再搜不算）
+  'read_per_user_day', 1000000000, -- 每人每天最多打开几次简洁阅读（含看存档）
+  'deep_per_user_day', 1000000000, -- 每人每天最多“深挖”几次（含查历史版本；这些都免费，上限只是防止被滥用）
   'order', jsonb_build_array('exa', 'tavily'),       -- 网页、新闻、视频：先用 Exa，用完换 Tavily
   'img_order', jsonb_build_array('tavily', 'exa'),   -- 图片：先用 Tavily（它能从网页里找图）
   'exa_free', 2500,              -- 只用来在规则页显示“免费约多少次”，不限制使用
@@ -93,7 +108,9 @@ select 2, '用量计数（每人每天、每家每月）', case when to_regproce
 union all
 select 3, '个人搜索规则表（只能看到自己的）', case when exists (select 1 from pg_policies where tablename = 'search_prefs' and policyname = 'search_prefs_own') then '是' else '否' end
 union all
-select 4, '默认名单和上限', coalesce((select '每人每天 ' || (value ->> 'per_user_day') || ' 次；先用 ' || initcap(value -> 'order' ->> 0) || '，用完换 ' || initcap(value -> 'order' ->> 1) from public.app_config where key = 'search'), '否');
+select 4, '默认名单和上限', coalesce((select case when (value ->> 'per_user_day')::numeric >= 100000 then '每人每天不限次数' else '每人每天 ' || (value ->> 'per_user_day') || ' 次' end || '；先用 ' || initcap(value -> 'order' ->> 0) || '，用完换 ' || initcap(value -> 'order' ->> 1) from public.app_config where key = 'search'), '否')
+union all
+select 5, '密钥表（手机读不到）', case when to_regclass('public.search_keys') is not null and not has_table_privilege('anon', 'public.search_keys', 'select') and not has_table_privilege('authenticated', 'public.search_keys', 'select') then '是；已存 ' || (select count(*) from public.search_keys) || ' 个密钥' else '否' end;
 
 commit;
 

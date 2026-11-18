@@ -12,7 +12,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261118-4';
+const VER = '20261118-5';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -23,7 +23,10 @@ const pickKey = (name: string, legacy: string) => {
 };
 const SRK = pickKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
 const PUBK = pickKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY');
-const KEY: Record<string, () => string> = { exa: () => env('EXA_API_KEY'), tavily: () => env('TAVILY_API_KEY') };
+// 搜索服务的密钥：先看服务器环境变量，没有就用数据库 search_keys 表里的（只有服务器能读，改了 1 分钟内生效）
+let DBK: Record<string, string> = {}, DBK_AT = 0;
+const sec = (k: string) => env(k) || DBK[k] || '';
+const KEY: Record<string, () => string> = { exa: () => sec('EXA_API_KEY'), tavily: () => sec('TAVILY_API_KEY') };
 const NAME: Record<string, string> = { exa: 'Exa', tavily: 'Tavily' };
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -46,6 +49,8 @@ const link = (v: Any) => (typeof v === 'string' && /^https?:\/\//i.test(v)) ? v.
 const num = (v: Any) => (typeof v === 'number' && isFinite(v)) ? Math.round(v) : undefined;
 const day10 = (v: Any) => { const t = Date.parse(String(v || '')); return isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 10) : undefined; };
 const strip = (s: Any) => String(s || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+// Tavily 的摘要是带排版符号的长文（###、[...]、**、换行），整理成一两句干净的话
+const tidy = (v: Any, n = 220) => { const t = String(v || '').replace(/^\s*Title:[^\n]*\n/i, '').replace(/\[\.\.\.\]/g, '…').replace(/^\s*#{1,6}\s*/gm, '').replace(/\*\*|__|`/g, '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim(); return t ? (t.length > n ? t.slice(0, n) + '…' : t) : undefined; };
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 function bg(p: Promise<unknown>) { p.catch(() => {}); try { (globalThis as Any).EdgeRuntime?.waitUntil?.(p); } catch { /* 没有也行 */ } }
 async function tfetch(u: string, init: RequestInit = {}, ms = 8000) {
@@ -70,7 +75,7 @@ function dbh(extra: Record<string, string> = {}) {
 const monthStart = () => { const d = new Date(Date.now() + 8 * 3600000); return d.toISOString().slice(0, 8) + '01'; };   // 北京时间的本月 1 号
 
 /* ---------- 配置（数据库里改，1 分钟内生效） ---------- */
-const CFG_DEF = { enabled: true, per_user_day: 300, read_per_user_day: 300, deep_per_user_day: 200, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000 };
+const CFG_DEF = { enabled: true, per_user_day: 1000000000, read_per_user_day: 1000000000, deep_per_user_day: 1000000000, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000 };
 let CFG: Any = null, CFG_AT = 0;
 async function cfg() {
   if (CFG && Date.now() - CFG_AT < 60000) return CFG;
@@ -80,6 +85,15 @@ async function cfg() {
     CFG = { ...CFG_DEF, ...((a && a[0] && a[0].value) || {}) };
   } catch { CFG = CFG || { ...CFG_DEF }; }
   CFG_AT = Date.now(); return CFG;
+}
+
+async function loadKeys() {
+  if (DBK_AT && Date.now() - DBK_AT < 60000) return;
+  try {
+    const r = await tfetch(SB_URL + '/rest/v1/search_keys?select=name,value', { headers: dbh() }, 4000);
+    if (r.ok) { const o: Record<string, string> = {}; for (const x of await r.json()) if (x && x.name && x.value) o[x.name] = String(x.value).trim(); DBK = o; }
+  } catch { /* 读不到就只用环境变量 */ }
+  DBK_AT = Date.now();
 }
 
 /* ---------- 谁在用（用登录凭证向登录服务确认，5 分钟内不重复问） ---------- */
@@ -158,7 +172,7 @@ async function exa(type: string, q: string, tbs: string, sites: string[] = []) {
   const res = ((r.j && r.j.results) || []).filter((x: Any) => link(x.url));
   if (type === 'images') return { items: res.filter((x: Any) => link(x.image)).map((x: Any) => ({ t: str(x.title, 200), img: link(x.image), th: link(x.image), u: link(x.url), src: hostOf(x.url) })) };
   if (type === 'videos') return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), img: link(x.image), src: hostOf(x.url), ch: str(x.author, 80), d: day10(x.publishedDate) })) };
-  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(Array.isArray(x.highlights) ? x.highlights.join(' … ') : x.text, 400), d: day10(x.publishedDate), img: type === 'news' ? link(x.image) : undefined })) };
+  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: tidy(Array.isArray(x.highlights) ? x.highlights.join(' … ') : x.text, 300), d: day10(x.publishedDate), img: type === 'news' ? link(x.image) : undefined })) };
 }
 async function tavily(type: string, q: string, tbs: string, sites: string[] = []) {
   const body: Any = { query: q, search_depth: 'basic', max_results: type === 'images' ? 20 : 10, topic: type === 'news' ? 'news' : 'general' };
@@ -175,13 +189,13 @@ async function tavily(type: string, q: string, tbs: string, sites: string[] = []
   const res = ((r.j && r.j.results) || []).filter((x: Any) => link(x.url));
   if (type === 'images') {
     const items: Any[] = [], seen = new Set<string>();
-    const add = (im: Any, page?: Any) => { const u = link(typeof im === 'string' ? im : im && im.url); if (!u || seen.has(u)) return; seen.add(u); items.push({ t: str(im && im.description, 200) || str(page && page.title, 200), img: u, th: u, u: page ? link(page.url) : undefined, src: page ? hostOf(page.url) : hostOf(u) }); };
+    const add = (im: Any, page?: Any) => { const u = link(typeof im === 'string' ? im : im && im.url); if (!u || seen.has(u)) return; seen.add(u); items.push({ t: str(im && im.title, 200) || str(page && page.title, 200) || str(im && im.description, 200), img: u, th: u, u: page ? link(page.url) : undefined, src: page ? hostOf(page.url) : hostOf(u) }); };   // 图片自带的是网页标题（中文）和一句英文描述：优先显示标题
     res.forEach((p: Any) => (p.images || []).forEach((im: Any) => add(im, p)));
     ((r.j && r.j.images) || []).forEach((im: Any) => add(im));
     return { items: items.slice(0, 60) };
   }
-  if (type === 'videos') return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(x.content, 200), src: hostOf(x.url), d: day10(x.published_date) })) };
-  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(x.content, 400), d: day10(x.published_date) })) };
+  if (type === 'videos') return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: tidy(x.content, 160), src: hostOf(x.url), d: day10(x.published_date) })) };
+  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: tidy(x.content), d: day10(x.published_date) })) };
 }
 const SRC: Record<string, (type: string, q: string, tbs: string, sites?: string[]) => Promise<Any>> = { exa, tavily };
 
@@ -242,7 +256,7 @@ async function archiveSearch(q: string) {
 }
 async function openalex(q: string) {
   const p = new URLSearchParams({ search: q, per_page: '8', select: 'id,display_name,publication_year,doi,primary_location,open_access,authorships,cited_by_count' });
-  if (env('OPENALEX_API_KEY')) p.set('api_key', env('OPENALEX_API_KEY'));
+  if (sec('OPENALEX_API_KEY')) p.set('api_key', sec('OPENALEX_API_KEY'));
   const j = await getJson('https://api.openalex.org/works?' + p);
   return ((j && j.results) || []).map((w: Any) => {
     const oa = w.open_access && link(w.open_access.oa_url), land = w.primary_location && link(w.primary_location.landing_page_url);
@@ -253,7 +267,7 @@ async function openalex(q: string) {
 }
 async function github(q: string) {
   const h: Record<string, string> = { Accept: 'application/vnd.github+json' };
-  if (env('GITHUB_TOKEN')) h.Authorization = 'Bearer ' + env('GITHUB_TOKEN');
+  if (sec('GITHUB_TOKEN')) h.Authorization = 'Bearer ' + sec('GITHUB_TOKEN');
   const j = await getJson('https://api.github.com/search/repositories?' + new URLSearchParams({ q, per_page: '6' }), h);
   return ((j && j.items) || []).map((x: Any) => ({ t: str(x.full_name, 120), u: link(x.html_url), s: str(x.description, 240), f: ['★ ' + (x.stargazers_count || 0), x.language, day10(x.pushed_at) && '更新于 ' + day10(x.pushed_at)].filter(Boolean).join(' · ') })).filter((x: Any) => x.u);
 }
@@ -323,7 +337,7 @@ async function doSearch(uid: string, b: Any, c: Any) {
     out.type = type; out.q = q; out.src = s;
     const used = await bump(ALL, 'm:' + s, 1000000000, true).catch(() => null);
     bg(cput(ck[s], out));
-    return json({ ok: true, cached: false, left: Math.max(0, c.per_user_day - n), used, ...out });
+    return json({ ok: true, cached: false, left: c.per_user_day >= 100000 ? undefined : Math.max(0, c.per_user_day - n), used, ...out });   // 不限次数时不报“还剩几次”
   }
   if (type === 'images') { const cm = await comP; if (cm.length) return json({ ok: true, cached: false, type, q, src: 'commons', items: cm, partial: true }); }
   return failAll(want, why);
@@ -495,7 +509,8 @@ export async function handle(req: Request): Promise<Response> {
   if (req.method !== 'POST') return fail('bad', '只接受 POST', 405);
   let b: Any; try { b = await req.json(); } catch { return fail('bad', '请求格式不对', 400); }
   if (!b || typeof b !== 'object') return fail('bad', '请求格式不对', 400);
-  if (b.op === 'ping') return json({ ok: true, v: VER, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily() } });
+  await loadKeys();
+  if (b.op === 'ping') return json({ ok: true, v: VER, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily(), openalex: !!sec('OPENALEX_API_KEY') } });
   let uid: string | null = null; try { uid = await uidOf(req); } catch { uid = null; }
   if (!uid) return fail('auth', '登录过期了，重新登录一下', 401);
   try {
@@ -512,5 +527,5 @@ export async function handle(req: Request): Promise<Response> {
     return fail('server', '服务器出错了：' + String((e as Any)?.message || e).slice(0, 120));
   }
 }
-export const __test = { reset() { CFG = null; CFG_AT = 0; UIDS.clear(); } };
+export const __test = { reset() { CFG = null; CFG_AT = 0; UIDS.clear(); DBK = {}; DBK_AT = 0; } };
 if (!env('CHATTER_TEST')) Deno.serve(handle);
