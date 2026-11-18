@@ -64,7 +64,7 @@ create policy search_prefs_own on public.search_prefs for all to authenticated
 grant select, insert, update on public.search_prefs to authenticated;
 
 -- ========== 4. 默认名单和上限（已经有就不覆盖，你改过的不会被冲掉） ==========
-insert into public.app_config (key, value, updated_at) values ('search', jsonb_build_object(
+insert into public.app_config (key, value, updated_at) select 'search', jsonb_build_object(
   'enabled', true,
   'per_user_day', 80,            -- 每人每天最多搜几次（缓存命中不算）
   'read_per_user_day', 300,      -- 每人每天最多打开几次简洁阅读
@@ -78,8 +78,8 @@ insert into public.app_config (key, value, updated_at) values ('search', jsonb_b
   'direct', jsonb_build_array(   -- 要登录或者不让服务器取内容的网站：点了直接用浏览器打开，不走简洁阅读
     'x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'pinterest.com', 'quora.com',
     'tiktok.com', 'weibo.com', 'weibo.cn', 'xiaohongshu.com', 'douyin.com', 'zhihu.com')
-), now())
-on conflict (key) do nothing;
+), now()
+where not exists (select 1 from public.app_config where key = 'search');
 
 -- ========== 检查表 ==========
 insert into _chatter_1118

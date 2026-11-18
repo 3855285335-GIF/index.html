@@ -12,7 +12,7 @@ create schema auth;
 create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
 create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
 create table public.profiles(id uuid, account_id text);
-create table public.app_config(key text primary key, value jsonb, updated_at timestamptz default now());
+create table public.app_config(key text, value jsonb, updated_at timestamptz default now());   -- 故意不设主键：线上表结构没核实，SQL 不能依赖它
 alter table public.app_config enable row level security;
 create policy app_config_read on public.app_config for select using (true);
 insert into public.app_config values ('ice', '{"x":1}', now());
