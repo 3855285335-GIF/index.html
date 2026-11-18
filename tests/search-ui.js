@@ -17,12 +17,20 @@ const WEB = { ok: true, cached: false, left: 76, type: 'web', q: '量子计算',
     { t: 'qiskit/qiskit：开源的量子计算工具包', u: 'https://github.com/qiskit/qiskit', s: 'Qiskit 是一个开源的量子计算软件开发工具包，可以在模拟器和真实量子硬件上运行程序。' },
     { t: '如何通俗地解释量子计算？', u: 'https://www.zhihu.com/question/1', s: '量子计算机不是更快的普通电脑，而是在某些特定问题上换了一种算法……' },
     { t: '量子计算的现状与挑战（综述）', u: 'https://arxiv.org/abs/0000.00000', s: '本文回顾了超导、离子阱、光量子等主要技术路线的进展，并讨论纠错和规模化的难点。', d: '2026年3月' }
-  ], rel: ['量子计算机原理', '量子比特', '量子纠缠', '量子计算 入门书'] };
-const IMGS = { ok: true, type: 'images', q: '极光', page: 1, items: [['5b8def', '1fd1a5', 600, 400], ['22c08a', '0e5d4a', 400, 600], ['8b7cf6', '2b1d6e', 600, 450], ['e39a2d', 'a33b54', 500, 500], ['1fd1a5', '2b6cb0', 600, 340], ['e8508c', '6c5ce7', 420, 600], ['3a8ee6', '0b1f4d', 600, 400], ['f6c453', 'e8508c', 600, 600]].map((c, i) => ({ t: '极光照片 ' + (i + 1), img: IMG('i' + i, c[0], c[1]), th: IMG('t' + i, c[0], c[1]), w: c[2], h: c[3], u: 'https://photos.example.com/p/' + i, src: ['photos.example.com', 'travel.example.org', 'nature.example.net'][i % 3] })) };
-const VIDS = { ok: true, type: 'videos', q: '量子计算', page: 1, items: [
+  ], src: 'exa', used: 120 };
+const TAV = { ok: true, type: 'web', q: '量子计算', src: 'tavily', used: 31, items: [{ t: '量子计算科普合集', u: 'https://kepu.example.cn/q', s: '来自 Tavily 的另一批结果。' }, { t: '量子计算 - 维基百科，自由的百科全书', u: 'https://zh.wikipedia.org/wiki/x', s: '……' }] };
+const IMGS = { ok: true, type: 'images', q: '极光', src: 'tavily', items: [['5b8def', '1fd1a5', 600, 400], ['22c08a', '0e5d4a', 400, 600], ['8b7cf6', '2b1d6e', 600, 450], ['e39a2d', 'a33b54', 500, 500], ['1fd1a5', '2b6cb0', 600, 340], ['e8508c', '6c5ce7', 420, 600], ['3a8ee6', '0b1f4d', 600, 400], ['f6c453', 'e8508c', 600, 600]].map((c, i) => ({ t: '极光照片 ' + (i + 1), img: IMG('i' + i, c[0], c[1]), th: IMG('t' + i, c[0], c[1]), w: c[2], h: c[3], u: 'https://photos.example.com/p/' + i, src: ['photos.example.com', 'travel.example.org', 'nature.example.net'][i % 3] })) };
+const VIDS = { ok: true, type: 'videos', q: '量子计算', src: 'exa', items: [
   { t: '十分钟看懂量子计算', u: 'https://www.youtube.com/watch?v=abcdefghijk', img: IMG('v1', '6c5ce7', '1fd1a5'), dur: '10:24', src: 'YouTube', ch: '科普频道', d: '3 个月前' },
   { t: '量子计算机到底是怎么工作的？', u: 'https://www.bilibili.com/video/BV1xx411c7mD', img: IMG('v2', 'e8508c', 'e39a2d'), dur: '18:02', src: 'Bilibili', ch: '物理小站', d: '1 年前' },
   { t: '量子比特和普通比特的区别', u: 'https://vimeo.com/1', img: IMG('v3', '3a8ee6', '22c08a'), dur: '6:47', src: 'Vimeo', ch: 'Lab', d: '2 周前' }] };
+const DEEP = { ok: true, type: 'deep', q: '量子计算', down: ['GitHub'], groups: [
+  { k: 'wiki', n: '维基百科', items: [{ t: '量子计算', u: 'https://zh.m.wikipedia.org/wiki/x', s: '量子计算是一种遵循量子力学规律调控量子信息单元进行计算的新型计算模式……', f: '更新于 2026-09-01' }, { t: '量子比特', u: 'https://zh.m.wikipedia.org/wiki/y', s: '量子比特是量子信息的基本单位……' }] },
+  { k: 'archive', n: '互联网档案馆', items: [{ t: '量子计算导论（扫描版）', u: 'https://archive.org/details/quantum-book', s: '一本 2001 年出版的入门教材。', f: '书 / 文档 · 2001', img: IMG('ar', 'e39a2d', '8b7cf6'), ext: true }] },
+  { k: 'papers', n: '论文', items: [{ t: '量子计算的现状与挑战', u: 'https://arxiv.org/pdf/0000.pdf', s: '张三、李四', f: '2020 · 被引用 12 次 · 可以免费看全文', ext: true }] },
+  { k: 'hn', n: 'Hacker News 讨论', items: [{ t: 'Quantum computing, explained simply', u: 'https://gone.example.com/post', c: 'https://news.ycombinator.com/item?id=123', f: '321 分 · 45 条评论 · 2026-01-01' }] }] };
+const OLD = { ok: true, u: 'https://gone.example.com/post', title: 'Quantum computing, explained simply', site: 'gone.example.com', date: '2019-02-20', len: 900, arch: '20190302000000',
+  html: '<p>This is the version saved by the Internet Archive in 2019. The original page has since been deleted.</p><p>Quantum computers use qubits, which can be in a superposition of 0 and 1 until they are measured.</p>' };
 const P = t => '<p>' + t + '</p>';
 const READ = { ok: true, u: 'https://example.org/quantum-intro', title: '量子计算入门：从量子比特到量子门', site: 'example.org', date: '2026-10-21', len: 1800,
   html: P('普通电脑里的一个比特，要么是 0，要么是 1。量子计算机里的量子比特不一样：在被测量之前，它可以处在 0 和 1 的叠加状态。') +
@@ -34,9 +42,18 @@ const READ = { ok: true, u: 'https://example.org/quantum-intro', title: '量子�
 const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${CSS}</style></head>
 <body><div class="app-container"></div><script>
 window.__log = []; window.__opened = []; window.open = u => { __opened.push(u); };
-const DATA = ${JSON.stringify({ WEB, IMGS, VIDS, READ })};
+const DATA = ${JSON.stringify({ WEB, TAV, IMGS, VIDS, READ, DEEP, OLD })};
 window.__chWS = {
-  call: async b => { __log.push(b); await new Promise(r => setTimeout(r, 60)); if (b.op === 'read') return DATA.READ; return b.type === 'images' ? DATA.IMGS : b.type === 'videos' ? DATA.VIDS : Object.assign({}, DATA.WEB, { q: b.q }); },
+  call: async b => {
+    __log.push(b); await new Promise(r => setTimeout(r, 60));
+    if (b.op === 'usage') return { ok: true, used: { exa: 120, tavily: 31 }, free: { exa: 2500, tavily: 1000 }, keys: { exa: true, tavily: true } };
+    if (b.op === 'versions') return { ok: true, url: b.url, list: ['20240501000000', '20190302000000', '20150101000000'] };
+    if (b.op === 'read') { if (b.url.indexOf('gone.example.com') >= 0) return b.at ? DATA.OLD : { ok: false, code: 'fetch', msg: '这个网页已经不存在了' }; return DATA.READ; }
+    if (b.type === 'deep') return DATA.DEEP;
+    if (b.type === 'images') return DATA.IMGS;
+    if (b.type === 'videos') return DATA.VIDS;
+    return b.src === 'tavily' ? Object.assign({}, DATA.TAV, { q: b.q }) : Object.assign({}, DATA.WEB, { q: b.q });
+  },
   toast: m => __log.push({ toast: m }), acts: (t, items) => { window.__acts = items; }, form: () => {}, copy: () => {}, logErr: () => {}, forward: t => __log.push({ fwd: t }),
   sb: () => ({ from: () => { const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: null }), upsert: async () => ({}) }; return q; } }), uid: () => 'u1'
 };
@@ -78,6 +95,12 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('[data-act="tgl-clean"]');
       await pg.click('.ws-r a.t >> text=如何通俗地解释量子计算？');
       ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com') && await on() === 'res', '知乎这类要登录的：直接用浏览器打开');
+      ok(await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Exa'), '结果页标出这次是用 Exa 搜的');
+      await pg.click('[data-act="swap"]'); await pg.waitForSelector('.ws-r a.t >> text=量子计算科普合集');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].src)) === 'tavily' && await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Tavily'), '点“换 Tavily 再搜一次”：用 Tavily 重搜，标签跟着变');
+      await pg.click('[data-act="src"]'); const lab = await pg.evaluate(() => __acts.map(x => x.label).join(' | '));
+      ok(/Exa（本月用了 120 次，免费约 2500 次）/.test(lab) && /Tavily（本月用了 31 次，免费约 1000 次） ✓/.test(lab), '来源菜单里写着每家这个月用了多少次 → ' + lab.slice(0, 60));
+      await pg.evaluate(() => __acts[0].fn()); await pg.waitForSelector('.ws-r a.t >> text=qiskit/qiskit：开源的量子计算工具包');
     }
     await pg.click('.ws-r a.t >> text=量子计算入门：从量子比特到量子门'); await pg.waitForSelector('.ws-body p');
     await shot('3-阅读页');
@@ -89,7 +112,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('.ws-body img'); ok(await on() === 'img', '点文章里的图：看大图'); await pg.goBack(); await pg.waitForTimeout(150);
       ok(await on() === 'read' && await pg.$eval('[data-r="rdsc"]', e => e.scrollTop) > 200, '看完大图返回：回到文章原来的位置');
       await pg.goBack(); await pg.waitForTimeout(150);
-      ok(await on() === 'res' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === 1, '返回结果页：不重新搜');
+      ok(await on() === 'res' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === 3, '返回结果页：不重新搜（一共只有首次、换 Tavily、换回 Exa 这 3 次）');
     } else { await pg.goBack(); await pg.waitForTimeout(150); }
     await pg.click('[data-act="tab"][data-t="images"]'); await pg.waitForSelector('.ws-im img'); await pg.waitForTimeout(300);
     await shot('4-图片');
@@ -102,11 +125,33 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(!(await pg.$('iframe.ws-player')), '离开播放页：视频停掉');
       await pg.click('.ws-vd >> nth=2'); ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('vimeo.com'), '其他网站的视频：用浏览器打开');
     }
-    await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('.ws-rules .ws-sw');
+    await pg.click('[data-act="tab"][data-t="deep"]'); await pg.waitForSelector('.ws-gh'); await pg.waitForTimeout(200);
+    await shot('7-深挖');
+    if (theme === 'light') {
+      ok((await pg.$$eval('.ws-gh b', a => a.map(x => x.textContent))).join(',') === '维基百科,互联网档案馆,论文,Hacker News 讨论' && /这次没连上：GitHub/.test(await pg.$eval('[data-r="res"]', e => e.textContent)), '深挖：按来源分组，连不上的说明一下');
+      ok(!(await pg.$('[data-act="src"]')), '深挖不显示来源和时间筛选（它不花 Exa、Tavily 的次数）');
+      await pg.click('.ws-r a.t >> text=量子计算导论（扫描版）'); ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('archive.org/details'), '档案馆的书：用浏览器打开');
+    }
+    await pg.click('.ws-r a.t >> text=Quantum computing, explained simply'); await pg.waitForSelector('[data-act="rd-arch"]');
+    if (theme === 'light') ok(/已经不存在了/.test(await pg.$eval('[data-r="read"]', e => e.textContent)), '网页没了：说清楚，并给出“看存档”');
+    await pg.click('[data-act="rd-arch"]'); await pg.waitForSelector('.ws-arch');
+    await shot('8-存档');
+    if (theme === 'light') {
+      const b = await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0]);
+      ok(b.at === 'latest' && /2019-03-02 的存档/.test(await pg.$eval('.ws-arch', e => e.textContent)), '看存档：显示是哪一天存的');
+      await pg.click('.ws-tool [data-act="rd-vers"]'); await pg.waitForFunction(() => window.__acts && /2015/.test(__acts.map(x => x.label).join()));
+      const lab = await pg.evaluate(() => __acts.map(x => x.label));
+      ok(lab[0] === '2024 年 5 月 1 日' && lab[1] === '2019 年 3 月 2 日（正在看）', '历史版本：列出每一版，标出正在看的 → ' + lab.slice(0, 2).join(' / '));
+      await pg.click('[data-act="rd-copy"]');
+      await pg.goBack(); await pg.goBack(); await pg.waitForTimeout(150);
+    } else { await pg.goBack(); await pg.goBack(); await pg.waitForTimeout(150); }
+    await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('.ws-rules .ws-sw'); await pg.waitForTimeout(150);
     await shot('6-搜索规则');
     if (theme === 'light') {
+      ok(/用了 120 \/ 2500 次/.test(await pg.$eval('[data-r="rules"]', e => e.textContent)), '规则页：显示这个月每家用了多少次');
       await pg.goBack(); await pg.goBack(); await pg.waitForTimeout(150);
       ok(await on() === 'home', '一路返回：规则 → 结果 → 首页');
+      ok(/最近看过[\s\S]*Quantum computing, explained simply[\s\S]*2019-03-02 存档/.test(await pg.$eval('[data-r="home"]', e => e.textContent)), '首页“最近看过”记下了刚看的文章（含存档）');
       await pg.goBack(); await pg.waitForTimeout(150);
       ok(await pg.$eval('#ws', e => !e.classList.contains('on')), '首页再返回：关掉搜索');
       ok(!errs.length, '没有报错 ' + errs.join(' | '));

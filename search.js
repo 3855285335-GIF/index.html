@@ -1,7 +1,7 @@
-/* Chatter 搜索（第 1 步）：搜索首页、结果页、简洁阅读、搜索规则。
+/* Chatter 搜索：搜索首页、结果页（网页 / 图片 / 视频 / 新闻 / 深挖）、简洁阅读（含存档和历史版本）、搜索规则。
    点顶部的放大镜才下载这个文件，不用搜索的人不多花流量。
    颜色、字体全部用 App 的主题变量（--bg、--accent、--font……），跟着“我”里的主题和字体设置走。
-   搜索结果由服务器函数 chatter-search 返回；排序和过滤在手机上按你的规则做，改规则不花搜索次数。 */
+   搜索结果由服务器函数 chatter-search 返回（Exa、Tavily 和几个免费数据库）；排序和过滤在手机上按你的规则做，改规则不花搜索次数。 */
 (function () {
 'use strict';
 if (window.ChatterSearch) return;
@@ -34,9 +34,8 @@ const I = {
   play: '<path d="M8 5.5v13l11-6.5z"/>',
   img: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M20 16l-5-5-8 8.5"/>'
 };
-const TYPES = [['web', '网页'], ['images', '图片'], ['videos', '视频'], ['news', '新闻']];
-const TBS = [['', '时间不限'], ['qdr:d', '一天内'], ['qdr:w', '一周内'], ['qdr:m', '一个月内'], ['qdr:y', '一年内']];
-const GLS = [['', '不指定'], ['us', '美国'], ['hk', '香港'], ['tw', '台湾'], ['sg', '新加坡'], ['jp', '日本'], ['gb', '英国']];
+const TYPES = [['web', '网页'], ['images', '图片'], ['videos', '视频'], ['news', '新闻'], ['deep', '深挖']];
+const TBS = [['', '时间不限'], ['day', '一天内'], ['week', '一周内'], ['month', '一个月内'], ['year', '一年内']];
 const SIZES = [16, 18, 20, 22];
 const MONO = ['var(--accent)', 'var(--ok)', 'var(--accent2)', '#e39a2d', '#3a8ee6'];
 const monoColor = h => { let n = 0; for (let i = 0; i < h.length; i++) n = (n * 31 + h.charCodeAt(i)) >>> 0; return MONO[n % MONO.length]; };
@@ -73,7 +72,7 @@ function hit(u, list) {
 const normSite = s => { s = String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''); return /^[a-z0-9.-]+\.[a-z0-9-]{2,}(\/\S*)?$/.test(s) ? s : ''; };
 
 /* ---------- 规则（存在账号里，换手机也在；本机也存一份，打开就有） ---------- */
-const prefsDef = () => ({ clean: true, hideFarms: true, gl: '', pin: [], block: [], fav: [] });
+const prefsDef = () => ({ clean: true, hideFarms: true, src: '', pin: [], block: [], fav: [] });
 let P = null, saveT = 0;
 function loadPrefs() {
   const uid = B.uid() || '';
@@ -145,7 +144,8 @@ const CSS = `
 .ws-tile span:last-child{font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-hint{font-size:12.5px;color:var(--muted);margin:10px 4px 0;line-height:1.5}
 .ws-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);flex-shrink:0}
-.ws-tab{height:42px;padding:0 12px;font-size:15px;color:var(--muted);background:transparent;border-radius:0}
+.ws-tab{height:42px;padding:0 10px;font-size:15px;color:var(--muted);background:transparent;border-radius:0;flex-shrink:0}
+.ws-srcb{margin-left:auto;align-self:center;height:30px;padding:0 6px 0 10px;border-radius:15px;background:var(--surface2);color:var(--muted);font-size:12.5px;display:flex;align-items:center;gap:2px;flex-shrink:0;white-space:nowrap}
 .ws-tab.on{color:var(--accent);font-weight:700;box-shadow:inset 0 -3px 0 var(--accent)}
 .ws-list{padding:6px 12px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
 .ws-r{padding:14px 12px 14px 16px;display:flex;flex-direction:column;gap:5px;cursor:pointer;position:relative}
@@ -219,7 +219,7 @@ const CSS = `
 .ws-lead{width:100%;border-radius:18px;margin:0 0 18px;display:block;background:var(--surface2)}
 .ws-from{font-size:12.5px;color:var(--muted);margin-top:24px}
 .ws-from a{color:var(--muted)}
-.ws-tool{display:grid;grid-template-columns:repeat(4,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.ws-tool{display:grid;grid-template-columns:repeat(5,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
 .ws-tool button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
 .ws-tool button.on{color:var(--accent)}
 .ws-v.dk{background:#0b0a10;color:#f1eefb}
@@ -243,11 +243,18 @@ const CSS = `
 .ws-rules summary::-webkit-details-marker{display:none}
 .ws-rules details p{margin:0 0 12px;font-size:13px;color:var(--muted);line-height:1.7;word-break:break-all}
 .ws-rules details+details{border-top:1px solid var(--line)}
+.ws-gh{display:flex;align-items:baseline;justify-content:space-between;padding:14px 16px 2px;font-size:14px}
+.ws-gh span{font-size:12px;color:var(--muted)}
+.ws-lnk{background:transparent;padding:0;font-size:12px;color:var(--accent);border-radius:0}
+.ws-arch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 16px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--accent) 11%,transparent);font-size:13px;line-height:1.5}
+.ws-arch span{flex:1;min-width:150px}
+.ws-arch button{height:30px;padding:0 10px;border-radius:10px;background:var(--surface);color:var(--accent);font-size:12.5px}
+.ws-vd .th .pl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted)}
 `;
 
 /* ---------- 界面骨架 ---------- */
 let root = null;
-const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [] };
+const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null };
 if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
 function bar(id, ph, right) {
   return '<div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button>' +
@@ -264,7 +271,7 @@ function build() {
     '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
     '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
     '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div><div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
-      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
+      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-vers">' + ico(I.clock) + '历史版本</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
     '<section class="ws-v" data-v="rules"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" style="color:var(--ink);font-size:16px;font-weight:600">搜索规则</span><span style="width:50px"></span></div><div class="ws-sc"><div class="ws-pad ws-in ws-rules" data-r="rules"></div></div></section>' +
     '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">用浏览器看原图</button></div></section>' +
     '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在原网站打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
@@ -323,7 +330,7 @@ function onPop(e) {
   return true;
 }
 function open(q) {
-  build(); loadPrefs(); loadCfg();
+  build(); loadPrefs(); loadCfg(); loadUsage();
   if (W.on) { if (q) search(q, W.type); return; }
   W.on = true; root.classList.add('on'); document.body.classList.add('ws-open');
   go('home');
@@ -349,6 +356,12 @@ function renderHome() {
     fav.forEach((f, i) => { h += '<div class="ws-row" data-act="fav-go" data-i="' + i + '">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || f.u) + '<span class="ws-sub">' + esc(f.s || host(f.u)) + '</span></span></div>'; });
     h += '</div>';
   }
+  const sn = seen().slice(0, 5);
+  if (sn.length) {
+    h += '<div class="ws-sec">最近看过<button type="button" data-act="seen-clear">清空</button></div><div class="ws-card">';
+    sn.forEach((x, i) => { h += '<div class="ws-row" data-act="seen-go" data-i="' + i + '" style="cursor:pointer">' + ico(I.chev, 15) + '<span class="ws-tx">' + esc(x.t || x.u) + '<span class="ws-sub">' + esc((x.s || host(x.u)) + (x.at ? ' · ' + tsDay(x.at) + ' 存档' : '')) + '</span></span></div>'; });
+    h += '</div>';
+  }
   const hs = hist().slice(0, 8);
   if (hs.length) {
     h += '<div class="ws-sec">最近搜过<button type="button" data-act="hist-clear">清空</button></div><div class="ws-card">';
@@ -360,32 +373,40 @@ function renderHome() {
 
 /* ---------- 搜索 ---------- */
 const URLISH = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)*\.(com|cn|net|org|io|dev|app|gov|edu|me|co|info|tv|cc|xyz|top|jp|hk|tw|uk|de|fr|ru|kr|sg)(\/\S*)?)$/i;
-function search(q, type) {
+const SRCN = { exa: 'Exa', tavily: 'Tavily', commons: '维基共享资源' };
+function search(q, type, src) {
   q = String(q || '').replace(/\s+/g, ' ').trim(); if (!q) return;
   if (URLISH.test(q) && q.indexOf(' ') < 0) { openUrl(/^https?:/i.test(q) ? q : 'https://' + q); return; }
   W.type = type || W.type || 'web';
   addHist(q); W.showFarms = false;
-  W.cur = { q: q, type: W.type, tbs: W.tbs, page: 0, pages: [], meta: null, loading: false, err: null, more: true };
+  W.cur = { q: q, type: W.type, tbs: W.type === 'deep' ? '' : W.tbs, src: src || '', items: [], data: null, used: '', loading: false, err: null, done: false };
   const t = top();
   if (t && t.v === 'res') { t.y = 0; show(); } else go('res');
   const sc = R('rsc'); if (sc) sc.scrollTop = 0;
-  fetchPage();
+  fetchRes();
 }
-async function fetchPage() {
+async function fetchRes() {
   const c = W.cur; if (!c || c.loading) return;
   c.loading = true; c.err = null; const my = ++W.seq;
   renderRes();
-  const r = await B.call({ op: 'search', q: c.q, type: c.type, page: c.page + 1, tbs: c.tbs || '', gl: P.gl || '', hl: 'zh-cn' }, 20000);
+  const r = await B.call({ op: 'search', q: c.q, type: c.type, tbs: c.tbs || '', src: c.src || '', pref: P.src || '' }, c.type === 'deep' ? 25000 : 20000);
   if (my !== W.seq || W.cur !== c) return;
   c.loading = false;
   if (r && r.ok) {
-    c.page++; c.pages.push(r.items || []);
-    if (c.page === 1) c.meta = { kg: r.kg, wiki: r.wiki, ans: r.ans, rel: r.rel };
+    c.done = true; c.data = r; c.items = r.items || []; c.used = r.src || '';
     if (typeof r.left === 'number') W.left = r.left;
-    c.more = (r.items || []).length >= (c.type === 'images' ? 20 : 8) && c.page < 10;
+    if (r.src && typeof r.used === 'number') W.used[r.src] = r.used;
   } else c.err = r || { code: 'net', msg: '出错了' };
   renderRes();
 }
+async function loadUsage() {
+  const r = await B.call({ op: 'usage' }, 10000);
+  if (!r || !r.ok) return;
+  W.used = Object.assign({}, W.used, r.used || {}); W.free = Object.assign({}, W.free, r.free || {}); W.keys = r.keys || W.keys;
+  const t = top(); if (W.on && t && t.v === 'rules') renderRules();
+}
+const usageText = s => W.used[s] != null ? '（本月用了 ' + W.used[s] + ' 次，免费约 ' + (W.free[s] || '?') + ' 次）' : '';
+const otherSrc = s => s === 'tavily' ? 'exa' : 'tavily';
 function arrange(items) {   // 按你的规则：不看的网站去掉，营销号去掉，置顶的排最前，干净的往前挪 3 位
   let farms = 0; const out = [];
   items.forEach((it, i) => {
@@ -403,27 +424,31 @@ function renderRes() {
   const c = W.cur; if (!c || !root) return;
   const v = V('res'), inp = v.querySelector('input');
   if (document.activeElement !== inp) { inp.value = c.q; inp.closest('.ws-field').classList.toggle('has', !!c.q); }
-  R('tabs').innerHTML = TYPES.map(t => '<button type="button" class="ws-tab' + (c.type === t[0] ? ' on' : '') + '" data-act="tab" data-t="' + t[0] + '">' + t[1] + '</button>').join('');
+  const sn = SRCN[c.used || c.src || (c.type === 'images' ? 'tavily' : (P.src || 'exa'))];
+  R('tabs').innerHTML = TYPES.map(t => '<button type="button" class="ws-tab' + (c.type === t[0] ? ' on' : '') + '" data-act="tab" data-t="' + t[0] + '">' + t[1] + '</button>').join('') +
+    (c.type !== 'deep' ? '<button type="button" class="ws-srcb" data-act="src" aria-label="换一家搜">' + esc(sn) + ico(I.down, 13) + '</button>' : '');
   const tl = (TBS.find(x => x[0] === (c.tbs || '')) || TBS[0])[1];
-  R('filters').innerHTML = ((c.type === 'images' || c.type === 'videos') ? '' :
-    '<button type="button" class="ws-chip ' + (P.clean ? 'soft' : 'soft off') + '" data-act="tgl-clean">' + (P.clean ? ico(I.check, 13) : '') + '干净页面优先</button>' +
-    '<button type="button" class="ws-chip ' + (P.hideFarms ? 'soft' : 'soft off') + '" data-act="tgl-farm">' + (P.hideFarms ? ico(I.check, 13) : '') + '不看营销号</button>') +
-    '<button type="button" class="ws-chip soft' + (c.tbs ? '' : ' off') + '" data-act="tbs">' + esc(tl) + ico(I.down, 13) + '</button>';
+  let f = '';
+  if (c.type === 'web' || c.type === 'news') f += '<button type="button" class="ws-chip ' + (P.clean ? 'soft' : 'soft off') + '" data-act="tgl-clean">' + (P.clean ? ico(I.check, 13) : '') + '干净页面优先</button>' +
+    '<button type="button" class="ws-chip ' + (P.hideFarms ? 'soft' : 'soft off') + '" data-act="tgl-farm">' + (P.hideFarms ? ico(I.check, 13) : '') + '不看营销号</button>';
+  if (c.type !== 'deep') f += '<button type="button" class="ws-chip soft' + (c.tbs ? '' : ' off') + '" data-act="tbs">' + esc(tl) + ico(I.down, 13) + '</button>';
+  R('filters').innerHTML = f; R('filters').style.display = f ? '' : 'none';
   const box = R('res'); let h = '';
-  const all = [].concat.apply([], c.pages);
-  if (!all.length && c.loading) { box.innerHTML = skel(); return; }
-  if (!all.length && c.err) { box.innerHTML = '<div class="ws-list">' + errCard(c.err, 'retry') + '</div>'; return; }
-  if (!all.length) { box.innerHTML = '<div class="ws-list"><div class="ws-card ws-err"><p>没有找到结果</p><small>换个说法试试，或者把时间范围放宽</small></div></div>'; return; }
   W.view = [];
-  if (c.type === 'images') h = renderImgs(all);
-  else if (c.type === 'videos') h = renderVids(all);
-  else h = renderWeb(c, all);
+  if (!c.done && c.loading) { box.innerHTML = skel(); return; }
+  if (!c.done && c.err) { box.innerHTML = '<div class="ws-list">' + errCard(c.err, 'retry') + '</div>'; return; }
+  if (c.type === 'deep') h = renderDeep(c);
+  else if (!c.items.length && !(c.data && c.data.wiki)) h = '<div class="ws-list"><div class="ws-card ws-err"><p>没有找到结果</p><small>换个说法试试，或者把时间范围放宽' + (c.type !== 'deep' ? '；也可以换一家搜，或者去“深挖”看看' : '') + '</small></div></div>';
+  else if (c.type === 'images') h = renderImgs(c.items);
+  else if (c.type === 'videos') h = renderVids(c.items);
+  else h = renderWeb(c, c.items);
   const tail = [];
-  if (c.err) tail.push(errCard(c.err, 'more'));
-  else if (c.loading) tail.push('<button type="button" class="ws-btn" disabled>加载中…</button>');
-  else if (c.more) tail.push('<button type="button" class="ws-btn" data-act="more">更多结果</button>');
-  if (c.type === 'web' && c.meta && c.meta.rel && c.meta.rel.length) tail.push('<div class="ws-sec" style="margin:8px 4px 0">相关搜索</div><div class="ws-rel">' + c.meta.rel.map(q => '<button type="button" class="ws-chip" data-act="go-q" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') + '</div>');
-  if (W.left != null && W.left < 20) tail.push('<div class="ws-note">今天还能搜 ' + W.left + ' 次（搜过的词再搜不算）</div>');
+  if (c.loading) tail.push('<button type="button" class="ws-btn" disabled>正在搜…</button>');
+  else if (c.err) tail.push(errCard(c.err, 'retry'));
+  else if (c.type !== 'deep' && (c.used === 'exa' || c.used === 'tavily')) tail.push('<button type="button" class="ws-btn" data-act="swap">换 ' + SRCN[otherSrc(c.used)] + ' 再搜一次，看看别的结果</button>');
+  if (c.type !== 'deep' && c.type !== 'images' && c.done) tail.push('<button type="button" class="ws-btn" data-act="tab" data-t="deep">去“深挖”看看（档案馆、论文、代码、讨论）</button>');
+  if (c.data && c.data.partial) tail.unshift('<div class="ws-note">Exa 和 Tavily 这个月都用完了，上面只有维基共享资源的图</div>');
+  if (W.left != null && W.left < 20 && c.type !== 'deep') tail.push('<div class="ws-note">今天还能搜 ' + W.left + ' 次（搜过的词再搜不算）</div>');
   box.innerHTML = h + (tail.length ? '<div class="ws-list" style="padding-top:0">' + tail.join('') + '</div>' : '');
 }
 function skel() {
@@ -431,9 +456,11 @@ function skel() {
   return '<div class="ws-list">' + card(80) + card(66) + card(74) + '</div>';
 }
 function errCard(err, act) {
-  const how = { nofn: '服务器函数还没部署', nokey: '服务器里的 Serper 密钥没填或填错了', nosql: '搜索那份 SQL 还没运行', credits: 'Serper 的额度用完了', net: '' }[err.code];
+  const how = { nofn: '服务器函数还没部署', nokey: '服务器里的 Exa 或 Tavily 密钥没填，或者填错了', nosql: '搜索那份 SQL 还没运行' }[err.code];
+  const stop = /^(limit|off|nokey|nosql|nofn|empty|noArchive|bad)$/.test(err.code);
   return '<div class="ws-card ws-err"><p>' + esc(err.msg || '出错了') + '</p>' + (how ? '<small>' + esc(how) + '</small>' : '') +
-    (/^(limit|month|off|nokey|nosql|nofn|credits)$/.test(err.code) ? '' : '<button type="button" class="ws-btn pri" data-act="' + act + '">重试</button>') + '</div>';
+    (err.code === 'empty' ? '<button type="button" class="ws-btn pri" data-act="tab" data-t="deep">去“深挖”看看</button>' : '') +
+    (stop ? '' : '<button type="button" class="ws-btn pri" data-act="' + act + '">重试</button>') + '</div>';
 }
 function siteRow(u, extra, i) {
   const h = host(u);
@@ -442,38 +469,31 @@ function siteRow(u, extra, i) {
 }
 function renderWeb(c, all) {
   let h = '<div class="ws-list">';
-  const m = c.meta || {};
-  if (c.type === 'web' && m.ans && m.ans.t) h += '<div class="ws-card ws-ans">' + esc(m.ans.t) + (m.ans.u ? '<span class="src">' + esc(m.ans.title || host(m.ans.u)) + '</span>' : '') + '</div>';
-  const kg = c.type === 'web' ? (m.kg || m.wiki) : null;
+  const kg = c.type === 'web' && c.data ? c.data.wiki : null;
   if (kg && kg.t) {
     W.view.push({ u: kg.u, t: kg.t }); const ki = W.view.length - 1;
     h += '<div class="ws-card ws-kg"' + (kg.u ? ' data-act="r-go" data-i="' + ki + '" style="cursor:pointer"' : '') + '>' + (kg.img ? '<img src="' + esc(kg.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy">' : '') +
-      '<div class="c"><b>' + esc(kg.t) + '</b>' + (kg.type ? '<span class="ty">' + esc(kg.type) + '</span>' : '') + (kg.s ? '<span class="s">' + esc(kg.s) + '</span>' : '') +
-      (kg.attrs && kg.attrs.length ? '<dl>' + kg.attrs.map(a => '<dt>' + esc(a[0]) + '</dt><dd>' + esc(a[1]) + '</dd>').join('') + '</dl>' : '') +
-      '<span class="src">' + esc(kg.src || (m.kg ? '谷歌' : '维基百科')) + '</span></div></div>';
+      '<div class="c"><b>' + esc(kg.t) + '</b>' + (kg.s ? '<span class="s">' + esc(kg.s) + '</span>' : '') + '<span class="src">' + esc(kg.src || '维基百科') + '</span></div></div>';
   }
-  let farms = 0, rows = '';
-  c.pages.forEach(items => {
-    const a = arrange(items); farms += a.farms;
-    a.list.forEach(x => {
-      const it = x.it; W.view.push(it); const i = W.view.length - 1;
-      const direct = hit(it.u, CFG.direct), vid = vidOf(it.u);
-      const tags = (x.pin ? '<span class="ws-tag">置顶</span>' : '') + (x.farm ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">营销号</span>' : '');
-      if (c.type === 'news') {
-        rows += '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
-          (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + '<div class="f">' + esc([it.src, it.d].filter(Boolean).join(' · ')) + '</div></div>' +
-          (it.img ? '<img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy">' : '') + '</div>';
-      } else {
-        rows += '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
-          (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') +
-          ((direct || vid || it.d) ? '<div class="f">' + esc([it.d, vid ? '点开直接播放' : direct ? '要登录，会用浏览器打开' : ''].filter(Boolean).join(' · ')) + '</div>' : '') + '</div>';
-      }
-    });
+  const a = arrange(all); let rows = '';
+  a.list.forEach(x => {
+    const it = x.it; W.view.push(it); const i = W.view.length - 1;
+    const direct = hit(it.u, CFG.direct), vid = vidOf(it.u);
+    const tags = (x.pin ? '<span class="ws-tag">置顶</span>' : '') + (x.farm ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">营销号</span>' : '');
+    const foot = [it.d, vid ? '点开直接播放' : direct ? '要登录，会用浏览器打开' : ''].filter(Boolean).join(' · ');
+    if (c.type === 'news' && it.img) {
+      rows += '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
+        (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>' +
+        '<img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy"></div>';
+    } else {
+      rows += '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
+        (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>';
+    }
   });
   if (rows) h += '<div class="ws-card">' + rows + '</div>';
-  if (farms) h += '<div class="ws-note">隐藏了 ' + farms + ' 条营销号<button type="button" data-act="show-farms">显示</button></div>';
+  if (a.farms) h += '<div class="ws-note">隐藏了 ' + a.farms + ' 条营销号<button type="button" data-act="show-farms">显示</button></div>';
   else if (W.showFarms) h += '<div class="ws-note"><button type="button" data-act="hide-farms">重新隐藏营销号</button></div>';
-  if (!rows && !kg) h += '<div class="ws-card ws-err"><p>结果都被你的规则过滤掉了</p><small>可以在搜索规则里改</small></div>';
+  if (!rows && all.length) h += '<div class="ws-card ws-err"><p>结果都被你的规则过滤掉了</p><small>可以在搜索规则里改</small></div>';
   return h + '</div>';
 }
 function renderImgs(all) {
@@ -491,10 +511,29 @@ function renderVids(all) {
   all.forEach(it => {
     if (hit(it.u, P.block)) return;
     W.view.push(it); const i = W.view.length - 1;
-    h += '<div class="ws-vd" data-act="vid-go" data-i="' + i + '"><div class="th"' + (it.img ? ' style="background-image:url(&quot;' + esc(it.img) + '&quot;)"' : '') + '>' + (it.dur ? '<em>' + esc(it.dur) + '</em>' : '') + '</div>' +
+    h += '<div class="ws-vd" data-act="vid-go" data-i="' + i + '"><div class="th"' + (it.img ? ' style="background-image:url(&quot;' + esc(it.img) + '&quot;)"' : '') + '>' + (it.dur ? '<em>' + esc(it.dur) + '</em>' : '') + (it.img ? '' : '<span class="pl">' + ico(I.play, 26) + '</span>') + '</div>' +
       '<div class="c"><b>' + esc(it.t || it.u) + '</b><span class="f">' + esc([it.ch, it.src || host(it.u), it.d].filter(Boolean).join(' · ')) + '</span>' + (vidOf(it.u) ? '<span class="f" style="color:var(--ok)">点开直接播放</span>' : '') + '</div></div>';
   });
   return h + '</div></div>';
+}
+function renderDeep(c) {   // 深挖：几个大数据库的结果按来源分组
+  const d = c.data || {}; let h = '<div class="ws-list">';
+  (d.groups || []).forEach(g => {
+    h += '<div class="ws-card"><div class="ws-gh"><b>' + esc(g.n) + '</b><span>' + g.items.length + ' 条</span></div>';
+    g.items.forEach(it => {
+      W.view.push(it); const i = W.view.length - 1;
+      const foot = (it.f ? esc(it.f) : '') + (it.c ? (it.f ? ' · ' : '') + '<button type="button" class="ws-lnk" data-act="hn-c" data-i="' + i + '">看讨论</button>' : '');
+      const body = '<div class="ws-rt"><span class="h">' + esc(host(it.u)) + '</span>' + (it.ext ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">用浏览器打开</span>' : '') +
+        '<button type="button" class="ws-more" data-act="r-more" data-i="' + i + '" aria-label="更多">' + ico(I.more, 18) + '</button></div>' +
+        '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' + (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + foot + '</div>' : '');
+      h += it.img ? '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + body + '</div><img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy"></div>'
+        : '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + body + '</div>';
+    });
+    h += '</div>';
+  });
+  if (!(d.groups || []).length) h += '<div class="ws-card ws-err"><p>这几个数据库里都没找到</p><small>换个说法、或者换成英文试试</small></div>';
+  if (d.down && d.down.length) h += '<div class="ws-note">这次没连上：' + esc(d.down.join('、')) + '</div>';
+  return h + '</div>';
 }
 
 /* ---------- 打开结果 ---------- */
@@ -518,6 +557,7 @@ function itemActs(it) {
   items.push({ label: pinned ? '取消置顶 ' + h : '置顶 ' + h + '（排在最前面）', fn: () => { if (pinned) P.pin = P.pin.filter(d => !hit(it.u, [d])); else P.pin = [h].concat(P.pin || []); savePrefs(); renderTop(); B.toast(pinned ? '已取消置顶' : '已置顶 ' + h); } });
   items.push({ label: '不看 ' + h + ' 的结果', fn: () => { P.block = [h].concat((P.block || []).filter(d => d !== h)); savePrefs(); renderTop(); B.toast('以后不显示 ' + h + '，可以在搜索规则里改回来'); } });
   items.push({ label: '用浏览器打开', fn: () => ext(it.u) });
+  items.push({ label: '看互联网档案馆的存档', fn: () => go('read', { u: it.u, t: it.t, at: 'latest' }) });
   items.push({ label: '复制链接', fn: () => B.copy(it.u) });
   items.push({ label: '发给好友', fn: () => B.forward((it.t ? it.t + '\n' : '') + it.u) });
   items.push({ label: '取消', fn: null });
@@ -548,18 +588,30 @@ function sanitize(html) {   // 服务器已经洗过一遍；这里再按白名�
   })(doc.body, out);
   return out;
 }
+const tsDay = ts => String(ts || '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1-$2-$3');
+const tsCn = ts => { const m = /^(\d{4})(\d{2})(\d{2})/.exec(String(ts || '')); return m ? m[1] + ' 年 ' + (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : String(ts || ''); };
+const archUrl = d => d.art && d.art.arch ? 'https://web.archive.org/web/' + d.art.arch + '/' + (d.art.u || d.u) : (d.art && d.art.u) || d.u;
+function seen() { return LSg(uidKey('ch2wsSeen'), []); }
+function addSeen(d) {   // 最近看过：打开成功的文章记下来，结果列表变了也能找回
+  const a = d.art; if (!a) return;
+  const at = a.arch || '', list = seen().filter(x => !(x.u === d.u && (x.at || '') === at));
+  list.unshift({ u: d.u, t: a.title, s: a.site, at: at, tm: Date.now() });
+  LSs(uidKey('ch2wsSeen'), list.slice(0, 100));
+}
 function renderRead(t) {
   const d = t.d;
-  R('rsite').textContent = host(d.u);
+  R('rsite').textContent = host(d.u) + (d.at ? ' · 存档' : '');
   R('rtool').style.display = d.art ? '' : 'none';
-  const favd = (P.fav || []).some(f => f.u === d.u);
+  const favd = (P.fav || []).some(f => f.u === d.u && (f.at || '') === ((d.art && d.art.arch) || ''));
   const fb = R('rtool').querySelector('[data-act="rd-fav"]'); fb.classList.toggle('on', favd); fb.lastChild.nodeValue = favd ? '已收藏' : '收藏';
   if (W.shownRead === t && !d.dirty) return;
   W.shownRead = t; d.dirty = false;
   const box = R('read');
   if (d.art) {
     const a = d.art, mins = Math.max(1, Math.round((a.len || 0) / 450));
-    box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px"><h1>' + esc(a.title) + '</h1><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
+    box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px">' +
+      (a.arch ? '<div class="ws-arch"><span>互联网档案馆 ' + esc(tsDay(a.arch)) + ' 的存档</span><button type="button" data-act="rd-vers">别的版本</button><button type="button" data-act="rd-now">看现在的</button></div>' : '') +
+      '<h1>' + esc(a.title) + '</h1><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
       (a.img ? '<img class="ws-lead" src="' + esc(a.img) + '" alt="" referrerpolicy="no-referrer">' : '') + '<div class="ws-body"></div>' +
       '<div class="ws-from">来源：<a href="' + esc(a.u || d.u) + '" data-act="rd-orig">' + esc(host(a.u || d.u)) + '</a></div></article>';
     box.querySelector('.ws-body').appendChild(sanitize(a.html));
@@ -567,20 +619,31 @@ function renderRead(t) {
   }
   R('rdsc').scrollTop = 0;
   if (d.err) {
-    const e = d.err;
-    box.innerHTML = '<div class="ws-list" style="padding-top:30px"><div class="ws-card ws-err"><p>' + esc(e.msg || '打不开') + '</p>' + (/^(limit|bad)$/.test(e.code) ? '' : '<small>' + (e.code === 'noArticle' ? '这种页面用原网页看更合适' : '可能要登录，或者网站不让直接取内容') + '</small>') +
-      '<button type="button" class="ws-btn pri" data-act="rd-orig">用浏览器打开原网页</button>' + (/^(fetch|net|http|server|upstream)$/.test(e.code) ? '<button type="button" class="ws-btn" data-act="rd-retry">重试</button>' : '') + '</div></div>';
+    const e = d.err, transient = /^(fetch|net|http|server|upstream|db)$/.test(e.code);
+    const tip = e.code === 'noArticle' ? '这种页面用原网页看更合适' : e.code === 'noArchive' ? '' : /^(limit|bad)$/.test(e.code) ? '' : '可能要登录、已经删掉了，或者网站不让直接取内容';
+    box.innerHTML = '<div class="ws-list" style="padding-top:30px"><div class="ws-card ws-err"><p>' + esc(e.msg || '打不开') + '</p>' + (tip ? '<small>' + tip + '</small>' : '') +
+      (!d.at && !/^(limit|bad)$/.test(e.code) ? '<button type="button" class="ws-btn pri" data-act="rd-arch">看互联网档案馆的存档</button>' : '') +
+      '<button type="button" class="ws-btn' + (d.at ? ' pri' : '') + '" data-act="rd-orig">用浏览器打开原网页</button>' +
+      (transient ? '<button type="button" class="ws-btn" data-act="rd-retry">重试</button>' : '') + '</div></div>';
     return;
   }
-  box.innerHTML = '<div class="ws-art"><h1 style="opacity:.55">' + esc(d.t || '正在打开…') + '</h1><div class="meta">' + esc(host(d.u)) + ' · 正在整理成简洁版</div>' + skel().replace('ws-list', 'ws-list" style="padding:0') + '</div>';
+  box.innerHTML = '<div class="ws-art"><h1 style="opacity:.55">' + esc(d.t || '正在打开…') + '</h1><div class="meta">' + esc(host(d.u)) + (d.at ? ' · 正在从互联网档案馆取存档' : ' · 正在整理成简洁版') + '</div>' + skel().replace('ws-list', 'ws-list" style="padding:0') + '</div>';
   if (!d.loading) fetchRead(t);
 }
 async function fetchRead(t) {
   const d = t.d; d.loading = true;
-  const r = await B.call({ op: 'read', url: d.u }, 25000);
+  const r = await B.call({ op: 'read', url: d.u, at: d.at || '' }, d.at ? 30000 : 25000);
   d.loading = false; d.dirty = true;
-  if (r && r.ok) d.art = r; else d.err = r || { code: 'net', msg: '出错了' };
+  if (r && r.ok) { d.art = r; addSeen(d); } else d.err = r || { code: 'net', msg: '出错了' };
   if (top() === t) renderRead(t);
+}
+async function showVersions(d) {
+  B.toast('正在查互联网档案馆…');
+  const r = await B.call({ op: 'versions', url: d.u }, 25000);
+  if (!r || !r.ok) { B.toast((r && r.msg) || '查不到存档'); return; }
+  if (!r.list || !r.list.length) { B.toast('互联网档案馆里没有这个网页的存档'); return; }
+  const cur = d.art && d.art.arch;
+  B.acts('历史版本（共 ' + r.list.length + ' 个，最近的在前）', r.list.slice(0, 40).map(ts => ({ label: tsCn(ts) + (cur && cur.slice(0, 8) === ts.slice(0, 8) ? '（正在看）' : ''), fn: () => go('read', { u: d.u, t: d.art ? d.art.title : d.t, at: ts }) })).concat([{ label: '取消', fn: null }]));
 }
 function readerLink(a) {
   const hr = a.getAttribute('href') || ''; if (!/^https?:\/\//i.test(hr)) return;
@@ -611,24 +674,28 @@ function renderVid(t) {
 
 /* ---------- 搜索规则 ---------- */
 function renderRules() {
-  const gl = (GLS.find(x => x[0] === (P.gl || '')) || GLS[0])[1];
   const sw = (act, on, t, sub) => '<div class="ws-row" data-act="' + act + '" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">' + t + '<span class="ws-sub" style="white-space:normal">' + sub + '</span></span><button type="button" class="ws-sw" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" aria-label="' + t + '" data-act="' + act + '"></button></div>';
   const list = (k, empty) => {
     const a = P[k] || [];
     return (a.length ? a.map(d => '<div class="ws-row"><span class="ws-mono" style="width:26px;height:26px;border-radius:8px;background:' + monoColor(d) + ';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + esc(monoChar(d)) + '</span><span class="ws-tx">' + esc(d) + '</span><button type="button" class="ws-x" data-act="rule-del" data-k="' + k + '" data-d="' + esc(d) + '" aria-label="删掉">' + ico(I.x, 15) + '</button></div>').join('') : '<div class="ws-row" style="color:var(--muted);font-size:14px">' + empty + '</div>') +
       '<button type="button" class="ws-row" data-act="rule-add" data-k="' + k + '" style="color:var(--accent)">' + ico(I.plus, 18) + '<span class="ws-tx">添加网站</span></button>';
   };
-  let h = '<div class="ws-sec" style="margin-top:10px">排序和过滤</div><div class="ws-card">' +
+  const use = s => (W.keys && W.keys[s] === false) ? '还没填密钥' : (W.used[s] != null ? '用了 ' + W.used[s] + ' / ' + (W.free[s] || '?') + ' 次' : '…');
+  const h = '<div class="ws-sec" style="margin-top:10px">排序和过滤</div><div class="ws-card">' +
     sw('tgl-clean', P.clean, '干净页面优先', '维基百科、GitHub、政府和学校网站往前排') +
     sw('tgl-farm', P.hideFarms, '不看营销号', '百家号、搜狐号、360doc 这类不显示') +
-    '<div class="ws-row" data-act="gl" style="cursor:pointer"><span class="ws-tx">结果地区<span class="ws-sub">影响排在前面的是哪里的网站</span></span><span class="ws-val">' + esc(gl) + '</span>' + ico(I.chev, 16) + '</div></div>' +
+    '<div class="ws-row" data-act="pref-src" style="cursor:pointer"><span class="ws-tx">网页先用哪家搜<span class="ws-sub">这家用完了会自动换另一家</span></span><span class="ws-val">' + SRCN[P.src === 'tavily' ? 'tavily' : 'exa'] + '</span>' + ico(I.chev, 16) + '</div></div>' +
+    '<div class="ws-sec">这个月的次数</div><div class="ws-card">' +
+      '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Exa<span class="ws-sub" style="white-space:normal">网页、新闻、视频默认用它；每月免费约 ' + (W.free.exa || 2500) + ' 次</span></span><span class="ws-val">' + esc(use('exa')) + '</span></div>' +
+      '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Tavily<span class="ws-sub" style="white-space:normal">图片先用它，Exa 用完时顶上；每月免费 ' + (W.free.tavily || 1000) + ' 次</span></span><span class="ws-val">' + esc(use('tavily')) + '</span></div></div>' +
+    '<div class="ws-hint">每月 1 号恢复。同一个词 24 小时内再搜不算次数；“深挖”和打开网页不花这些次数。' + (W.left != null ? '你今天还能搜 ' + W.left + ' 次。' : '') + '</div>' +
     '<div class="ws-sec">置顶网站</div><div class="ws-card">' + list('pin', '还没有') + '</div>' +
     '<div class="ws-sec">不看的网站</div><div class="ws-card">' + list('block', '还没有') + '</div>' +
     '<div class="ws-sec">默认名单</div><div class="ws-card">' +
       '<details><summary>营销号（' + CFG.farms.length + ' 个）</summary><p>' + esc(CFG.farms.join('、')) + '</p></details>' +
       '<details><summary>干净网站（' + CFG.clean.length + ' 个）</summary><p>' + esc(CFG.clean.join('、')) + '</p></details>' +
       '<details><summary>直接用浏览器打开（' + CFG.direct.length + ' 个）</summary><p>要登录或者不让取内容的网站。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
-    '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。' + (W.left != null ? '今天还能搜 ' + W.left + ' 次。' : '') + '</div>';
+    '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。</div>';
   R('rules').innerHTML = h;
 }
 function addSite(k) {
@@ -652,31 +719,35 @@ function onClick(e) {
   const t = top(), c = W.cur, it = W.view && W.view[+el.dataset.i];
   switch (act) {
     case 'back': back(); break;
-    case 'rules': go('rules'); break;
+    case 'rules': go('rules'); loadUsage(); break;
     case 'clear': { const f = el.closest('.ws-field'), inp = f.querySelector('input'); inp.value = ''; f.classList.remove('has'); inp.focus(); break; }
     case 'type': {
       W.type = el.dataset.t; renderHome();
       const q = V('home').querySelector('input').value.trim(); if (q) search(q, W.type);
       break;
     }
-    case 'tab': if (c && c.type !== el.dataset.t) { W.type = el.dataset.t; search(c.q, W.type); } break;
+    case 'tab': if (c && (c.type !== el.dataset.t || el.dataset.t === 'deep')) { W.type = el.dataset.t; search(c.q, W.type); } break;
     case 'go-q': search(el.dataset.q, W.type); break;
     case 'hist-del': e.stopPropagation(); LSs(uidKey('ch2wsHist'), hist().filter(x => x !== el.dataset.q)); renderHome(); break;
     case 'hist-clear': LSs(uidKey('ch2wsHist'), []); renderHome(); break;
+    case 'seen-clear': LSs(uidKey('ch2wsSeen'), []); renderHome(); break;
+    case 'seen-go': { const s = seen()[+el.dataset.i]; if (s) go('read', { u: s.u, t: s.t, at: s.at || '' }); break; }
     case 'pin-add': addSite('pin'); break;
     case 'pin-go': { const inp = V('home').querySelector('input'); inp.value = 'site:' + el.dataset.d + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); break; }
-    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) openUrl(f.u, f.t); break; }
-    case 'fav-all': B.acts('收藏的文章', (P.fav || []).slice(0, 60).map(f => ({ label: (f.t || f.u).slice(0, 40), fn: () => openUrl(f.u, f.t) })).concat([{ label: '取消', fn: null }])); break;
-    case 'r-go': if (it && it.u) openUrl(it.u, it.t); break;
+    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at) go('read', { u: f.u, t: f.t, at: f.at }); else openUrl(f.u, f.t); } break; }
+    case 'fav-all': B.acts('收藏的文章', (P.fav || []).slice(0, 60).map(f => ({ label: (f.t || f.u).slice(0, 40), fn: () => { if (f.at) go('read', { u: f.u, t: f.t, at: f.at }); else openUrl(f.u, f.t); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'r-go': if (it && it.u) { if (it.ext) ext(it.u); else openUrl(it.u, it.t); } break;
     case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;
-    case 'more': fetchPage(); break;
-    case 'retry': if (c) { c.pages = []; c.page = 0; c.err = null; fetchPage(); } break;
+    case 'hn-c': e.stopPropagation(); if (it && it.c) openUrl(it.c, it.t); break;
+    case 'retry': if (c) { c.err = null; c.done = false; fetchRes(); } break;
+    case 'swap': if (c && c.used) search(c.q, c.type, otherSrc(c.used)); break;
+    case 'src': if (c) B.acts('用哪家搜', [['exa', 'Exa'], ['tavily', 'Tavily']].map(x => ({ label: x[1] + usageText(x[0]) + (c.used === x[0] ? ' ✓' : ''), fn: () => { if (c.used !== x[0]) search(c.q, c.type, x[0]); } })).concat([{ label: '取消', fn: null }])); break;
     case 'show-farms': W.showFarms = true; renderRes(); break;
     case 'hide-farms': W.showFarms = false; renderRes(); break;
     case 'tgl-clean': P.clean = !P.clean; savePrefs(); renderTop(); break;
     case 'tgl-farm': P.hideFarms = !P.hideFarms; W.showFarms = false; savePrefs(); renderTop(); break;
-    case 'tbs': B.acts('时间范围', TBS.map(x => ({ label: x[1] + ((c && (c.tbs || '') === x[0]) ? ' ✓' : ''), fn: () => { W.tbs = x[0]; if (c) { c.tbs = x[0]; search(c.q, c.type); } } })).concat([{ label: '取消', fn: null }])); break;
-    case 'gl': B.acts('结果地区', GLS.map(x => ({ label: x[1] + ((P.gl || '') === x[0] ? ' ✓' : ''), fn: () => { P.gl = x[0]; savePrefs(); renderTop(); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'tbs': B.acts('时间范围', TBS.map(x => ({ label: x[1] + ((c && (c.tbs || '') === x[0]) ? ' ✓' : ''), fn: () => { W.tbs = x[0]; if (c) search(c.q, c.type, c.src); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'pref-src': B.acts('网页先用哪家搜', [['exa', 'Exa（免费次数多，推荐）'], ['tavily', 'Tavily']].map(x => ({ label: x[1] + ((P.src === 'tavily' ? 'tavily' : 'exa') === x[0] ? ' ✓' : ''), fn: () => { P.src = x[0] === 'exa' ? '' : x[0]; savePrefs(); renderTop(); } })).concat([{ label: '取消', fn: null }])); break;
     case 'rule-add': addSite(el.dataset.k); break;
     case 'rule-del': P[el.dataset.k] = (P[el.dataset.k] || []).filter(x => x !== el.dataset.d); savePrefs(); renderTop(); break;
     case 'img-go': if (it) go('img', { it: it }); break;
@@ -685,8 +756,11 @@ function onClick(e) {
     case 'vid-go': if (it && it.u) { const vid = vidOf(it.u); if (vid) go('vid', { u: it.u, t: it.t, vid: vid }); else ext(it.u); } break;
     case 'vid-out': if (t && t.d.u) ext(t.d.u); break;
     case 'vid-send': if (t && t.d.u) B.forward((t.d.t ? t.d.t + '\n' : '') + t.d.u); break;
-    case 'rd-orig': if (t && t.d.u) ext((t.d.art && t.d.art.u) || t.d.u); break;
+    case 'rd-orig': if (t && t.d.u) ext(archUrl(t.d)); break;
     case 'rd-retry': if (t) { t.d.err = null; t.d.dirty = true; renderRead(t); } break;
+    case 'rd-arch': if (t) go('read', { u: t.d.u, t: t.d.t, at: 'latest' }); break;
+    case 'rd-now': if (t) openUrl(t.d.u, t.d.art && t.d.art.title); break;
+    case 'rd-vers': if (t) showVersions(t.d); break;
     case 'rd-fs': {
       W.fs = SIZES[(SIZES.indexOf(W.fs) + 1) % SIZES.length] || 18; LSs('ch2wsFs', W.fs);
       const a = R('read').querySelector('.ws-art'); if (a) a.style.fontSize = W.fs + 'px';
@@ -694,12 +768,12 @@ function onClick(e) {
     }
     case 'rd-fav': {
       if (!t || !t.d.art) break;
-      const u = t.d.u, had = (P.fav || []).some(f => f.u === u);
-      P.fav = had ? P.fav.filter(f => f.u !== u) : [{ u: u, t: t.d.art.title, s: t.d.art.site, at: Date.now() }].concat(P.fav || []).slice(0, 200);
-      savePrefs(); renderRead(t); B.toast(had ? '已取消收藏' : '已收藏，搜索首页能看到'); break;
+      const u = t.d.u, at = t.d.art.arch || '', same = f => f.u === u && (f.at || '') === at, had = (P.fav || []).some(same);
+      P.fav = had ? P.fav.filter(f => !same(f)) : [{ u: u, t: t.d.art.title, s: t.d.art.site + (at ? ' · ' + tsDay(at) + ' 存档' : ''), at: at, tm: Date.now() }].concat(P.fav || []).slice(0, 200);
+      savePrefs(); t.d.dirty = false; renderRead(t); B.toast(had ? '已取消收藏' : '已收藏，搜索首页能看到'); break;
     }
-    case 'rd-copy': if (t) B.copy((t.d.art && t.d.art.u) || t.d.u); break;
-    case 'rd-send': if (t) B.forward(((t.d.art && t.d.art.title) ? t.d.art.title + '\n' : '') + ((t.d.art && t.d.art.u) || t.d.u)); break;
+    case 'rd-copy': if (t) B.copy(archUrl(t.d)); break;
+    case 'rd-send': if (t) B.forward(((t.d.art && t.d.art.title) ? t.d.art.title + '\n' : '') + archUrl(t.d)); break;
   }
 }
 

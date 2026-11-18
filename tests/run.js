@@ -419,7 +419,8 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
       if (u.indexOf('/functions/v1/chatter-search') > 0) {
         const b = JSON.parse(o.body); calls.push(b);
         ok(o.headers.Authorization === 'Bearer tok', '调用搜索没带登录凭证');
-        if (b.op === 'search') return resp({ ok: true, cached: false, left: 70, type: b.type, q: b.q, page: b.page, items: [{ t: '营销', u: 'https://baijiahao.baidu.com/s?id=1', s: '震惊' }, { t: '普通', u: 'https://a.example.com/1', s: 'x' }, { t: '置顶的', u: 'https://docs.pin.dev/x', s: 'y' }, { t: '维基', u: 'https://zh.wikipedia.org/wiki/x', s: 'z' }, { t: '推特', u: 'https://x.com/a/status/1' }], wiki: { t: '词条', s: '摘要', u: 'https://zh.m.wikipedia.org/wiki/x' }, rel: ['相关一'] });
+        if (b.op === 'usage') return resp({ ok: true, used: { exa: 5, tavily: 0 }, free: { exa: 2500, tavily: 1000 }, keys: { exa: true, tavily: true } });
+        if (b.op === 'search') return resp({ ok: true, cached: false, left: 70, used: 6, src: b.src || 'exa', type: b.type, q: b.q, items: [{ t: '营销', u: 'https://baijiahao.baidu.com/s?id=1', s: '震惊' }, { t: '普通', u: 'https://a.example.com/1', s: 'x' }, { t: '置顶的', u: 'https://docs.pin.dev/x', s: 'y' }, { t: '维基', u: 'https://zh.wikipedia.org/wiki/x', s: 'z' }, { t: '推特', u: 'https://x.com/a/status/1' }], wiki: { t: '词条', s: '摘要', u: 'https://zh.m.wikipedia.org/wiki/x' }, rel: ['相关一'] });
         if (b.op === 'read') return resp({ ok: true, u: b.url, title: '文章标题', site: '示例', html: '<p onclick="alert(0)">正文<script>alert(1)</script><img src="https://img.example/a.jpg" onerror="alert(2)"><a href="javascript:alert(3)">坏</a><a href="https://b.example.com/2">好</a></p><iframe src="https://evil/"></iframe>', len: 900 });
       }
       return resp({ sent: 1 });
@@ -431,9 +432,9 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
     w.eval(fs.readFileSync(path.join(ROOT, 'search.js'), 'utf8')); sc.onload(); await sleep(50);
     const ws = env.$('ws'), on = v => ws.querySelector('.ws-v.on') && ws.querySelector('.ws-v.on').dataset.v;
     ok(ws && ws.classList.contains('on') && on() === 'home' && H.state && H.state.ws === 1, '搜索首页没打开：' + on() + ' ' + JSON.stringify(H.state));
-    const f = ws.querySelector('[data-form="home"]'); f.querySelector('input').value = '测试';
+    const f = ws.querySelector('[data-form="home"]'); f.querySelector('input').value = '测试'; calls.length = 0;
     f.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await sleep(120);
-    ok(calls[0] && calls[0].op === 'search' && calls[0].q === '测试' && calls[0].type === 'web' && calls[0].page === 1, '搜索请求不对：' + JSON.stringify(calls[0]));
+    ok(calls[0] && calls[0].op === 'search' && calls[0].q === '测试' && calls[0].type === 'web' && calls[0].src === '' && calls[0].tbs === '', '搜索请求不对：' + JSON.stringify(calls[0]));
     ok(on() === 'res' && H.state.ws === 2, '没有进入结果页');
     const titles = Array.from(ws.querySelectorAll('.ws-r a.t')).map(a => a.textContent);
     ok(titles.join(',') === '置顶的,维基,普通,推特', '排序不对（应该：置顶的、维基、普通、推特；营销号隐藏）：' + titles.join(','));

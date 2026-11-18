@@ -1,18 +1,24 @@
 // Chatter 搜索服务器函数（Supabase 服务器函数，名字 chatter-search）
-// 手机 → 这里 → Serper（谷歌的搜索结果）/ 维基百科 / 网页原文。Serper 的密钥只放在服务器上，手机里没有。
-//   op: 'search'  搜网页 / 图片 / 视频 / 新闻。同样的搜索 24 小时内直接用缓存，不花额度、不算次数
-//   op: 'read'    简洁阅读：服务器把网页取回来，只留正文和图片
-//   op: 'ping'    检查服务器是否装好（不用登录）
-// 次数上限、营销号名单都在数据库 app_config 表 key='search' 里，改了不用重新部署。
+// 手机 → 这里 → Exa / Tavily（网页搜索）、维基百科、互联网档案馆、论文库、GitHub、Hacker News、网页原文。
+// 搜索服务的密钥只放在服务器上，手机里没有。
+//   op: 'search'    搜网页 / 图片 / 视频 / 新闻 / 深挖。同样的搜索 24 小时内直接用缓存，不花额度、不算次数
+//                   网页、新闻、视频默认先用 Exa，Exa 用完自动换 Tavily；图片先用 Tavily
+//                   深挖：维基百科、互联网档案馆、论文库（OpenAlex）、GitHub、Hacker News，全部免费
+//   op: 'read'      简洁阅读：服务器把网页取回来，只留正文和图片；at='latest' 或时间戳 = 看互联网档案馆的存档
+//   op: 'versions'  这个网页在互联网档案馆里有哪些历史版本
+//   op: 'usage'     这个月 Exa、Tavily 各用了多少次
+//   op: 'ping'      检查服务器是否装好（不用登录）
+// 次数上限、搜索顺序、营销号名单都在数据库 app_config 表 key='search' 里，改了不用重新部署。
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261118-1';
+const VER = '20261118-2';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
 const SRK = env('SUPABASE_SERVICE_ROLE_KEY');
-const SERPER = () => env('SERPER_API_KEY');
+const KEY: Record<string, () => string> = { exa: () => env('EXA_API_KEY'), tavily: () => env('TAVILY_API_KEY') };
+const NAME: Record<string, string> = { exa: 'Exa', tavily: 'Tavily' };
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -20,8 +26,10 @@ const CORS: Record<string, string> = {
 };
 const DAY = 86400000, TTL = DAY, ALL = '00000000-0000-0000-0000-000000000000';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const WIKI_UA = 'ChatterSearch/1.0 (https://github.com/3855285335-gif/index.html)';
+const BOT_UA = 'ChatterSearch/1.0 (https://github.com/3855285335-gif/index.html)';
 const MAX_PAGE = 3 * 1024 * 1024;
+const VID_SITES = ['youtube.com', 'bilibili.com', 'vimeo.com'];
+const CJK = /[\u3400-\u9fff]/;
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -30,19 +38,33 @@ const fail = (code: string, msg: string, st = 200) => json({ ok: false, code, ms
 const str = (v: Any, n = 400) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, n) : undefined;
 const link = (v: Any) => (typeof v === 'string' && /^https?:\/\//i.test(v)) ? v.slice(0, 2000) : undefined;
 const num = (v: Any) => (typeof v === 'number' && isFinite(v)) ? Math.round(v) : undefined;
+const day10 = (v: Any) => { const t = Date.parse(String(v || '')); return isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 10) : undefined; };
+const strip = (s: Any) => String(s || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 function bg(p: Promise<unknown>) { p.catch(() => {}); try { (globalThis as Any).EdgeRuntime?.waitUntil?.(p); } catch { /* 没有也行 */ } }
 async function tfetch(u: string, init: RequestInit = {}, ms = 8000) {
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms);
   try { return await fetch(u, { ...init, signal: ac.signal }); } finally { clearTimeout(t); }
+}
+async function getJson(u: string, headers: Record<string, string> = {}, ms = 7000) {
+  const r = await tfetch(u, { headers: { 'User-Agent': BOT_UA, Accept: 'application/json', ...headers } }, ms);
+  if (!r.ok) throw new Error(u.split('?')[0] + ' ' + r.status);
+  return await r.json();
+}
+async function postJson(u: string, headers: Record<string, string>, body: Any, ms = 12000) {
+  const r = await tfetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }, ms);
+  const j = await r.json().catch(() => null);
+  return { status: r.status, ok: r.ok, j };
 }
 function dbh(extra: Record<string, string> = {}) {
   const h: Record<string, string> = { apikey: SRK, 'Content-Type': 'application/json', ...extra };
   if (!SRK.startsWith('sb_')) h.Authorization = 'Bearer ' + SRK;   // 新式密钥（sb_secret_…）不能放在 Authorization 里
   return h;
 }
+const monthStart = () => { const d = new Date(Date.now() + 8 * 3600000); return d.toISOString().slice(0, 8) + '01'; };   // 北京时间的本月 1 号
 
 /* ---------- 配置（数据库里改，1 分钟内生效） ---------- */
-const CFG_DEF = { enabled: true, per_user_day: 80, read_per_user_day: 300, month_cap: 2400 };
+const CFG_DEF = { enabled: true, per_user_day: 80, read_per_user_day: 300, deep_per_user_day: 200, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000 };
 let CFG: Any = null, CFG_AT = 0;
 async function cfg() {
   if (CFG && Date.now() - CFG_AT < 60000) return CFG;
@@ -67,20 +89,21 @@ async function uidOf(req: Request) {
   UIDS.set(tok, { uid: u.id, at: Date.now() }); return u.id as string;
 }
 
-/* ---------- 缓存和计数 ---------- */
+/* ---------- 缓存、记号和计数 ---------- */
 async function sha(s: string) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 40);
 }
-async function cget(k: string) {
+async function cgetMany(keys: string[]) {   // 一次查好几个键（缓存和“用完了”的记号放在同一张表里）
+  const out: Record<string, { v: Any; at: number }> = {};
   try {
-    const r = await tfetch(SB_URL + '/rest/v1/search_cache?k=eq.' + k + '&select=v,at', { headers: dbh() }, 4000);
-    if (!r.ok) return null;
-    const a = await r.json(); const x = a && a[0];
-    if (!x || Date.now() - Date.parse(x.at) > TTL) return null;
-    return x.v;
-  } catch { return null; }
+    const r = await tfetch(SB_URL + '/rest/v1/search_cache?k=in.(' + keys.join(',') + ')&select=k,v,at', { headers: dbh() }, 4000);
+    if (!r.ok) return out;
+    for (const x of await r.json()) out[x.k] = { v: x.v, at: Date.parse(x.at) };
+  } catch { /* 查不到就当没有 */ }
+  return out;
 }
+async function cget(k: string) { const x = (await cgetMany([k]))[k]; return x && Date.now() - x.at <= TTL ? x.v : null; }
 async function cput(k: string, v: Any) {
   try { await tfetch(SB_URL + '/rest/v1/search_cache?on_conflict=k', { method: 'POST', headers: dbh({ Prefer: 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify({ k, v, at: new Date().toISOString() }) }, 5000); } catch { /* 存不上下次重搜 */ }
   if (Math.random() < 0.03) await sweep();
@@ -97,26 +120,66 @@ async function bump(uid: string, kind: string, limit: number, month = false) {
   if (!r.ok) throw new Oops('db', '数据库出错（' + r.status + '），稍后再试');
   return Number(await r.json());
 }
-
-/* ---------- 搜索 ---------- */
-const TYPES: Record<string, string> = { web: 'search', images: 'images', videos: 'videos', news: 'news' };
-const TBS = ['', 'qdr:d', 'qdr:w', 'qdr:m', 'qdr:y'];
-const GLS = ['', 'us', 'hk', 'tw', 'sg', 'jp', 'gb'];
-const HLS = ['zh-cn', 'zh-tw', 'en', 'ja'];
-function shape(type: string, j: Any) {
-  j = j || {};
-  if (type === 'images') return { items: (j.images || []).slice(0, 100).map((i: Any) => ({ t: str(i.title, 200), img: link(i.imageUrl), th: link(i.thumbnailUrl), w: num(i.imageWidth), h: num(i.imageHeight), u: link(i.link), src: str(i.domain || i.source, 80) })).filter((x: Any) => x.img || x.th) };
-  if (type === 'videos') return { items: (j.videos || []).map((v: Any) => ({ t: str(v.title, 200), u: link(v.link), s: str(v.snippet), img: link(v.imageUrl), dur: str(v.duration, 12), src: str(v.source, 60), ch: str(v.channel, 80), d: str(v.date, 40) })).filter((x: Any) => x.u) };
-  if (type === 'news') return { items: (j.news || []).map((v: Any) => ({ t: str(v.title, 200), u: link(v.link), s: str(v.snippet), img: link(v.imageUrl), src: str(v.source, 60), d: str(v.date, 40) })).filter((x: Any) => x.u) };
-  const o: Any = { items: (j.organic || []).map((v: Any) => ({ t: str(v.title, 200), u: link(v.link), s: str(v.snippet, 400), d: str(v.date, 40) })).filter((x: Any) => x.u) };
-  const kg = j.knowledgeGraph;
-  if (kg && kg.title) o.kg = { t: str(kg.title, 120), type: str(kg.type, 60), s: str(kg.description, 600), src: str(kg.descriptionSource, 40), u: link(kg.descriptionLink) || link(kg.website), img: link(kg.imageUrl),
-    attrs: (kg.attributes && typeof kg.attributes === 'object') ? Object.entries(kg.attributes).slice(0, 6).map(([k, v]) => [str(k, 40), str(String(v), 120)]).filter(x => x[0] && x[1]) : undefined };
-  const ab = j.answerBox;
-  if (ab && (ab.answer || ab.snippet)) o.ans = { t: str(ab.answer || ab.snippet, 600), title: str(ab.title, 200), u: link(ab.link) };
-  if (Array.isArray(j.relatedSearches)) o.rel = j.relatedSearches.map((x: Any) => str(x && x.query, 80)).filter(Boolean).slice(0, 8);
-  return o;
+async function usage() {
+  try {
+    const r = await tfetch(SB_URL + '/rest/v1/search_usage?uid=eq.' + ALL + '&day=eq.' + monthStart() + '&select=kind,n', { headers: dbh() }, 4000);
+    const a = r.ok ? await r.json() : [];
+    const o: Record<string, number> = { exa: 0, tavily: 0 };
+    for (const x of a) if (/^m:/.test(x.kind)) o[x.kind.slice(2)] = x.n;
+    return o;
+  } catch { return { exa: 0, tavily: 0 }; }
 }
+
+/* ---------- 两家网页搜索 ---------- */
+const SINCE: Record<string, number> = { day: 1, week: 7, month: 31, year: 366 };
+function srcErr(s: string, status: number, j: Any) {   // 把各家的出错说成人话；“用完了”单独标出来，好自动换下一家
+  const m = String((j && (j.error || j.message || j.detail && (j.detail.error || j.detail))) || '');
+  if (status === 402 || status === 432 || status === 433 || /credit|balance|quota|usage limit|insufficient/i.test(m)) return new Oops('empty', NAME[s] + ' 这个月的免费次数用完了');
+  if (status === 401 || status === 403) return new Oops('badkey', NAME[s] + ' 的密钥不对：检查服务器里填的密钥');
+  if (status === 429) return new Oops('busy', '搜得太快了，等几秒再试');
+  return new Oops('upstream', NAME[s] + ' 出错（' + status + '）');
+}
+async function exa(type: string, q: string, tbs: string, sites: string[] = []) {
+  const body: Any = { query: q, type: 'lite', numResults: 10, contents: { highlights: true } };
+  if (SINCE[tbs]) body.startPublishedDate = new Date(Date.now() - SINCE[tbs] * DAY).toISOString();
+  if (type === 'news') body.category = 'news';
+  if (type === 'videos') body.includeDomains = VID_SITES;
+  if (sites.length) body.includeDomains = sites;   // “site:网址”：Exa 要用这个参数，不认搜索词里的 site:
+  const h = { 'x-api-key': KEY.exa() };
+  let r = await postJson('https://api.exa.ai/search', h, body);
+  if (r.status === 400) { delete body.contents; r = await postJson('https://api.exa.ai/search', h, body); }   // 万一简版不支持摘要，退一步只要标题
+  if (!r.ok) throw srcErr('exa', r.status, r.j);
+  const res = ((r.j && r.j.results) || []).filter((x: Any) => link(x.url));
+  if (type === 'images') return { items: res.filter((x: Any) => link(x.image)).map((x: Any) => ({ t: str(x.title, 200), img: link(x.image), th: link(x.image), u: link(x.url), src: hostOf(x.url) })) };
+  if (type === 'videos') return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), img: link(x.image), src: hostOf(x.url), ch: str(x.author, 80), d: day10(x.publishedDate) })) };
+  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(Array.isArray(x.highlights) ? x.highlights.join(' … ') : x.text, 400), d: day10(x.publishedDate), img: type === 'news' ? link(x.image) : undefined })) };
+}
+async function tavily(type: string, q: string, tbs: string, sites: string[] = []) {
+  const body: Any = { query: q, search_depth: 'basic', max_results: type === 'images' ? 20 : 10, topic: type === 'news' ? 'news' : 'general' };
+  if (SINCE[tbs]) body.time_range = tbs;
+  if (CJK.test(q)) body.language = 'zh-cn';
+  if (type === 'images') { body.include_images = true; body.include_image_descriptions = true; }
+  if (type === 'videos') body.include_domains = VID_SITES;
+  if (sites.length) body.include_domains = sites;
+  if (type === 'news') body.include_published_date = true;
+  const h = { Authorization: 'Bearer ' + KEY.tavily() };
+  let r = await postJson('https://api.tavily.com/search', h, body);
+  if (r.status === 400 && body.language) { delete body.language; r = await postJson('https://api.tavily.com/search', h, body); }
+  if (!r.ok) throw srcErr('tavily', r.status, r.j);
+  const res = ((r.j && r.j.results) || []).filter((x: Any) => link(x.url));
+  if (type === 'images') {
+    const items: Any[] = [], seen = new Set<string>();
+    const add = (im: Any, page?: Any) => { const u = link(typeof im === 'string' ? im : im && im.url); if (!u || seen.has(u)) return; seen.add(u); items.push({ t: str(im && im.description, 200) || str(page && page.title, 200), img: u, th: u, u: page ? link(page.url) : undefined, src: page ? hostOf(page.url) : hostOf(u) }); };
+    res.forEach((p: Any) => (p.images || []).forEach((im: Any) => add(im, p)));
+    ((r.j && r.j.images) || []).forEach((im: Any) => add(im));
+    return { items: items.slice(0, 60) };
+  }
+  if (type === 'videos') return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(x.content, 200), src: hostOf(x.url), d: day10(x.published_date) })) };
+  return { items: res.map((x: Any) => ({ t: str(x.title, 200), u: link(x.url), s: str(x.content, 400), d: day10(x.published_date) })) };
+}
+const SRC: Record<string, (type: string, q: string, tbs: string, sites?: string[]) => Promise<Any>> = { exa, tavily };
+
+/* ---------- 免费的：维基百科卡片、维基共享资源图片 ---------- */
 function loose(a: Any, b: Any) {
   const n = (x: Any) => String(x || '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
   const x = n(a), y = n(b); return !!x && !!y && (x.includes(y) || y.includes(x));
@@ -126,54 +189,146 @@ function clip(t: string, n = 280) {
   const cut = t.slice(0, n), i = Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('. '), cut.lastIndexOf('！'), cut.lastIndexOf('？'));
   return i > n * 0.5 ? cut.slice(0, i + 1) : cut + '…';
 }
-async function wiki(q: string) {   // 百科卡片：谷歌没给知识卡片时，用维基百科的第一条（标题要和搜的词对得上，不然不显示）
+const wikiHost = (q: string) => CJK.test(q) ? 'zh.wikipedia.org' : 'en.wikipedia.org';
+const wikiLink = (host: string, title: string) => 'https://' + host.replace('.wikipedia', '.m.wikipedia') + '/wiki/' + encodeURIComponent(title.replace(/ /g, '_'));
+async function wiki(q: string) {   // 百科卡片：维基百科的第一条（标题要和搜的词对得上，不然不显示）
   if (q.length > 60) return null;
-  const zh = /[㐀-鿿]/.test(q), host = zh ? 'zh.wikipedia.org' : 'en.wikipedia.org';
+  const host = wikiHost(q);
   const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrlimit: '1', gsrnamespace: '0', prop: 'extracts|pageimages|info', exintro: '1', explaintext: '1', piprop: 'thumbnail', pithumbsize: '240', inprop: 'url|displaytitle', redirects: '1' });
-  if (zh) p.set('variant', 'zh-cn');
-  const r = await tfetch('https://' + host + '/w/api.php?' + p, { headers: { 'User-Agent': WIKI_UA, 'Api-User-Agent': WIKI_UA, 'Accept-Language': zh ? 'zh-CN' : 'en' } }, 5000);
-  if (!r.ok) return null;
-  const j = await r.json(); const pg = j && j.query && j.query.pages && j.query.pages[0];
+  if (CJK.test(q)) p.set('variant', 'zh-cn');
+  const j = await getJson('https://' + host + '/w/api.php?' + p, { 'Api-User-Agent': BOT_UA, 'Accept-Language': CJK.test(q) ? 'zh-CN' : 'en' }, 5000);
+  const pg = j && j.query && j.query.pages && j.query.pages[0];
   if (!pg || pg.missing) return null;
-  const title = String(pg.displaytitle || pg.title || '').replace(/<[^>]+>/g, '');
+  const title = strip(pg.displaytitle || pg.title);
   const ex = String(pg.extract || '').trim();
   if (ex.length < 20 || /may refer to|可以指|可能指|可指/.test(ex.slice(0, 80))) return null;
   if (!loose(title, q) && !loose(pg.title, q)) return null;
-  const u = link(pg.fullurl);
-  return { t: title.slice(0, 120), s: clip(ex), img: link(pg.thumbnail && pg.thumbnail.source), u: u && u.replace('://' + host, '://' + host.replace('.wikipedia', '.m.wikipedia')), src: '维基百科' };
+  return { t: title.slice(0, 120), s: clip(ex), img: link(pg.thumbnail && pg.thumbnail.source), u: wikiLink(host, pg.title), src: '维基百科' };
 }
-async function doSearch(uid: string, b: Any, c: Any) {
-  const type = TYPES[b.type] ? b.type : 'web';
-  const q = String(b.q || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-  if (!q) return fail('bad', '没有要搜的内容');
-  const page = Math.min(10, Math.max(1, parseInt(b.page) || 1));
-  const tbs = TBS.includes(b.tbs) ? b.tbs : '', gl = GLS.includes(b.gl) ? b.gl : '', hl = HLS.includes(b.hl) ? b.hl : 'zh-cn';
-  const key = 's' + await sha([type, q.toLowerCase(), page, tbs, gl, hl].join('|'));
+async function commons(q: string) {   // 维基共享资源的图片：免费、清晰、能标出处
+  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrnamespace: '6', gsrlimit: '20', prop: 'imageinfo', iiprop: 'url|size|mime', iiurlwidth: '480' });
+  const j = await getJson('https://commons.wikimedia.org/w/api.php?' + p, { 'Api-User-Agent': BOT_UA }, 6000);
+  return ((j && j.query && j.query.pages) || []).map((pg: Any) => {
+    const ii = pg.imageinfo && pg.imageinfo[0]; if (!ii || !/^image\//.test(ii.mime || '')) return null;
+    return { t: strip(String(pg.title || '').replace(/^File:|\.\w+$/g, '')).slice(0, 120), img: link(ii.url), th: link(ii.thumburl) || link(ii.url), w: num(ii.width), h: num(ii.height), u: link(ii.descriptionurl), src: '维基共享资源' };
+  }).filter(Boolean);
+}
+
+/* ---------- 深挖：几个大数据库，全部免费 ---------- */
+async function wikiList(q: string) {
+  const host = wikiHost(q);
+  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', list: 'search', srsearch: q, srlimit: '6', srprop: 'snippet|timestamp' });
+  if (CJK.test(q)) p.set('variant', 'zh-cn');
+  const j = await getJson('https://' + host + '/w/api.php?' + p, { 'Api-User-Agent': BOT_UA });
+  return ((j && j.query && j.query.search) || []).map((x: Any) => ({ t: str(x.title, 160), u: wikiLink(host, x.title), s: str(strip(x.snippet), 240), f: day10(x.timestamp) && '更新于 ' + day10(x.timestamp) }));
+}
+const MEDIA: Record<string, string> = { texts: '书 / 文档', movies: '视频', audio: '音频', image: '图片', software: '软件', web: '网页', data: '数据', collection: '合集', etree: '现场录音' };
+async function archiveSearch(q: string) {
+  const p = new URLSearchParams({ q, rows: '8', output: 'json' });
+  ['identifier', 'title', 'description', 'mediatype', 'year', 'creator'].forEach(f => p.append('fl[]', f));
+  const j = await getJson('https://archive.org/advancedsearch.php?' + p);
+  const one = (v: Any) => Array.isArray(v) ? v[0] : v;
+  return ((j && j.response && j.response.docs) || []).filter((d: Any) => d.identifier).map((d: Any) => ({
+    t: str(strip(one(d.title)), 160) || d.identifier, u: 'https://archive.org/details/' + encodeURIComponent(d.identifier), s: str(clip(strip(one(d.description)), 200), 220),
+    f: [MEDIA[d.mediatype] || d.mediatype, one(d.year), str(strip(one(d.creator)), 40)].filter(Boolean).join(' · '), img: 'https://archive.org/services/img/' + encodeURIComponent(d.identifier), ext: true
+  }));
+}
+async function openalex(q: string) {
+  const p = new URLSearchParams({ search: q, per_page: '8', select: 'id,display_name,publication_year,doi,primary_location,open_access,authorships,cited_by_count' });
+  if (env('OPENALEX_API_KEY')) p.set('api_key', env('OPENALEX_API_KEY'));
+  const j = await getJson('https://api.openalex.org/works?' + p);
+  return ((j && j.results) || []).map((w: Any) => {
+    const oa = w.open_access && link(w.open_access.oa_url), land = w.primary_location && link(w.primary_location.landing_page_url);
+    const au = (w.authorships || []).slice(0, 3).map((a: Any) => a && a.author && a.author.display_name).filter(Boolean).join('、');
+    return { t: str(strip(w.display_name), 200), u: oa || land || link(w.doi) || link(w.id), s: au ? str(au + ((w.authorships || []).length > 3 ? ' 等' : ''), 160) : undefined,
+      f: [w.publication_year, typeof w.cited_by_count === 'number' ? '被引用 ' + w.cited_by_count + ' 次' : '', oa ? '可以免费看全文' : ''].filter(Boolean).join(' · '), ext: !!(oa && /\.pdf($|\?)/i.test(oa)) };
+  }).filter((x: Any) => x.t && x.u);
+}
+async function github(q: string) {
+  const h: Record<string, string> = { Accept: 'application/vnd.github+json' };
+  if (env('GITHUB_TOKEN')) h.Authorization = 'Bearer ' + env('GITHUB_TOKEN');
+  const j = await getJson('https://api.github.com/search/repositories?' + new URLSearchParams({ q, per_page: '6' }), h);
+  return ((j && j.items) || []).map((x: Any) => ({ t: str(x.full_name, 120), u: link(x.html_url), s: str(x.description, 240), f: ['★ ' + (x.stargazers_count || 0), x.language, day10(x.pushed_at) && '更新于 ' + day10(x.pushed_at)].filter(Boolean).join(' · ') })).filter((x: Any) => x.u);
+}
+async function hackernews(q: string) {
+  const j = await getJson('https://hn.algolia.com/api/v1/search?' + new URLSearchParams({ query: q, tags: 'story', hitsPerPage: '6' }));
+  return ((j && j.hits) || []).map((x: Any) => {
+    const c = 'https://news.ycombinator.com/item?id=' + encodeURIComponent(x.objectID);
+    return { t: str(x.title, 200), u: link(x.url) || c, c, f: [(x.points || 0) + ' 分', (x.num_comments || 0) + ' 条评论', day10(x.created_at)].filter(Boolean).join(' · ') };
+  }).filter((x: Any) => x.t);
+}
+const DEEP: [string, string, (q: string) => Promise<Any[]>][] = [['wiki', '维基百科', wikiList], ['archive', '互联网档案馆', archiveSearch], ['papers', '论文', openalex], ['github', 'GitHub', github], ['hn', 'Hacker News 讨论', hackernews]];
+async function doDeep(uid: string, q: string, c: Any) {
+  const key = 'd' + await sha(q.toLowerCase());
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
-  if (!SERPER()) return fail('nokey', '搜索还没开通：服务器里还没填 Serper 的密钥');
+  if (await bump(uid, 'd', c.deep_per_user_day) < 0) return fail('limit', '今天“深挖”用得太多了，明天再来');
+  const got = await Promise.all(DEEP.map(d => d[2](q).then(items => items, () => null)));
+  const groups = DEEP.map((d, i) => ({ k: d[0], n: d[1], items: got[i] || [] })).filter(g => g.items.length);
+  const down = DEEP.filter((_, i) => got[i] === null).map(d => d[1]);
+  const out = { type: 'deep', q, groups, down };
+  if (down.length < DEEP.length) bg(cput(key, out));   // 全都没连上就不存，下次重试
+  return json({ ok: true, cached: false, ...out });
+}
+
+/* ---------- 搜索入口 ---------- */
+const TYPES = ['web', 'images', 'videos', 'news', 'deep'];
+async function doSearch(uid: string, b: Any, c: Any) {
+  const type = TYPES.includes(b.type) ? b.type : 'web';
+  const q = String(b.q || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!q) return fail('bad', '没有要搜的内容');
+  const sites: string[] = [];   // 搜索词里的“site:网址”拆出来，交给各家的“只搜这些网站”参数
+  const words = q.replace(/(^|\s)site:(\S+)/gi, (_m: string, sp: string, d: string) => { const x = d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''); if (/^[a-z0-9.-]+\.[a-z0-9-]{2,}(\/\S*)?$/.test(x) && sites.length < 5) sites.push(x); return sp; }).replace(/\s+/g, ' ').trim();
+  if (!words) return fail('bad', '“site:”后面还要写上要搜的词');
+  if (type === 'deep') return await doDeep(uid, words, c);
+  const tbs = SINCE[b.tbs] ? b.tbs : '';
+  const base = (type === 'images' ? c.img_order : c.order) || ['exa', 'tavily'];
+  let want: string[] = SRC[b.src] ? [b.src] : base.filter((s: string) => SRC[s]);
+  if (!SRC[b.src] && SRC[b.pref] && type !== 'images') want = [b.pref].concat(want.filter(s => s !== b.pref));   // 你在规则里选了先用哪家
+  const ck: Record<string, string> = {};
+  for (const s of want) ck[s] = 's' + await sha([type, q.toLowerCase(), tbs, s].join('|'));
+  const got = await cgetMany(want.map(s => ck[s]).concat(want.map(s => 'x-' + s)));
+  for (const s of want) { const x = got[ck[s]]; if (x && Date.now() - x.at <= TTL) return json({ ok: true, cached: true, ...x.v }); }
+  const why: Record<string, string> = {}, avail: string[] = [];
+  for (const s of want) {
+    if (!KEY[s]()) { why[s] = 'nokey'; continue; }
+    const m = got['x-' + s]; if (m && Date.now() - m.at < 6 * 3600000) { why[s] = 'empty'; continue; }   // 刚发现用完了：6 小时内不再去试
+    avail.push(s);
+  }
+  if (!avail.length) {
+    if (type === 'images' && !sites.length) { const cm = await commons(words).catch(() => []); if (cm.length) return json({ ok: true, cached: false, type, q, src: 'commons', items: cm, partial: true }); }
+    return failAll(want, why);
+  }
   const n = await bump(uid, 's', c.per_user_day);
   if (n < 0) return fail('limit', '今天搜了 ' + c.per_user_day + ' 次，到上限了，明天再来（搜过的词再搜不算次数）');
-  if (await bump(ALL, 'month', c.month_cap, true) < 0) return fail('month', '这个月的搜索次数用完了（所有人合计），下个月 1 号恢复');
-  const body: Any = { q, page, hl }; if (gl) body.gl = gl; if (tbs) body.tbs = tbs; if (type !== 'images') body.num = 10;
-  const wikiP = (type === 'web' && page === 1) ? wiki(q).catch(() => null) : Promise.resolve(null);
-  let r: Response, j: Any;
-  try {
-    r = await tfetch('https://google.serper.dev/' + TYPES[type], { method: 'POST', headers: { 'X-API-KEY': SERPER(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 9000);
-    j = await r.json().catch(() => null);
-  } catch { return fail('upstream', '搜索服务没响应，稍后再试'); }
-  if (!r.ok) {
-    const m = String((j && j.message) || '');
-    if (/credit/i.test(m)) return fail('credits', 'Serper 的额度用完了：要去 Serper 充值，或者换一个密钥');
-    if (r.status === 401 || r.status === 403) return fail('nokey', 'Serper 的密钥不对：检查服务器里填的 SERPER_API_KEY');
-    if (r.status === 429) return fail('busy', '搜得太快了，等几秒再试');
-    return fail('upstream', '搜索服务出错（' + r.status + '）');
+  const wikiP = type === 'web' && !sites.length ? wiki(words).catch(() => null) : Promise.resolve(null);
+  const comP = type === 'images' && !sites.length ? commons(words).catch(() => []) : Promise.resolve([]);
+  for (const s of avail) {
+    let out: Any;
+    try { out = await SRC[s](type, words, tbs, sites); }
+    catch (e) {
+      why[s] = e instanceof Oops ? e.code : 'upstream';
+      if (why[s] === 'empty') bg(cput('x-' + s, { at: Date.now() }));
+      continue;
+    }
+    if (type === 'images') { const seen = new Set(out.items.map((x: Any) => x.img)); out.items = out.items.concat((await comP).filter((x: Any) => !seen.has(x.img))); }
+    if (type === 'web') { const w = await wikiP; if (w) out.wiki = w; }
+    out.type = type; out.q = q; out.src = s;
+    const used = await bump(ALL, 'm:' + s, 1000000000, true).catch(() => null);
+    bg(cput(ck[s], out));
+    return json({ ok: true, cached: false, left: Math.max(0, c.per_user_day - n), used, ...out });
   }
-  const out: Any = shape(type, j);
-  if (type === 'web' && page === 1 && !out.kg) { const w = await wikiP; if (w) out.wiki = w; }
-  out.type = type; out.q = q; out.page = page;
-  bg(cput(key, out));
-  return json({ ok: true, cached: false, left: Math.max(0, c.per_user_day - n), ...out });
+  if (type === 'images') { const cm = await comP; if (cm.length) return json({ ok: true, cached: false, type, q, src: 'commons', items: cm, partial: true }); }
+  return failAll(want, why);
+}
+function failAll(list: string[], why: Record<string, string>) {
+  const codes = list.map(s => why[s]);
+  const named = (code: string) => list.filter(s => why[s] === code).map(s => NAME[s]).join('、');
+  if (codes.every(x => x === 'nokey')) return fail('nokey', '搜索还没开通：服务器里还没填' + (list.length > 1 ? ' Exa 或 Tavily ' : ' ' + NAME[list[0]] + ' ') + '的密钥');
+  if (codes.includes('badkey')) return fail('nokey', named('badkey') + ' 的密钥不对：检查服务器里填的密钥');
+  if (codes.every(x => x === 'empty' || x === 'nokey')) return fail('empty', named('empty') + ' 这个月的免费次数用完了，下个月 1 号恢复；“深挖”还能用');
+  if (codes.includes('busy')) return fail('busy', '搜得太快了，等几秒再试');
+  return fail('upstream', '搜索服务暂时没响应，稍后再试');
 }
 
 /* ---------- 简洁阅读 ---------- */
@@ -210,11 +365,11 @@ function decode(buf: Uint8Array, ct: string) {   // 国内很多网站还是 GBK
   cs = (cs || 'utf-8').toLowerCase(); if (cs === 'gb2312' || cs === 'gbk') cs = 'gb18030';
   try { return new TextDecoder(cs).decode(buf); } catch { return new TextDecoder('utf-8').decode(buf); }
 }
-async function grab(u0: URL) {
+async function grab(u0: URL, ms = 9000) {
   let cur = u0;
   for (let hop = 0; hop < 6; hop++) {
     let r: Response;
-    try { r = await tfetch(cur.href, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' } }, 9000); }
+    try { r = await tfetch(cur.href, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' } }, ms); }
     catch (e) { throw new Oops('fetch', (e as Any)?.name === 'AbortError' ? '这个网页太久没响应' : '这个网页连不上'); }
     if (r.status >= 300 && r.status < 400) {
       const loc = r.headers.get('location'); try { await r.body?.cancel(); } catch { /* 不要正文 */ }
@@ -237,8 +392,8 @@ const escA = (s: string) => escT(s).replace(/"/g, '&quot;');
 function abs(v: Any, base: string) { if (!v) return ''; try { const u = new URL(String(v).trim(), base); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch { return ''; } }
 const KEEP = new Set(['p', 'br', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'em', 'strong', 'b', 'i', 'u', 's', 'sub', 'sup', 'a', 'img', 'figure', 'figcaption', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'div']);
 const DROP = new Set(['script', 'style', 'noscript', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'svg', 'canvas', 'video', 'audio', 'template', 'link', 'meta', 'nav', 'aside', 'footer', 'header']);
-function clean(content: string, base: string) {   // 只留白名单里的标签；属性只留链接和图片地址
-  const { document } = parseHTML('<!doctype html><html><body><div id="chx">' + content + '</div></body></html>');
+function clean(content: string, base: string, imgUrl: (u: string) => string) {   // 只留白名单里的标签；属性只留链接和图片地址
+  const { document } = parseHTML('<!doctype html><html><body><div id="chx">' + content + '</div></body></html>') as Any;
   const root = document.getElementById('chx'); const out: string[] = []; let text = 0, imgs = 0;
   const walk = (node: Any) => {
     for (const ch of Array.from(node.childNodes) as Any[]) {
@@ -253,7 +408,7 @@ function clean(content: string, base: string) {   // 只留白名单里的标签
         const ss = String(ch.getAttribute('srcset') || '').split(',').pop() || '';
         const src = abs(ch.getAttribute('src') || ss.trim().split(/\s+/)[0], base); if (!src) continue;
         imgs++; const alt = String(ch.getAttribute('alt') || '').slice(0, 200);
-        out.push('<img src="' + escA(src) + '"' + (alt ? ' alt="' + escA(alt) + '"' : '') + '>'); continue;
+        out.push('<img src="' + escA(imgUrl(src)) + '"' + (alt ? ' alt="' + escA(alt) + '"' : '') + '>'); continue;
       }
       if (tag === 'br' || tag === 'hr') { out.push('<' + tag + '>'); continue; }
       if (tag === 'a') { const h = abs(ch.getAttribute('href'), base); out.push(h ? '<a href="' + escA(h) + '">' : ''); walk(ch); out.push(h ? '</a>' : ''); continue; }
@@ -264,10 +419,9 @@ function clean(content: string, base: string) {   // 只留白名单里的标签
   const html = out.join('').replace(/<(p|div|li|figure)>\s*<\/\1>/g, '').replace(/\n{3,}/g, '\n\n');
   return { html: html.slice(0, 400000), text, imgs };
 }
-function normDate(v: Any) { const t = Date.parse(String(v || '')); return isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 10) : undefined; }
-const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
-function extract(html: string, base: string) {
-  const { document } = parseHTML(html);
+// 存档页里的地址要按原网址补全，图片改成从互联网档案馆取（原网站可能早没了）
+function extract(html: string, base: string, arch?: string) {
+  const { document } = parseHTML(html) as Any;
   for (const im of Array.from(document.querySelectorAll('img')) as Any[]) {   // 懒加载的图：真地址藏在 data-src 之类里
     const ds = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-actualsrc') || im.getAttribute('data-url');
     const src = im.getAttribute('src') || '';
@@ -281,21 +435,51 @@ function extract(html: string, base: string) {
   let r: Any = null;
   try { r = new Readability(document as Any, { charThreshold: 200, keepClasses: false }).parse(); } catch { r = null; }
   if (!r || !r.content || (r.length || 0) < 140) return null;
-  const c = clean(r.content, base);
+  const imgUrl = (u: string) => arch && !/^https?:\/\/web\.archive\.org\//.test(u) ? 'https://web.archive.org/web/' + arch + 'im_/' + u : u;
+  const c = clean(r.content, base, imgUrl);
   if (c.text < 100) return null;
-  return { u: base, title: str(r.title, 200) || hostOf(base), site: str(r.siteName, 60) || str(site, 60) || hostOf(base), by: str(r.byline, 80), date: normDate(r.publishedTime || pub), lang: str(r.lang || lang, 20), html: c.html, len: c.text, img: c.imgs ? undefined : (abs(ogImg, base) || undefined) };
+  const lead = abs(ogImg, base);
+  return { u: base, title: str(r.title, 200) || hostOf(base), site: str(r.siteName, 60) || str(site, 60) || hostOf(base), by: str(r.byline, 80), date: day10(r.publishedTime || pub), lang: str(r.lang || lang, 20), html: c.html, len: c.text, img: c.imgs || !lead ? undefined : imgUrl(lead), arch };
 }
 async function doRead(uid: string, b: Any, c: Any) {
   const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
-  const key = 'r' + await sha(u0.href);
+  let at = String(b.at || '');
+  if (at && at !== 'latest' && !/^\d{4,14}$/.test(at)) return fail('bad', '存档时间不对');
+  const key = 'r' + await sha(u0.href + '|' + at);
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
   if (await bump(uid, 'r', c.read_per_user_day) < 0) return fail('limit', '今天简洁阅读打开太多次了，明天再来；可以先点“原网页”');
-  const got = await grab(u0);
-  const art = extract(got.html, got.url);
-  if (!art) return fail('noArticle', '这个网页不是文章，没法简洁阅读');
+  let target = u0;
+  if (at) {
+    if (at === 'latest') {
+      let j: Any = null;
+      try { j = await getJson('https://archive.org/wayback/available?' + new URLSearchParams({ url: u0.href }), {}, 9000); } catch { throw new Oops('fetch', '互联网档案馆暂时连不上，稍后再试'); }
+      const cl = j && j.archived_snapshots && j.archived_snapshots.closest;
+      if (!cl || !cl.available || !/^\d{14}$/.test(String(cl.timestamp))) return fail('noArchive', '互联网档案馆里没有这个网页的存档');
+      at = String(cl.timestamp);
+    }
+    target = new URL('https://web.archive.org/web/' + at + 'id_/' + u0.href);
+  }
+  const got = await grab(target, at ? 15000 : 9000);
+  if (at) { const m = /\/web\/(\d{14})id_\//.exec(got.url); if (m) at = m[1]; }   // 实际取到的是哪一天的存档
+  const art = extract(got.html, at ? u0.href : got.url, at || undefined);
+  if (!art) return fail('noArticle', at ? '这一版存档不是文章，没法简洁阅读' : '这个网页不是文章，没法简洁阅读');
   bg(cput(key, art));
   return json({ ok: true, cached: false, ...art });
+}
+async function doVersions(uid: string, b: Any, c: Any) {
+  const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
+  const key = 'v' + await sha(u0.href);
+  const hit = await cget(key);
+  if (hit) return json({ ok: true, cached: true, ...hit });
+  if (await bump(uid, 'd', c.deep_per_user_day) < 0) return fail('limit', '今天查存档太多次了，明天再来');
+  let rows: Any;
+  try { rows = await getJson('https://web.archive.org/cdx/search/cdx?' + new URLSearchParams({ url: u0.href, output: 'json', fl: 'timestamp,statuscode', filter: 'statuscode:200', collapse: 'timestamp:6' }), {}, 15000); }
+  catch { return fail('fetch', '互联网档案馆暂时连不上，稍后再试'); }
+  const list = (Array.isArray(rows) ? rows.slice(1) : []).map((r: Any) => String(r && r[0])).filter((t: string) => /^\d{14}$/.test(t)).reverse().slice(0, 80);
+  const out = { url: u0.href, list };
+  bg(cput(key, out));
+  return json({ ok: true, cached: false, ...out });
 }
 
 /* ---------- 入口 ---------- */
@@ -304,7 +488,7 @@ export async function handle(req: Request): Promise<Response> {
   if (req.method !== 'POST') return fail('bad', '只接受 POST', 405);
   let b: Any; try { b = await req.json(); } catch { return fail('bad', '请求格式不对', 400); }
   if (!b || typeof b !== 'object') return fail('bad', '请求格式不对', 400);
-  if (b.op === 'ping') return json({ ok: true, v: VER, key: !!SERPER() });
+  if (b.op === 'ping') return json({ ok: true, v: VER, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily() } });
   let uid: string | null = null; try { uid = await uidOf(req); } catch { uid = null; }
   if (!uid) return fail('auth', '登录过期了，重新登录一下', 401);
   try {
@@ -312,6 +496,8 @@ export async function handle(req: Request): Promise<Response> {
     if (c.enabled === false) return fail('off', '搜索暂时关闭了');
     if (b.op === 'search') return await doSearch(uid, b, c);
     if (b.op === 'read') return await doRead(uid, b, c);
+    if (b.op === 'versions') return await doVersions(uid, b, c);
+    if (b.op === 'usage') return json({ ok: true, used: await usage(), free: { exa: c.exa_free, tavily: c.tavily_free }, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily() } });
     return fail('bad', '不认识的操作');
   } catch (e) {
     if (e instanceof Oops) return fail(e.code, e.message);

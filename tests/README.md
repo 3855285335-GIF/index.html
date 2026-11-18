@@ -84,8 +84,8 @@ node sql-1117-test.mjs
 ## 搜索的另外三组检查
 
 ```bash
-node search-ui.js [截图目录]                       # 真 Chromium：搜索界面 17 项，浅色深色各截 6 张
-deno run -A --node-modules-dir=none fn-search-test.ts   # 服务器函数 52 项（假的数据库、Serper、维基百科、网站）
+node search-ui.js [截图目录]                       # 真 Chromium：搜索界面 28 项，浅色深色各截 8 张
+deno run -A --node-modules-dir=none fn-search-test.ts   # 服务器函数 79 项（假的数据库、Exa、Tavily、维基百科、档案馆、论文库、GitHub、Hacker News、网站）
 npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   # 搜索 SQL 在内存数据库里试跑 23 项
 ```
 
