@@ -38,6 +38,7 @@ npm run quick        # 跳过两个要等十几秒的，约 40 秒
 | 群消息补推 | 推了一部分后不再问（当时在线、随后离开的人收不到）；服务器说“都推过了”还一直问 |
 | 退出其他设备 | 没让服务器删推送登记、没作废其他设备的登录凭证；发起的这台把自己踢掉；服务器还没更新时出错；查不到时误踢 |
 | 来电 | 来电界面不弹、拒绝后不关 |
+| 网页搜索 | 点放大镜不下载搜索；营销号没隐藏、置顶不在前；简洁阅读把脚本带进来；返回退不回去；在搜索里打开聊天被盖住 |
 | 半屏 | 键盘收起后页面停在半屏 |
 
 ## 可选：真浏览器测试（Chromium）
@@ -79,3 +80,13 @@ node sql-1117-test.mjs
 - 用 `ok(条件, '没通过时显示的话')` 判断结果。
 
 注意：app.js 末尾那行 `if (window.__TEST__) window.__T = {` 是给检查用的接口，别删。
+
+## 搜索的另外三组检查
+
+```bash
+node search-ui.js [截图目录]                       # 真 Chromium：搜索界面 17 项，浅色深色各截 6 张
+deno run -A --node-modules-dir=none fn-search-test.ts   # 服务器函数 52 项（假的数据库、Serper、维基百科、网站）
+npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   # 搜索 SQL 在内存数据库里试跑 23 项
+```
+
+Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/deno`。

@@ -1928,6 +1928,7 @@ async function warmConvs() {   // 启动后先把最近几个会话的消息拉�
 }
 async function openConv(key, peer) {
   if (!S.me) return;
+  try { if (window.ChatterSearch && window.ChatterSearch.isOpen()) window.ChatterSearch.closeNow(); } catch (e) {}   // 在搜索里点了消息横幅：先收起搜索，不然聊天被盖在下面
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; S.editSince = new Date().toISOString(); clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
@@ -6213,6 +6214,39 @@ async function fnCall(body) {
   if (!r.ok) { const er = new Error(r.status === 404 ? NO_FN : '通知服务出错（' + r.status + '）' + ((j && (j.error || j.message || j.msg)) ? '：' + (j.error || j.message || j.msg) : '')); er.status = r.status; throw er; }
   PUSH.srv = true; return j || {};
 }
+/* ---- 网页搜索：界面在 search.js 里，第一次点放大镜才下载；这里给它提供调用服务器、弹菜单、转发这些能力 ---- */
+const SEARCH_FN = API_URL + '/functions/v1/chatter-search';
+async function wsCall(body, ms) {
+  let tok = S.token;
+  try { const r = await sb.auth.getSession(); tok = (r && r.data && r.data.session && r.data.session.access_token) || tok; } catch (e) {}
+  if (!tok) return { ok: false, code: 'auth', msg: '还没有登录' };
+  const ac = typeof AbortController === 'function' ? new AbortController() : null;
+  const t = ac ? setTimeout(function () { try { ac.abort(); } catch (e) {} }, ms || 20000) : 0;
+  let r;
+  try { r = await fetch(SEARCH_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body), signal: ac ? ac.signal : undefined }); }
+  catch (e) { clearTimeout(t); return { ok: false, code: 'net', msg: (e && e.name === 'AbortError') ? '等太久了，网络可能不太好，再试一次' : '连不上搜索服务器，检查一下网络' }; }
+  clearTimeout(t);
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (r.status === 404 && !(j && 'ok' in j)) return { ok: false, code: 'nofn', msg: '搜索服务器还没装好' };
+  if (!j || !('ok' in j)) return { ok: false, code: r.status === 401 ? 'auth' : 'http', msg: r.status === 401 ? '登录过期了，重新登录一下' : '搜索服务器出错（' + r.status + '）' };
+  return j;
+}
+window.__chWS = {
+  call: wsCall, toast: toast, acts: openActs, form: openForm, copy: copyText, logErr: logErr,
+  forward: function (text) { openForward({ type: 'text', body: String(text || '') }); },
+  sb: function () { return sb; }, uid: function () { return S.uid; }
+};
+let wsLoading = false;
+function openWS() {
+  if (window.ChatterSearch) { window.ChatterSearch.open(); return; }
+  if (wsLoading) return;
+  wsLoading = true;
+  const s = document.createElement('script');
+  s.src = 'search.js?v=' + (APP_V || '0');
+  s.onload = function () { wsLoading = false; if (window.ChatterSearch) window.ChatterSearch.open(); else toast('搜索没加载出来，再点一次试试'); };
+  s.onerror = function () { wsLoading = false; s.remove(); toast('搜索没加载出来，检查网络后再点一次'); };
+  document.body.appendChild(s);
+}
 const pushBlocked = () => S.v8 === false || (PUSH.srv === false && now() - PUSH.srvAt < 10 * 60000);
 async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（对方在线、不是好友等情况由数据库判断后跳过）
   if (!S.me || pushBlocked()) return null;
@@ -6692,6 +6726,7 @@ function bindUI() {
   })();
   window.addEventListener('popstate', (e) => {
     if (S.call) { armGuard(); return; }   // 通话界面不让滑走
+    if (window.ChatterSearch && window.ChatterSearch.onPop(e)) return;   // 搜索里：退一层（结果页 → 首页 → 关掉）
     if (S.conv) { S.hist = false; closeChat(); return; }
     const st = (e && e.state) || history.state;
     // 关掉聊天后浏览器会留一条“前进”记录：从右边缘往左滑（前进）时，真的把刚才那个聊天打开，
@@ -7254,6 +7289,7 @@ $('btn-export').onclick = () => {
   openActs('导出哪个聊天？', list);
 };
 $('btn-msearch').onclick = searchMsgs;
+$('btn-web').onclick = openWS;
 $('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;
   $('multi-copy').onclick = multiCopy;

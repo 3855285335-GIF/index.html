@@ -56,7 +56,11 @@ const FILES = [
   { id: '06c', name: '06c 11-16 第三份 SQL（已读不推送）', file: 'parts/04-新增SQL-20261116-c.sql' },
   { id: '07', name: '07 11-16 改动清单', file: 'parts/05-今日改动-20261116.md' },
   { id: '08', name: '08 11-17 改动清单（白屏保护、自动更新、实时权限、群补推、退出其他设备）', file: 'parts/05-今日改动-20261117.md' },
-  { id: '09', name: '09 11-17 SQL（实时权限 + 群补推 + 退出其他设备）', file: 'parts/04-新增SQL-20261117.sql' }
+  { id: '09', name: '09 11-17 SQL（实时权限 + 群补推 + 退出其他设备）', file: 'parts/04-新增SQL-20261117.sql' },
+  { id: '10', name: '10 11-18 改动清单（第 1 步：自己的搜索）', file: 'parts/05-今日改动-20261118.md' },
+  { id: '11', name: '11 11-18 SQL（搜索：缓存、计数、个人规则、默认名单）', file: 'parts/04-新增SQL-20261118-search.sql' },
+  { id: '12', name: '12 搜索服务器函数（chatter-search）', file: 'parts/06-搜索服务器函数.ts.txt' },
+  { id: '13', name: '13 搜索界面（search.js）', file: 'parts/07-搜索界面.txt' }
 ];
 const nav = document.getElementById('nav'), out = document.getElementById('out'), meta = document.getElementById('meta'), dl = document.getElementById('dl');
 let cur = FILES[4], text = '', lastIdx = -1;

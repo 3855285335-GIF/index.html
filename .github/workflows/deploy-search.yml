@@ -1,0 +1,29 @@
+# 搜索服务器函数自动部署：supabase/functions 里的文件一改，推送到 main 后自动装到 Supabase 上。
+# 需要在仓库 Settings → Secrets and variables → Actions 里加一个 SUPABASE_ACCESS_TOKEN（Supabase 账号的访问令牌）。
+# 没加的话这一步自动跳过，不会报错；也可以在 Actions 页面手动点“Run workflow”重新部署。
+name: deploy-search
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/functions/**', '.github/workflows/deploy-search.yml']
+  workflow_dispatch:
+concurrency: deploy-search
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - name: 还没设置令牌就跳过
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "仓库里还没有 SUPABASE_ACCESS_TOKEN，这次不部署。"
+      - uses: actions/checkout@v4
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+      - uses: supabase/setup-cli@v1
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        with:
+          version: 3.2.0
+      - name: 部署 chatter-search
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: supabase functions deploy chatter-search --remote=uaoiqbxptnbrvkzjwguc --no-verify-jwt --use-api --yes

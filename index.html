@@ -47,7 +47,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261118d9">
+<link rel="preload" as="script" href="app.js?v=20261118d10">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -165,6 +165,8 @@
   .brand span { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .me-info { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); max-width: 55%; }
   .me-info #me-name { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-header .me-info { margin-left: auto; min-width: 0; }
+  .hd-find { width: 40px; height: 40px; padding: 0; margin-left: 10px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 12px 10px; }
   .tab-panel { display: none; min-height: 100%; }
   .tab-panel.active { display: block; animation: fadein .2s ease; }
@@ -1112,6 +1114,7 @@
     <header class="app-header">
       <div class="brand"><svg class="logo"><use href="#logo"/></svg><span>Chatter</span></div>
       <div class="me-info"><span id="me-name">加载中…</span><span id="me-acc"></span></div>
+      <button id="btn-web" type="button" class="hd-find" aria-label="搜索网页"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
     </header>
     <main>
       <section id="tab-convs" class="tab-panel active"><div id="conv-list" class="list-card"></div></section>
@@ -1421,6 +1424,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261118d9" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261118d9&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261118d10" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261118d10&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>

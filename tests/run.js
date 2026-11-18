@@ -406,6 +406,67 @@ test('返回手势：浏览器里主页面垫一条守卫（滑了不离开网�
   } finally { env.close(); }
 });
 
+test('网页搜索：点放大镜才下载；结果按规则排（营销号隐藏、置顶在前、干净的往前）；简洁阅读洗掉脚本；返回一层层退；在搜索里打开聊天先收起搜索', async () => {
+  const fs = require('fs');
+  const env = makeEnv({ db: baseDb(Date.now(), { app_config: [{ key: 'search', value: { farms: ['baijiahao.baidu.com'], clean: ['wikipedia.org'], direct: ['x.com'] } }], search_prefs: [] }) });
+  try {
+    await env.login(); await sleep(300);
+    const w = env.w, H = w.history, calls = [], opened = [];
+    const resp = (j, st) => ({ ok: (st || 200) < 300, status: st || 200, json: async () => j });
+    w.open = u => { opened.push(u); return null; };
+    w.fetch = async (u, o) => {
+      u = String(u);
+      if (u.indexOf('/functions/v1/chatter-search') > 0) {
+        const b = JSON.parse(o.body); calls.push(b);
+        ok(o.headers.Authorization === 'Bearer tok', '调用搜索没带登录凭证');
+        if (b.op === 'search') return resp({ ok: true, cached: false, left: 70, type: b.type, q: b.q, page: b.page, items: [{ t: '营销', u: 'https://baijiahao.baidu.com/s?id=1', s: '震惊' }, { t: '普通', u: 'https://a.example.com/1', s: 'x' }, { t: '置顶的', u: 'https://docs.pin.dev/x', s: 'y' }, { t: '维基', u: 'https://zh.wikipedia.org/wiki/x', s: 'z' }, { t: '推特', u: 'https://x.com/a/status/1' }], wiki: { t: '词条', s: '摘要', u: 'https://zh.m.wikipedia.org/wiki/x' }, rel: ['相关一'] });
+        if (b.op === 'read') return resp({ ok: true, u: b.url, title: '文章标题', site: '示例', html: '<p onclick="alert(0)">正文<script>alert(1)</script><img src="https://img.example/a.jpg" onerror="alert(2)"><a href="javascript:alert(3)">坏</a><a href="https://b.example.com/2">好</a></p><iframe src="https://evil/"></iframe>', len: 900 });
+      }
+      return resp({ sent: 1 });
+    };
+    w.localStorage.setItem('ch2ws:' + env.T.S.uid, JSON.stringify({ pin: ['pin.dev'] }));
+    click(env, env.$('btn-web')); await sleep(50);
+    const sc = Array.from(w.document.querySelectorAll('script')).find(x => /search\.js\?v=/.test(x.getAttribute('src') || ''));
+    ok(sc && !w.ChatterSearch, '点放大镜没有去下载 search.js');
+    w.eval(fs.readFileSync(path.join(ROOT, 'search.js'), 'utf8')); sc.onload(); await sleep(50);
+    const ws = env.$('ws'), on = v => ws.querySelector('.ws-v.on') && ws.querySelector('.ws-v.on').dataset.v;
+    ok(ws && ws.classList.contains('on') && on() === 'home' && H.state && H.state.ws === 1, '搜索首页没打开：' + on() + ' ' + JSON.stringify(H.state));
+    const f = ws.querySelector('[data-form="home"]'); f.querySelector('input').value = '测试';
+    f.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await sleep(120);
+    ok(calls[0] && calls[0].op === 'search' && calls[0].q === '测试' && calls[0].type === 'web' && calls[0].page === 1, '搜索请求不对：' + JSON.stringify(calls[0]));
+    ok(on() === 'res' && H.state.ws === 2, '没有进入结果页');
+    const titles = Array.from(ws.querySelectorAll('.ws-r a.t')).map(a => a.textContent);
+    ok(titles.join(',') === '置顶的,维基,普通,推特', '排序不对（应该：置顶的、维基、普通、推特；营销号隐藏）：' + titles.join(','));
+    ok(/隐藏了 1 条营销号/.test(ws.textContent) && ws.querySelector('.ws-kg') && /词条/.test(ws.querySelector('.ws-kg').textContent), '营销号提示或百科卡片没显示');
+    const rows = Array.from(ws.querySelectorAll('.ws-r'));
+    click(env, rows[3]); await sleep(50);
+    ok(opened[0] === 'https://x.com/a/status/1' && on() === 'res', '要登录的网站没有直接用浏览器打开：' + opened[0]);
+    click(env, rows[2]); await sleep(150);
+    ok(on() === 'read' && H.state.ws === 3 && calls[1] && calls[1].op === 'read' && calls[1].url === 'https://a.example.com/1', '点结果没进简洁阅读');
+    const body = ws.querySelector('.ws-body');
+    ok(body && /正文/.test(body.textContent) && !/script|onclick|onerror|javascript:|iframe|alert/.test(body.innerHTML), '正文没洗干净：' + (body && body.innerHTML));
+    ok(body.querySelector('img').getAttribute('referrerpolicy') === 'no-referrer', '文章图片没加 no-referrer（会被防盗链拦）');
+    H.back(); await sleep(80);
+    ok(on() === 'res' && ws.querySelectorAll('.ws-r').length === 4, '从阅读页返回没回到结果页');
+    click(env, ws.querySelector('.ws-r .ws-more')); await sleep(30);
+    const blockBtn = Array.from(env.$('as-items').querySelectorAll('button')).find(b => /^不看 /.test(b.textContent));
+    ok(blockBtn, '“⋯”菜单里没有“不看这个网站”');
+    click(env, blockBtn); await sleep(950);
+    ok(!Array.from(ws.querySelectorAll('.ws-r a.t')).some(a => a.textContent === '置顶的'), '“不看”之后还显示');
+    const pr = env.db.search_prefs.find(x => x.uid === env.T.S.uid);
+    ok(pr && pr.prefs && pr.prefs.block.indexOf('docs.pin.dev') >= 0, '规则没存到账号里：' + JSON.stringify(env.db.search_prefs));
+    H.back(); await sleep(80);
+    ok(on() === 'home', '结果页返回没回到首页');
+    ok(/测试/.test(ws.querySelector('[data-r="home"]').textContent), '首页没有“最近搜过”');
+    H.back(); await sleep(80);
+    ok(!ws.classList.contains('on') && H.state && H.state.app, '首页返回没关掉搜索：' + JSON.stringify(H.state));
+    click(env, env.$('btn-web')); await sleep(50);
+    ok(ws.classList.contains('on'), '第二次点放大镜没打开');
+    await env.T.openConv('bob::me', 'bob'); await sleep(200);
+    ok(!ws.classList.contains('on') && env.T.S.conv === 'bob::me', '在搜索里打开聊天，搜索没收起（聊天会被盖住）');
+  } finally { env.close(); }
+});
+
 test('登录设备：菜单能打开', async () => {
   const env = makeEnv({ db: { profiles: [prof(ME, '我')], friendships: [], conversations: [], user_devices: [{ account: ME, device_id: 'dabc', ua: 'iPhone', last_at: iso(Date.now()) }] } });
   try {
@@ -460,7 +521,7 @@ async function lint() {
       }
     }]
   });
-  const res = await eslint.lintFiles(['app.js', 'sw.js']);
+  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js']);
   const errs = [];
   res.forEach(r => r.messages.forEach(m => { if (m.severity === 2) errs.push(path.basename(r.filePath) + ' 第 ' + m.line + ' 行：' + m.message); }));
   return errs;
@@ -469,7 +530,7 @@ async function lint() {
 (async () => {
   let bad = 0;
   const t0 = Date.now();
-  process.stdout.write('代码检查（app.js、sw.js）… ');
+  process.stdout.write('代码检查（app.js、sw.js、search.js）… ');
   try { const errs = await lint(); if (errs.length) { bad++; console.log('❌'); errs.slice(0, 30).forEach(e => console.log('   ' + e)); } else console.log('✅'); }
   catch (e) { bad++; console.log('❌ 代码检查没跑起来：' + e.message); }
   for (const tc of tests) {

@@ -1,0 +1,707 @@
+/* Chatter 搜索（第 1 步）：搜索首页、结果页、简洁阅读、搜索规则。
+   点顶部的放大镜才下载这个文件，不用搜索的人不多花流量。
+   颜色、字体全部用 App 的主题变量（--bg、--accent、--font……），跟着“我”里的主题和字体设置走。
+   搜索结果由服务器函数 chatter-search 返回；排序和过滤在手机上按你的规则做，改规则不花搜索次数。 */
+(function () {
+'use strict';
+if (window.ChatterSearch) return;
+const B = window.__chWS;
+if (!B) return;
+
+/* ---------- 小工具 ---------- */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const LSg = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
+const LSs = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const uidKey = k => k + ':' + (B.uid() || '');
+const host = u => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ''); } catch (e) { return ''; } };
+const ico = (d, w) => '<svg viewBox="0 0 24 24" width="' + (w || 22) + '" height="' + (w || 22) + '" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+const I = {
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  find: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  rules: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  more: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  out: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  size: '<path d="M4 19l5-14 5 14M6 14h6"/><path d="M15 19l3-8 3 8M16 16.5h4"/>',
+  mark: '<path d="M6 4h12v17l-6-4-6 4z"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  send: '<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  play: '<path d="M8 5.5v13l11-6.5z"/>',
+  img: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M20 16l-5-5-8 8.5"/>'
+};
+const TYPES = [['web', '网页'], ['images', '图片'], ['videos', '视频'], ['news', '新闻']];
+const TBS = [['', '时间不限'], ['qdr:d', '一天内'], ['qdr:w', '一周内'], ['qdr:m', '一个月内'], ['qdr:y', '一年内']];
+const GLS = [['', '不指定'], ['us', '美国'], ['hk', '香港'], ['tw', '台湾'], ['sg', '新加坡'], ['jp', '日本'], ['gb', '英国']];
+const SIZES = [16, 18, 20, 22];
+const MONO = ['var(--accent)', 'var(--ok)', 'var(--accent2)', '#e39a2d', '#3a8ee6'];
+const monoColor = h => { let n = 0; for (let i = 0; i < h.length; i++) n = (n * 31 + h.charCodeAt(i)) >>> 0; return MONO[n % MONO.length]; };
+const monoChar = h => { const s = h.replace(/^(m|mobile|zh|en|news|blog)\./, ''); return (s[0] || '?').toUpperCase(); };
+
+/* ---------- 名单（数据库 app_config 里的 'search'；读不到用下面的） ---------- */
+const CFG = {
+  farms: ['baijiahao.baidu.com', 'mbd.baidu.com', 'jingyan.baidu.com', 'zhidao.baidu.com', 'wenku.baidu.com', 'toutiao.com', 'sohu.com/a/', '163.com/dy/', '360doc.com', 'docin.com', 'doc88.com', 'book118.com'],
+  clean: ['wikipedia.org', 'github.com', 'stackoverflow.com', 'stackexchange.com', 'developer.mozilla.org', 'arxiv.org', 'britannica.com', 'nature.com', '.gov', '.edu', '.gov.cn', '.edu.cn'],
+  direct: ['x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'pinterest.com', 'quora.com', 'tiktok.com', 'weibo.com', 'weibo.cn', 'xiaohongshu.com', 'douyin.com', 'zhihu.com']
+};
+let cfgAt = 0;
+function applyCfg(v) { if (!v || typeof v !== 'object') return; ['farms', 'clean', 'direct'].forEach(k => { if (Array.isArray(v[k])) CFG[k] = v[k].map(String); }); }
+async function loadCfg() {
+  if (cfgAt && Date.now() - cfgAt < 600000) return;
+  cfgAt = Date.now(); applyCfg(LSg('ch2wsCfg', null));
+  try {
+    const r = await B.sb().from('app_config').select('value').eq('key', 'search').maybeSingle();
+    if (r && r.data && r.data.value) { applyCfg(r.data.value); LSs('ch2wsCfg', r.data.value); }
+  } catch (e) {}
+}
+// 规则：'github.com' 匹配它和它的子域名；'.gov' 匹配所有 .gov 结尾的；'sohu.com/a/' 还要求路径开头对得上
+function hit(u, list) {
+  let h = '', p = '';
+  try { const x = new URL(u); h = x.hostname.toLowerCase().replace(/^www\./, ''); p = x.pathname; } catch (e) { return false; }
+  return (list || []).some(r => {
+    r = String(r || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/^www\./, '');
+    if (!r) return false;
+    const i = r.indexOf('/'), rh = i > 0 ? r.slice(0, i) : r, rp = i > 0 ? r.slice(i) : '';
+    const hm = rh[0] === '.' ? h.endsWith(rh) : (h === rh || h.endsWith('.' + rh));
+    return hm && (!rp || p.indexOf(rp) === 0);
+  });
+}
+const normSite = s => { s = String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''); return /^[a-z0-9.-]+\.[a-z0-9-]{2,}(\/\S*)?$/.test(s) ? s : ''; };
+
+/* ---------- 规则（存在账号里，换手机也在；本机也存一份，打开就有） ---------- */
+const prefsDef = () => ({ clean: true, hideFarms: true, gl: '', pin: [], block: [], fav: [] });
+let P = null, saveT = 0;
+function loadPrefs() {
+  const uid = B.uid() || '';
+  if (P && P._uid === uid) return;
+  P = Object.assign(prefsDef(), LSg('ch2ws:' + uid, {})); P._uid = uid;
+  syncPrefs();
+}
+async function syncPrefs() {
+  try {
+    const r = await B.sb().from('search_prefs').select('prefs, updated_at').maybeSingle();
+    const d = r && r.data;
+    if (d && d.prefs && (Date.parse(d.updated_at) || 0) > (P._at || 0)) {
+      P = Object.assign(prefsDef(), d.prefs, { _uid: P._uid, _at: Date.parse(d.updated_at) || 0 });
+      LSs('ch2ws:' + P._uid, P); renderTop();
+    }
+  } catch (e) {}
+}
+function savePrefs() {
+  P._at = Date.now(); LSs('ch2ws:' + P._uid, P);
+  clearTimeout(saveT);
+  saveT = setTimeout(async () => {
+    const body = Object.assign({}, P); delete body._uid; delete body._at;
+    try {
+      const r = await B.sb().from('search_prefs').upsert({ uid: B.uid(), prefs: body, updated_at: new Date().toISOString() }, { onConflict: 'uid' });
+      if (r && r.error) B.logErr('ws-prefs', r.error);
+    } catch (e) { B.logErr('ws-prefs', e); }
+  }, 800);
+}
+function hist() { return LSg(uidKey('ch2wsHist'), []); }
+function addHist(q) { LSs(uidKey('ch2wsHist'), [q].concat(hist().filter(x => x !== q)).slice(0, 30)); }
+
+/* ---------- 样式 ---------- */
+const CSS = `
+.ws{position:fixed;inset:0;z-index:60;display:none;background:var(--bg);color:var(--ink);font-family:var(--font)}
+.ws.on{display:block}
+.ws-v{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg)}
+.ws-v.on{display:flex;animation:fadein .16s ease}
+.ws-in{width:100%;max-width:760px;margin:0 auto}
+.ws-bar{display:flex;align-items:center;gap:6px;padding:10px 12px 8px;padding-top:calc(10px + env(safe-area-inset-top));flex-shrink:0}
+.ws-ib{width:44px;height:44px;border-radius:14px;padding:0;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ws-field{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:46px;padding:0 6px 0 14px;background:var(--surface);border-radius:16px;box-shadow:var(--shadow);margin:0}
+.ws-field>svg{color:var(--accent);flex-shrink:0}
+.ws-field input{flex:1;min-width:0;border:0;padding:0;height:44px;background:transparent;box-shadow:none;border-radius:0;font-size:16px;color:var(--ink)}
+.ws-field input:focus{box-shadow:none;border:0}
+.ws-field input::-webkit-search-cancel-button{display:none}
+.ws-clr{width:34px;height:34px;border-radius:12px;padding:0;background:transparent;color:var(--muted);display:none;align-items:center;justify-content:center;flex-shrink:0}
+.ws-field.has .ws-clr{display:flex}
+.ws-sc{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.ws-pad{padding:0 16px calc(28px + env(safe-area-inset-bottom))}
+.ws-chips{display:flex;gap:8px;padding:6px 16px 0;overflow-x:auto;scrollbar-width:none}
+.ws-chips::-webkit-scrollbar{display:none}
+.ws-chip{height:34px;padding:0 14px;border-radius:17px;background:var(--surface);box-shadow:var(--shadow);font-size:14px;color:var(--ink);display:inline-flex;align-items:center;gap:5px;flex-shrink:0;white-space:nowrap}
+.ws-chip.act{background:var(--accent);color:#fff;box-shadow:none}
+.ws-chip.soft{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);box-shadow:none;height:30px;font-size:13px;padding:0 12px}
+.ws-chip.off{background:var(--surface2);color:var(--muted)}
+.ws-sec{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--muted);margin:24px 4px 8px}
+.ws-sec button{background:transparent;padding:4px 2px;font-size:13px;color:var(--muted)}
+.ws-card{background:var(--surface);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}
+.ws-row{display:flex;align-items:center;gap:12px;padding:8px 8px 8px 14px;min-height:52px;font-size:15px;width:100%;background:transparent;border-radius:0;text-align:left;color:var(--ink)}
+.ws-row+.ws-row{border-top:1px solid var(--line)}
+.ws-row>svg{color:var(--muted);flex-shrink:0}
+.ws-row .ws-tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-row .ws-sub{display:block;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.ws-row .ws-x{width:36px;height:36px;padding:0;border-radius:12px;background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ws-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px 6px}
+.ws-tile{display:flex;flex-direction:column;align-items:center;gap:7px;background:transparent;padding:0;color:var(--ink);min-width:0}
+.ws-tile .ws-mono{width:54px;height:54px;border-radius:17px;background:var(--surface);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:19px}
+.ws-tile .ws-mono.add{background:transparent;box-shadow:none;border:1.5px dashed var(--muted);color:var(--muted)}
+.ws-tile span:last-child{font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-hint{font-size:12.5px;color:var(--muted);margin:10px 4px 0;line-height:1.5}
+.ws-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);flex-shrink:0}
+.ws-tab{height:42px;padding:0 12px;font-size:15px;color:var(--muted);background:transparent;border-radius:0}
+.ws-tab.on{color:var(--accent);font-weight:700;box-shadow:inset 0 -3px 0 var(--accent)}
+.ws-list{padding:6px 12px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+.ws-r{padding:14px 12px 14px 16px;display:flex;flex-direction:column;gap:5px;cursor:pointer;position:relative}
+.ws-r+.ws-r{border-top:1px solid var(--line)}
+.ws-rt{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);min-width:0}
+.ws-rt .m{width:20px;height:20px;border-radius:6px;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ws-rt .h{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ws-tag{height:22px;padding:0 8px;border-radius:11px;font-size:11.5px;display:inline-flex;align-items:center;flex-shrink:0;background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent)}
+.ws-tag.g{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.ws-more{margin-left:auto;width:32px;height:28px;padding:0;border-radius:10px;background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ws-r a.t{font-size:16.5px;font-weight:600;color:var(--accent);line-height:1.4;text-decoration:none;word-break:break-word}
+.ws-r .s{font-size:13.5px;color:var(--muted);line-height:1.55;word-break:break-word}
+.ws-r .f{font-size:12px;color:var(--muted)}
+.ws-r.nw{flex-direction:row;gap:12px}
+.ws-r.nw .c{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.ws-r.nw img{width:84px;height:84px;border-radius:14px;object-fit:cover;background:var(--surface2);flex-shrink:0}
+.ws-kg{padding:14px;display:flex;gap:12px}
+.ws-kg img,.ws-kg .ph{width:70px;height:70px;border-radius:14px;object-fit:cover;background:var(--surface2);flex-shrink:0}
+.ws-kg .c{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ws-kg b{font-size:17px}
+.ws-kg .ty{font-size:12.5px;color:var(--muted)}
+.ws-kg .s{font-size:13.5px;line-height:1.55;color:var(--ink);opacity:.86}
+.ws-kg .src{font-size:12px;color:var(--muted)}
+.ws-kg dl{margin:6px 0 0;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px}
+.ws-kg dt{color:var(--muted)}
+.ws-kg dd{margin:0;word-break:break-word}
+.ws-ans{padding:14px 16px;font-size:15px;line-height:1.6}
+.ws-ans .src{display:block;font-size:12px;color:var(--muted);margin-top:6px}
+.ws-btn{height:44px;border-radius:14px;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);font-size:14.5px;width:100%}
+.ws-btn.pri{background:var(--accent);color:#fff;box-shadow:none}
+.ws-note{font-size:12.5px;color:var(--muted);text-align:center;padding:2px 0}
+.ws-note button{background:transparent;padding:0 4px;color:var(--accent);font-size:12.5px}
+.ws-rel{display:flex;flex-wrap:wrap;gap:8px}
+.ws-err{padding:22px 18px;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}
+.ws-err p{margin:0;font-size:15px;line-height:1.6}
+.ws-err small{color:var(--muted);font-size:12.5px;line-height:1.5}
+.ws-err .ws-btn{max-width:240px}
+.ws-sk{padding:16px}
+.ws-sk i{display:block;height:13px;border-radius:7px;background:var(--surface2);margin:0 0 12px;animation:wsPulse 1.2s ease-in-out infinite}
+@keyframes wsPulse{50%{opacity:.5}}
+.ws-imgs{columns:2;column-gap:8px;padding:8px 12px calc(28px + env(safe-area-inset-bottom))}
+@media (min-width:600px){.ws-imgs{columns:3}}
+.ws-im{break-inside:avoid;margin:0 0 8px;border-radius:14px;overflow:hidden;background:var(--surface2);cursor:pointer;position:relative}
+.ws-im img{display:block;width:100%;height:auto;min-height:60px;object-fit:cover}
+.ws-im span{position:absolute;left:0;right:0;bottom:0;padding:16px 8px 6px;font-size:11px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.55));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-vd{display:flex;gap:12px;padding:12px;cursor:pointer}
+.ws-vd+.ws-vd{border-top:1px solid var(--line)}
+.ws-vd .th{width:132px;aspect-ratio:16/9;border-radius:12px;background:var(--surface2) center/cover no-repeat;position:relative;flex-shrink:0}
+.ws-vd .th em{position:absolute;right:5px;bottom:5px;font-style:normal;font-size:11px;color:#fff;background:rgba(0,0,0,.66);padding:1px 6px;border-radius:6px}
+.ws-vd .c{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ws-vd b{font-size:15px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ws-vd .f{font-size:12px;color:var(--muted)}
+.ws-site{flex:1;text-align:center;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-art{padding:12px 24px 40px;line-height:1.85;word-break:break-word}
+.ws-art h1{font-size:1.4em;line-height:1.4;margin:6px 0 10px}
+.ws-art .meta{font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.5}
+.ws-body h2,.ws-body h3,.ws-body h4{line-height:1.45;margin:1.4em 0 .6em}
+.ws-body h2{font-size:1.15em}.ws-body h3,.ws-body h4{font-size:1.05em}
+.ws-body p{margin:0 0 1em}
+.ws-body img{display:block;max-width:100%;height:auto;margin:14px auto;border-radius:12px;background:var(--surface2)}
+.ws-body figure{margin:14px 0}
+.ws-body figcaption{font-size:.8em;color:var(--muted);text-align:center;line-height:1.5}
+.ws-body a{color:var(--accent);text-decoration:none}
+.ws-body blockquote{margin:1em 0;padding:10px 14px;background:var(--surface2);border-radius:12px}
+.ws-body pre{overflow-x:auto;background:var(--surface2);padding:12px;border-radius:12px;font-size:.82em;line-height:1.55}
+.ws-body code{font-size:.9em}
+.ws-body table{display:block;overflow-x:auto;border-collapse:collapse;font-size:.88em;margin:1em 0}
+.ws-body th,.ws-body td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+.ws-body ul,.ws-body ol{padding-left:1.4em;margin:0 0 1em}
+.ws-body hr{border:0;height:1px;background:var(--line);margin:1.6em 0}
+.ws-lead{width:100%;border-radius:18px;margin:0 0 18px;display:block;background:var(--surface2)}
+.ws-from{font-size:12.5px;color:var(--muted);margin-top:24px}
+.ws-from a{color:var(--muted)}
+.ws-tool{display:grid;grid-template-columns:repeat(4,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.ws-tool button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
+.ws-tool button.on{color:var(--accent)}
+.ws-v.dk{background:#0b0a10;color:#f1eefb}
+.ws-v.dk .ws-ib{color:#f1eefb}
+.ws-v.dk .ws-site{color:rgba(241,238,251,.7)}
+.ws-big{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}
+.ws-big img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.ws-big p{color:rgba(241,238,251,.7);font-size:14px}
+.ws-dkb{display:flex;gap:10px;padding:10px 16px calc(12px + env(safe-area-inset-bottom))}
+.ws-dkb button{flex:1;height:44px;border-radius:14px;background:rgba(255,255,255,.12);color:#f1eefb;font-size:14px}
+.ws-dkt{padding:0 16px 6px;font-size:14px;line-height:1.5;color:rgba(241,238,251,.86)}
+.ws-dkt small{display:block;color:rgba(241,238,251,.55);font-size:12px;margin-top:2px}
+.ws-player{width:100%;aspect-ratio:16/9;background:#000;border:0;display:block}
+.ws-sw{width:50px;height:30px;border-radius:15px;padding:0;background:var(--surface2);position:relative;flex-shrink:0;transition:background .15s}
+.ws-sw::after{content:"";position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+.ws-sw[aria-checked="true"]{background:var(--accent)}
+.ws-sw[aria-checked="true"]::after{transform:translateX(20px)}
+.ws-val{color:var(--muted);font-size:14px;flex-shrink:0}
+.ws-rules details{padding:0 14px}
+.ws-rules summary{min-height:48px;display:flex;align-items:center;font-size:15px;cursor:pointer;list-style:none}
+.ws-rules summary::-webkit-details-marker{display:none}
+.ws-rules details p{margin:0 0 12px;font-size:13px;color:var(--muted);line-height:1.7;word-break:break-all}
+.ws-rules details+details{border-top:1px solid var(--line)}
+`;
+
+/* ---------- 界面骨架 ---------- */
+let root = null;
+const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [] };
+if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
+function bar(id, ph, right) {
+  return '<div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button>' +
+    '<form class="ws-field" data-form="' + id + '" action="#" role="search">' + ico(I.find, 18) +
+    '<input type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="' + esc(ph) + '" aria-label="' + esc(ph) + '">' +
+    '<button type="button" class="ws-clr" data-act="clear" aria-label="清空">' + ico(I.x, 16) + '</button></form>' + (right || '') + '</div>';
+}
+const rulesBtn = '<button type="button" class="ws-ib" data-act="rules" aria-label="搜索规则">' + ico(I.rules) + '</button>';
+function build() {
+  if (root) return;
+  const st = document.createElement('style'); st.id = 'ws-css'; st.textContent = CSS; document.head.appendChild(st);
+  root = document.createElement('div'); root.id = 'ws'; root.className = 'ws'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '搜索');
+  root.innerHTML =
+    '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
+    '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
+    '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div><div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
+      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
+    '<section class="ws-v" data-v="rules"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" style="color:var(--ink);font-size:16px;font-weight:600">搜索规则</span><span style="width:50px"></span></div><div class="ws-sc"><div class="ws-pad ws-in ws-rules" data-r="rules"></div></div></section>' +
+    '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">用浏览器看原图</button></div></section>' +
+    '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在原网站打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
+  (document.querySelector('.app-container') || document.body).appendChild(root);
+  root.addEventListener('click', onClick);
+  root.addEventListener('submit', e => { e.preventDefault(); const f = e.target; const inp = f.querySelector('input'); try { inp.blur(); } catch (x) {} search(inp.value, W.type); });
+  root.addEventListener('input', e => { const f = e.target.closest && e.target.closest('.ws-field'); if (f) f.classList.toggle('has', !!e.target.value); });
+  root.querySelector('[data-r="read"]').addEventListener('error', e => {   // 文章里的图片取不到：直接去掉，不留破图
+    const im = e.target; if (!im || im.tagName !== 'IMG') return;
+    const fig = im.closest('figure'); im.remove(); if (fig && !fig.querySelector('img') && !fig.textContent.trim()) fig.remove();
+  }, true);
+  root.querySelector('[data-r="res"]').addEventListener('error', e => { const im = e.target; if (im && im.tagName === 'IMG') { const box = im.closest('.ws-im'); if (box) box.remove(); else im.style.visibility = 'hidden'; } }, true);
+}
+const R = k => root.querySelector('[data-r="' + k + '"]');
+const V = v => root.querySelector('.ws-v[data-v="' + v + '"]');
+
+/* ---------- 页面栈和返回手势：每进一层加一条浏览器历史，边缘滑 / 返回键 = 退一层 ---------- */
+function top() { return W.stack[W.stack.length - 1]; }
+function scroller(v) { return v === 'res' ? R('rsc') : v === 'read' ? R('rdsc') : (V(v) && V(v).querySelector('.ws-sc')); }
+function show() {
+  const t = top(); if (!t) return;
+  root.querySelectorAll('.ws-v').forEach(el => el.classList.toggle('on', el.dataset.v === t.v));
+  if (t.v === 'home') renderHome();
+  else if (t.v === 'res') renderRes();
+  else if (t.v === 'read') renderRead(t);
+  else if (t.v === 'rules') renderRules();
+  else if (t.v === 'img') renderImg(t);
+  else if (t.v === 'vid') renderVid(t);
+  if (t.v !== 'vid') { R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }   // 离开播放页就停掉视频
+  const sc = scroller(t.v); if (sc && t.y != null) sc.scrollTop = t.y;   // 回到上一层时停在原来看到的位置
+}
+function go(v, d) {
+  const cur = top(); if (cur) { const sc = scroller(cur.v); if (sc) cur.y = sc.scrollTop; }
+  W.stack.push({ v: v, d: d || {} });
+  try { history.pushState({ ws: W.stack.length }, '', location.href); } catch (e) {}
+  show();
+}
+function back() {
+  if (history.state && history.state.ws) { try { history.back(); return; } catch (e) {} }
+  popTo(W.stack.length - 1);
+}
+function popTo(n) {
+  W.stack.length = Math.max(0, Math.min(n, W.stack.length));
+  if (!W.stack.length) { close(); return; }
+  show();
+}
+function close() {
+  W.on = false; W.stack.length = 0;
+  if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }
+  document.body.classList.remove('ws-open');
+}
+function onPop(e) {
+  if (!W.on) return false;
+  const st = (e && e.state) || history.state;
+  popTo((st && st.ws) || 0);
+  return true;
+}
+function open(q) {
+  build(); loadPrefs(); loadCfg();
+  if (W.on) { if (q) search(q, W.type); return; }
+  W.on = true; root.classList.add('on'); document.body.classList.add('ws-open');
+  go('home');
+  if (q) { search(q, W.type); return; }
+  const inp = V('home').querySelector('input'); inp.value = ''; inp.closest('.ws-field').classList.remove('has');
+  setTimeout(() => { try { inp.focus(); } catch (e) {} }, 30);
+}
+function renderTop() { if (W.on && top()) show(); }
+
+/* ---------- 搜索首页 ---------- */
+function renderHome() {
+  R('types').innerHTML = TYPES.map(t => '<button type="button" class="ws-chip' + (W.type === t[0] ? ' act' : '') + '" data-act="type" data-t="' + t[0] + '">' + t[1] + '</button>').join('');
+  let h = '<div class="ws-sec" style="margin-top:22px">置顶网站</div><div class="ws-grid">';
+  (P.pin || []).slice(0, 14).forEach(d => {
+    const hs = d.split('/')[0];
+    h += '<button type="button" class="ws-tile" data-act="pin-go" data-d="' + esc(d) + '"><span class="ws-mono" style="color:' + monoColor(hs) + '">' + esc(monoChar(hs)) + '</span><span>' + esc(hs.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>';
+  });
+  h += '<button type="button" class="ws-tile" data-act="pin-add"><span class="ws-mono add">' + ico(I.plus, 20) + '</span><span style="color:var(--muted)">添加</span></button></div>';
+  if (!(P.pin || []).length) h += '<div class="ws-hint">置顶的网站排在结果最前面；点一下只搜这个网站。</div>';
+  const fav = (P.fav || []).slice(0, 6);
+  if (fav.length) {
+    h += '<div class="ws-sec">收藏的文章' + ((P.fav || []).length > 6 ? '<button type="button" data-act="fav-all">全部 ' + P.fav.length + ' 篇</button>' : '') + '</div><div class="ws-card">';
+    fav.forEach((f, i) => { h += '<div class="ws-row" data-act="fav-go" data-i="' + i + '">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || f.u) + '<span class="ws-sub">' + esc(f.s || host(f.u)) + '</span></span></div>'; });
+    h += '</div>';
+  }
+  const hs = hist().slice(0, 8);
+  if (hs.length) {
+    h += '<div class="ws-sec">最近搜过<button type="button" data-act="hist-clear">清空</button></div><div class="ws-card">';
+    hs.forEach(q => { h += '<div class="ws-row" data-act="go-q" data-q="' + esc(q) + '">' + ico(I.clock, 17) + '<span class="ws-tx">' + esc(q) + '</span><button type="button" class="ws-x" data-act="hist-del" data-q="' + esc(q) + '" aria-label="删掉这条">' + ico(I.x, 15) + '</button></div>'; });
+    h += '</div>';
+  }
+  R('home').innerHTML = h;
+}
+
+/* ---------- 搜索 ---------- */
+const URLISH = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)*\.(com|cn|net|org|io|dev|app|gov|edu|me|co|info|tv|cc|xyz|top|jp|hk|tw|uk|de|fr|ru|kr|sg)(\/\S*)?)$/i;
+function search(q, type) {
+  q = String(q || '').replace(/\s+/g, ' ').trim(); if (!q) return;
+  if (URLISH.test(q) && q.indexOf(' ') < 0) { openUrl(/^https?:/i.test(q) ? q : 'https://' + q); return; }
+  W.type = type || W.type || 'web';
+  addHist(q); W.showFarms = false;
+  W.cur = { q: q, type: W.type, tbs: W.tbs, page: 0, pages: [], meta: null, loading: false, err: null, more: true };
+  const t = top();
+  if (t && t.v === 'res') { t.y = 0; show(); } else go('res');
+  const sc = R('rsc'); if (sc) sc.scrollTop = 0;
+  fetchPage();
+}
+async function fetchPage() {
+  const c = W.cur; if (!c || c.loading) return;
+  c.loading = true; c.err = null; const my = ++W.seq;
+  renderRes();
+  const r = await B.call({ op: 'search', q: c.q, type: c.type, page: c.page + 1, tbs: c.tbs || '', gl: P.gl || '', hl: 'zh-cn' }, 20000);
+  if (my !== W.seq || W.cur !== c) return;
+  c.loading = false;
+  if (r && r.ok) {
+    c.page++; c.pages.push(r.items || []);
+    if (c.page === 1) c.meta = { kg: r.kg, wiki: r.wiki, ans: r.ans, rel: r.rel };
+    if (typeof r.left === 'number') W.left = r.left;
+    c.more = (r.items || []).length >= (c.type === 'images' ? 20 : 8) && c.page < 10;
+  } else c.err = r || { code: 'net', msg: '出错了' };
+  renderRes();
+}
+function arrange(items) {   // 按你的规则：不看的网站去掉，营销号去掉，置顶的排最前，干净的往前挪 3 位
+  let farms = 0; const out = [];
+  items.forEach((it, i) => {
+    if (!it || !it.u) return;
+    if (hit(it.u, P.block)) return;
+    const farm = hit(it.u, CFG.farms);
+    if (farm && P.hideFarms && !W.showFarms) { farms++; return; }
+    const pin = hit(it.u, P.pin), clean = !!P.clean && hit(it.u, CFG.clean);
+    out.push({ it: it, i: i, pin: pin, clean: clean, farm: farm, score: i - (pin ? 1000 : 0) - (clean ? 3 : 0) });
+  });
+  out.sort((a, b) => a.score - b.score || a.i - b.i);
+  return { list: out, farms: farms };
+}
+function renderRes() {
+  const c = W.cur; if (!c || !root) return;
+  const v = V('res'), inp = v.querySelector('input');
+  if (document.activeElement !== inp) { inp.value = c.q; inp.closest('.ws-field').classList.toggle('has', !!c.q); }
+  R('tabs').innerHTML = TYPES.map(t => '<button type="button" class="ws-tab' + (c.type === t[0] ? ' on' : '') + '" data-act="tab" data-t="' + t[0] + '">' + t[1] + '</button>').join('');
+  const tl = (TBS.find(x => x[0] === (c.tbs || '')) || TBS[0])[1];
+  R('filters').innerHTML = ((c.type === 'images' || c.type === 'videos') ? '' :
+    '<button type="button" class="ws-chip ' + (P.clean ? 'soft' : 'soft off') + '" data-act="tgl-clean">' + (P.clean ? ico(I.check, 13) : '') + '干净页面优先</button>' +
+    '<button type="button" class="ws-chip ' + (P.hideFarms ? 'soft' : 'soft off') + '" data-act="tgl-farm">' + (P.hideFarms ? ico(I.check, 13) : '') + '不看营销号</button>') +
+    '<button type="button" class="ws-chip soft' + (c.tbs ? '' : ' off') + '" data-act="tbs">' + esc(tl) + ico(I.down, 13) + '</button>';
+  const box = R('res'); let h = '';
+  const all = [].concat.apply([], c.pages);
+  if (!all.length && c.loading) { box.innerHTML = skel(); return; }
+  if (!all.length && c.err) { box.innerHTML = '<div class="ws-list">' + errCard(c.err, 'retry') + '</div>'; return; }
+  if (!all.length) { box.innerHTML = '<div class="ws-list"><div class="ws-card ws-err"><p>没有找到结果</p><small>换个说法试试，或者把时间范围放宽</small></div></div>'; return; }
+  W.view = [];
+  if (c.type === 'images') h = renderImgs(all);
+  else if (c.type === 'videos') h = renderVids(all);
+  else h = renderWeb(c, all);
+  const tail = [];
+  if (c.err) tail.push(errCard(c.err, 'more'));
+  else if (c.loading) tail.push('<button type="button" class="ws-btn" disabled>加载中…</button>');
+  else if (c.more) tail.push('<button type="button" class="ws-btn" data-act="more">更多结果</button>');
+  if (c.type === 'web' && c.meta && c.meta.rel && c.meta.rel.length) tail.push('<div class="ws-sec" style="margin:8px 4px 0">相关搜索</div><div class="ws-rel">' + c.meta.rel.map(q => '<button type="button" class="ws-chip" data-act="go-q" data-q="' + esc(q) + '">' + esc(q) + '</button>').join('') + '</div>');
+  if (W.left != null && W.left < 20) tail.push('<div class="ws-note">今天还能搜 ' + W.left + ' 次（搜过的词再搜不算）</div>');
+  box.innerHTML = h + (tail.length ? '<div class="ws-list" style="padding-top:0">' + tail.join('') + '</div>' : '');
+}
+function skel() {
+  const card = w => '<div class="ws-card ws-sk"><i style="width:40%"></i><i style="width:' + w + '%;height:16px"></i><i style="width:96%"></i><i style="width:70%;margin:0"></i></div>';
+  return '<div class="ws-list">' + card(80) + card(66) + card(74) + '</div>';
+}
+function errCard(err, act) {
+  const how = { nofn: '服务器函数还没部署', nokey: '服务器里的 Serper 密钥没填或填错了', nosql: '搜索那份 SQL 还没运行', credits: 'Serper 的额度用完了', net: '' }[err.code];
+  return '<div class="ws-card ws-err"><p>' + esc(err.msg || '出错了') + '</p>' + (how ? '<small>' + esc(how) + '</small>' : '') +
+    (/^(limit|month|off|nokey|nosql|nofn|credits)$/.test(err.code) ? '' : '<button type="button" class="ws-btn pri" data-act="' + act + '">重试</button>') + '</div>';
+}
+function siteRow(u, extra, i) {
+  const h = host(u);
+  return '<div class="ws-rt"><span class="m" style="background:' + monoColor(h) + '">' + esc(monoChar(h)) + '</span><span class="h">' + esc(h) + '</span>' + (extra || '') +
+    '<button type="button" class="ws-more" data-act="r-more" data-i="' + i + '" aria-label="更多">' + ico(I.more, 18) + '</button></div>';
+}
+function renderWeb(c, all) {
+  let h = '<div class="ws-list">';
+  const m = c.meta || {};
+  if (c.type === 'web' && m.ans && m.ans.t) h += '<div class="ws-card ws-ans">' + esc(m.ans.t) + (m.ans.u ? '<span class="src">' + esc(m.ans.title || host(m.ans.u)) + '</span>' : '') + '</div>';
+  const kg = c.type === 'web' ? (m.kg || m.wiki) : null;
+  if (kg && kg.t) {
+    W.view.push({ u: kg.u, t: kg.t }); const ki = W.view.length - 1;
+    h += '<div class="ws-card ws-kg"' + (kg.u ? ' data-act="r-go" data-i="' + ki + '" style="cursor:pointer"' : '') + '>' + (kg.img ? '<img src="' + esc(kg.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy">' : '') +
+      '<div class="c"><b>' + esc(kg.t) + '</b>' + (kg.type ? '<span class="ty">' + esc(kg.type) + '</span>' : '') + (kg.s ? '<span class="s">' + esc(kg.s) + '</span>' : '') +
+      (kg.attrs && kg.attrs.length ? '<dl>' + kg.attrs.map(a => '<dt>' + esc(a[0]) + '</dt><dd>' + esc(a[1]) + '</dd>').join('') + '</dl>' : '') +
+      '<span class="src">' + esc(kg.src || (m.kg ? '谷歌' : '维基百科')) + '</span></div></div>';
+  }
+  let farms = 0, rows = '';
+  c.pages.forEach(items => {
+    const a = arrange(items); farms += a.farms;
+    a.list.forEach(x => {
+      const it = x.it; W.view.push(it); const i = W.view.length - 1;
+      const direct = hit(it.u, CFG.direct), vid = vidOf(it.u);
+      const tags = (x.pin ? '<span class="ws-tag">置顶</span>' : '') + (x.farm ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">营销号</span>' : '');
+      if (c.type === 'news') {
+        rows += '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
+          (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + '<div class="f">' + esc([it.src, it.d].filter(Boolean).join(' · ')) + '</div></div>' +
+          (it.img ? '<img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy">' : '') + '</div>';
+      } else {
+        rows += '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
+          (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') +
+          ((direct || vid || it.d) ? '<div class="f">' + esc([it.d, vid ? '点开直接播放' : direct ? '要登录，会用浏览器打开' : ''].filter(Boolean).join(' · ')) + '</div>' : '') + '</div>';
+      }
+    });
+  });
+  if (rows) h += '<div class="ws-card">' + rows + '</div>';
+  if (farms) h += '<div class="ws-note">隐藏了 ' + farms + ' 条营销号<button type="button" data-act="show-farms">显示</button></div>';
+  else if (W.showFarms) h += '<div class="ws-note"><button type="button" data-act="hide-farms">重新隐藏营销号</button></div>';
+  if (!rows && !kg) h += '<div class="ws-card ws-err"><p>结果都被你的规则过滤掉了</p><small>可以在搜索规则里改</small></div>';
+  return h + '</div>';
+}
+function renderImgs(all) {
+  let h = '<div class="ws-imgs">';
+  all.forEach(it => {
+    if (it.u && hit(it.u, P.block)) return;
+    W.view.push(it); const i = W.view.length - 1;
+    const ratio = (it.w && it.h) ? ' style="aspect-ratio:' + it.w + '/' + it.h + '"' : '';
+    h += '<div class="ws-im" data-act="img-go" data-i="' + i + '"><img src="' + esc(it.th || it.img) + '" alt="' + esc(it.t || '') + '"' + ratio + ' referrerpolicy="no-referrer" loading="lazy" decoding="async"><span>' + esc(it.src || host(it.u || '')) + '</span></div>';
+  });
+  return h + '</div>';
+}
+function renderVids(all) {
+  let h = '<div class="ws-list"><div class="ws-card">';
+  all.forEach(it => {
+    if (hit(it.u, P.block)) return;
+    W.view.push(it); const i = W.view.length - 1;
+    h += '<div class="ws-vd" data-act="vid-go" data-i="' + i + '"><div class="th"' + (it.img ? ' style="background-image:url(&quot;' + esc(it.img) + '&quot;)"' : '') + '>' + (it.dur ? '<em>' + esc(it.dur) + '</em>' : '') + '</div>' +
+      '<div class="c"><b>' + esc(it.t || it.u) + '</b><span class="f">' + esc([it.ch, it.src || host(it.u), it.d].filter(Boolean).join(' · ')) + '</span>' + (vidOf(it.u) ? '<span class="f" style="color:var(--ok)">点开直接播放</span>' : '') + '</div></div>';
+  });
+  return h + '</div></div>';
+}
+
+/* ---------- 打开结果 ---------- */
+function vidOf(u) {
+  let m = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/.exec(u || '');
+  if (m) return { src: 'https://www.youtube-nocookie.com/embed/' + m[1] + '?autoplay=1&playsinline=1&rel=0' };
+  m = /bilibili\.com\/video\/(BV[0-9A-Za-z]{10})/.exec(u || '');
+  if (m) return { src: 'https://player.bilibili.com/player.html?bvid=' + m[1] + '&autoplay=1&high_quality=1&danmaku=0' };
+  return null;
+}
+function ext(u) { try { window.open(u, '_blank', 'noopener'); } catch (e) {} }
+function openUrl(u, t) {
+  const vid = vidOf(u);
+  if (vid) { go('vid', { u: u, t: t, vid: vid }); return; }
+  if (hit(u, CFG.direct)) { ext(u); return; }
+  go('read', { u: u, t: t });
+}
+function itemActs(it) {
+  const h = host(it.u), items = [];
+  const pinned = (P.pin || []).some(d => hit(it.u, [d]));
+  items.push({ label: pinned ? '取消置顶 ' + h : '置顶 ' + h + '（排在最前面）', fn: () => { if (pinned) P.pin = P.pin.filter(d => !hit(it.u, [d])); else P.pin = [h].concat(P.pin || []); savePrefs(); renderTop(); B.toast(pinned ? '已取消置顶' : '已置顶 ' + h); } });
+  items.push({ label: '不看 ' + h + ' 的结果', fn: () => { P.block = [h].concat((P.block || []).filter(d => d !== h)); savePrefs(); renderTop(); B.toast('以后不显示 ' + h + '，可以在搜索规则里改回来'); } });
+  items.push({ label: '用浏览器打开', fn: () => ext(it.u) });
+  items.push({ label: '复制链接', fn: () => B.copy(it.u) });
+  items.push({ label: '发给好友', fn: () => B.forward((it.t ? it.t + '\n' : '') + it.u) });
+  items.push({ label: '取消', fn: null });
+  B.acts(h, items);
+}
+
+/* ---------- 简洁阅读 ---------- */
+const OK_TAG = /^(p|br|h2|h3|h4|h5|h6|ul|ol|li|blockquote|pre|code|em|strong|b|i|u|s|sub|sup|a|img|figure|figcaption|table|thead|tbody|tr|th|td|hr|div)$/;
+const BAD_TAG = /^(script|style|iframe|frame|object|embed|svg|math|template|noscript|form|input|button|textarea|select|link|meta|base|video|audio|source)$/;
+function sanitize(html) {   // 服务器已经洗过一遍；这里再按白名单重建一遍，只留文字、图片和链接
+  const doc = new DOMParser().parseFromString('<!doctype html><body>' + String(html || ''), 'text/html');
+  const out = document.createElement('div');
+  (function copy(src, dst) {
+    Array.prototype.forEach.call(src.childNodes, n => {
+      if (n.nodeType === 3) { dst.appendChild(document.createTextNode(n.nodeValue)); return; }
+      if (n.nodeType !== 1) return;
+      const t = n.tagName.toLowerCase();
+      if (BAD_TAG.test(t)) return;
+      if (!OK_TAG.test(t)) { copy(n, dst); return; }
+      const e = document.createElement(t);
+      if (t === 'a') { const hr = n.getAttribute('href') || ''; if (/^https?:\/\//i.test(hr)) e.setAttribute('href', hr); }
+      if (t === 'img') {
+        const s = n.getAttribute('src') || ''; if (!/^https?:\/\//i.test(s)) return;
+        e.setAttribute('src', s); e.setAttribute('alt', n.getAttribute('alt') || ''); e.setAttribute('loading', 'lazy'); e.setAttribute('decoding', 'async'); e.setAttribute('referrerpolicy', 'no-referrer');
+      }
+      copy(n, e); dst.appendChild(e);
+    });
+  })(doc.body, out);
+  return out;
+}
+function renderRead(t) {
+  const d = t.d;
+  R('rsite').textContent = host(d.u);
+  R('rtool').style.display = d.art ? '' : 'none';
+  const favd = (P.fav || []).some(f => f.u === d.u);
+  const fb = R('rtool').querySelector('[data-act="rd-fav"]'); fb.classList.toggle('on', favd); fb.lastChild.nodeValue = favd ? '已收藏' : '收藏';
+  if (W.shownRead === t && !d.dirty) return;
+  W.shownRead = t; d.dirty = false;
+  const box = R('read');
+  if (d.art) {
+    const a = d.art, mins = Math.max(1, Math.round((a.len || 0) / 450));
+    box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px"><h1>' + esc(a.title) + '</h1><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
+      (a.img ? '<img class="ws-lead" src="' + esc(a.img) + '" alt="" referrerpolicy="no-referrer">' : '') + '<div class="ws-body"></div>' +
+      '<div class="ws-from">来源：<a href="' + esc(a.u || d.u) + '" data-act="rd-orig">' + esc(host(a.u || d.u)) + '</a></div></article>';
+    box.querySelector('.ws-body').appendChild(sanitize(a.html));
+    return;
+  }
+  R('rdsc').scrollTop = 0;
+  if (d.err) {
+    const e = d.err;
+    box.innerHTML = '<div class="ws-list" style="padding-top:30px"><div class="ws-card ws-err"><p>' + esc(e.msg || '打不开') + '</p>' + (/^(limit|bad)$/.test(e.code) ? '' : '<small>' + (e.code === 'noArticle' ? '这种页面用原网页看更合适' : '可能要登录，或者网站不让直接取内容') + '</small>') +
+      '<button type="button" class="ws-btn pri" data-act="rd-orig">用浏览器打开原网页</button>' + (/^(fetch|net|http|server|upstream)$/.test(e.code) ? '<button type="button" class="ws-btn" data-act="rd-retry">重试</button>' : '') + '</div></div>';
+    return;
+  }
+  box.innerHTML = '<div class="ws-art"><h1 style="opacity:.55">' + esc(d.t || '正在打开…') + '</h1><div class="meta">' + esc(host(d.u)) + ' · 正在整理成简洁版</div>' + skel().replace('ws-list', 'ws-list" style="padding:0') + '</div>';
+  if (!d.loading) fetchRead(t);
+}
+async function fetchRead(t) {
+  const d = t.d; d.loading = true;
+  const r = await B.call({ op: 'read', url: d.u }, 25000);
+  d.loading = false; d.dirty = true;
+  if (r && r.ok) d.art = r; else d.err = r || { code: 'net', msg: '出错了' };
+  if (top() === t) renderRead(t);
+}
+function readerLink(a) {
+  const hr = a.getAttribute('href') || ''; if (!/^https?:\/\//i.test(hr)) return;
+  openUrl(hr, a.textContent.trim().slice(0, 80));
+}
+
+/* ---------- 看大图、播放视频 ---------- */
+function renderImg(t) {
+  const it = t.d.it || {};
+  R('isite').textContent = it.src || host(it.u || '');
+  R('itxt').innerHTML = esc(it.t || '') + (it.w && it.h ? '<small>' + it.w + ' × ' + it.h + '</small>' : '');
+  const box = R('ibig'); box.innerHTML = '';
+  const im = new Image(); im.alt = it.t || ''; im.referrerPolicy = 'no-referrer';
+  let tried = 0;
+  im.onerror = () => { if (!tried && it.th && im.src !== it.th) { tried = 1; im.src = it.th; return; } box.innerHTML = '<p>图片加载不出来，可以点下面用浏览器看原图</p>'; };
+  im.src = it.img || it.th; box.appendChild(im);
+  V('img').querySelector('[data-act="img-page"]').style.display = it.u ? '' : 'none';
+}
+function renderVid(t) {
+  const d = t.d;
+  R('vsite').textContent = host(d.u);
+  const box = R('vbox');
+  if (box.dataset.src === d.vid.src && box.firstChild) return;
+  box.dataset.src = d.vid.src;
+  box.innerHTML = '<div style="width:100%"><iframe class="ws-player" src="' + esc(d.vid.src) + '" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="视频"></iframe>' +
+    '<div class="ws-dkt" style="padding-top:14px">' + esc(d.t || '') + '<small>' + esc(host(d.u)) + ' · 放不出来的话点“在原网站打开”</small></div></div>';
+}
+
+/* ---------- 搜索规则 ---------- */
+function renderRules() {
+  const gl = (GLS.find(x => x[0] === (P.gl || '')) || GLS[0])[1];
+  const sw = (act, on, t, sub) => '<div class="ws-row" data-act="' + act + '" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">' + t + '<span class="ws-sub" style="white-space:normal">' + sub + '</span></span><button type="button" class="ws-sw" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" aria-label="' + t + '" data-act="' + act + '"></button></div>';
+  const list = (k, empty) => {
+    const a = P[k] || [];
+    return (a.length ? a.map(d => '<div class="ws-row"><span class="ws-mono" style="width:26px;height:26px;border-radius:8px;background:' + monoColor(d) + ';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + esc(monoChar(d)) + '</span><span class="ws-tx">' + esc(d) + '</span><button type="button" class="ws-x" data-act="rule-del" data-k="' + k + '" data-d="' + esc(d) + '" aria-label="删掉">' + ico(I.x, 15) + '</button></div>').join('') : '<div class="ws-row" style="color:var(--muted);font-size:14px">' + empty + '</div>') +
+      '<button type="button" class="ws-row" data-act="rule-add" data-k="' + k + '" style="color:var(--accent)">' + ico(I.plus, 18) + '<span class="ws-tx">添加网站</span></button>';
+  };
+  let h = '<div class="ws-sec" style="margin-top:10px">排序和过滤</div><div class="ws-card">' +
+    sw('tgl-clean', P.clean, '干净页面优先', '维基百科、GitHub、政府和学校网站往前排') +
+    sw('tgl-farm', P.hideFarms, '不看营销号', '百家号、搜狐号、360doc 这类不显示') +
+    '<div class="ws-row" data-act="gl" style="cursor:pointer"><span class="ws-tx">结果地区<span class="ws-sub">影响排在前面的是哪里的网站</span></span><span class="ws-val">' + esc(gl) + '</span>' + ico(I.chev, 16) + '</div></div>' +
+    '<div class="ws-sec">置顶网站</div><div class="ws-card">' + list('pin', '还没有') + '</div>' +
+    '<div class="ws-sec">不看的网站</div><div class="ws-card">' + list('block', '还没有') + '</div>' +
+    '<div class="ws-sec">默认名单</div><div class="ws-card">' +
+      '<details><summary>营销号（' + CFG.farms.length + ' 个）</summary><p>' + esc(CFG.farms.join('、')) + '</p></details>' +
+      '<details><summary>干净网站（' + CFG.clean.length + ' 个）</summary><p>' + esc(CFG.clean.join('、')) + '</p></details>' +
+      '<details><summary>直接用浏览器打开（' + CFG.direct.length + ' 个）</summary><p>要登录或者不让取内容的网站。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
+    '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。' + (W.left != null ? '今天还能搜 ' + W.left + ' 次。' : '') + '</div>';
+  R('rules').innerHTML = h;
+}
+function addSite(k) {
+  B.form(k === 'pin' ? '置顶网站' : '不看的网站', [{ ph: '网址，例如 github.com', max: 120, type: 'url' }], async vals => {
+    const d = normSite(vals[0]); if (!d) return '网址不对，例如 github.com';
+    P[k] = [d].concat((P[k] || []).filter(x => x !== d)).slice(0, 60);
+    const other = k === 'pin' ? 'block' : 'pin'; P[other] = (P[other] || []).filter(x => x !== d);
+    savePrefs(); renderTop(); return null;
+  }, '添加');
+}
+
+/* ---------- 点击 ---------- */
+function onClick(e) {
+  const el = e.target.closest('[data-act]'); if (!el || !root.contains(el)) {
+    const a = e.target.closest('.ws-body a[href]'); if (a) { e.preventDefault(); readerLink(a); }
+    const im = e.target.closest('.ws-body img'); if (im) go('img', { it: { img: im.getAttribute('src'), t: im.getAttribute('alt') || '' } });
+    return;
+  }
+  const act = el.dataset.act;
+  if (el.tagName === 'A' || e.target.closest('a')) e.preventDefault();
+  const t = top(), c = W.cur, it = W.view && W.view[+el.dataset.i];
+  switch (act) {
+    case 'back': back(); break;
+    case 'rules': go('rules'); break;
+    case 'clear': { const f = el.closest('.ws-field'), inp = f.querySelector('input'); inp.value = ''; f.classList.remove('has'); inp.focus(); break; }
+    case 'type': {
+      W.type = el.dataset.t; renderHome();
+      const q = V('home').querySelector('input').value.trim(); if (q) search(q, W.type);
+      break;
+    }
+    case 'tab': if (c && c.type !== el.dataset.t) { W.type = el.dataset.t; search(c.q, W.type); } break;
+    case 'go-q': search(el.dataset.q, W.type); break;
+    case 'hist-del': e.stopPropagation(); LSs(uidKey('ch2wsHist'), hist().filter(x => x !== el.dataset.q)); renderHome(); break;
+    case 'hist-clear': LSs(uidKey('ch2wsHist'), []); renderHome(); break;
+    case 'pin-add': addSite('pin'); break;
+    case 'pin-go': { const inp = V('home').querySelector('input'); inp.value = 'site:' + el.dataset.d + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); break; }
+    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) openUrl(f.u, f.t); break; }
+    case 'fav-all': B.acts('收藏的文章', (P.fav || []).slice(0, 60).map(f => ({ label: (f.t || f.u).slice(0, 40), fn: () => openUrl(f.u, f.t) })).concat([{ label: '取消', fn: null }])); break;
+    case 'r-go': if (it && it.u) openUrl(it.u, it.t); break;
+    case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;
+    case 'more': fetchPage(); break;
+    case 'retry': if (c) { c.pages = []; c.page = 0; c.err = null; fetchPage(); } break;
+    case 'show-farms': W.showFarms = true; renderRes(); break;
+    case 'hide-farms': W.showFarms = false; renderRes(); break;
+    case 'tgl-clean': P.clean = !P.clean; savePrefs(); renderTop(); break;
+    case 'tgl-farm': P.hideFarms = !P.hideFarms; W.showFarms = false; savePrefs(); renderTop(); break;
+    case 'tbs': B.acts('时间范围', TBS.map(x => ({ label: x[1] + ((c && (c.tbs || '') === x[0]) ? ' ✓' : ''), fn: () => { W.tbs = x[0]; if (c) { c.tbs = x[0]; search(c.q, c.type); } } })).concat([{ label: '取消', fn: null }])); break;
+    case 'gl': B.acts('结果地区', GLS.map(x => ({ label: x[1] + ((P.gl || '') === x[0] ? ' ✓' : ''), fn: () => { P.gl = x[0]; savePrefs(); renderTop(); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'rule-add': addSite(el.dataset.k); break;
+    case 'rule-del': P[el.dataset.k] = (P[el.dataset.k] || []).filter(x => x !== el.dataset.d); savePrefs(); renderTop(); break;
+    case 'img-go': if (it) go('img', { it: it }); break;
+    case 'img-page': { const x = t && t.d.it; if (x && x.u) openUrl(x.u, x.t); break; }
+    case 'img-raw': { const x = t && t.d.it; if (x) ext(x.img || x.th); break; }
+    case 'vid-go': if (it && it.u) { const vid = vidOf(it.u); if (vid) go('vid', { u: it.u, t: it.t, vid: vid }); else ext(it.u); } break;
+    case 'vid-out': if (t && t.d.u) ext(t.d.u); break;
+    case 'vid-send': if (t && t.d.u) B.forward((t.d.t ? t.d.t + '\n' : '') + t.d.u); break;
+    case 'rd-orig': if (t && t.d.u) ext((t.d.art && t.d.art.u) || t.d.u); break;
+    case 'rd-retry': if (t) { t.d.err = null; t.d.dirty = true; renderRead(t); } break;
+    case 'rd-fs': {
+      W.fs = SIZES[(SIZES.indexOf(W.fs) + 1) % SIZES.length] || 18; LSs('ch2wsFs', W.fs);
+      const a = R('read').querySelector('.ws-art'); if (a) a.style.fontSize = W.fs + 'px';
+      B.toast('字号：' + ['小', '标准', '大', '特大'][SIZES.indexOf(W.fs)]); break;
+    }
+    case 'rd-fav': {
+      if (!t || !t.d.art) break;
+      const u = t.d.u, had = (P.fav || []).some(f => f.u === u);
+      P.fav = had ? P.fav.filter(f => f.u !== u) : [{ u: u, t: t.d.art.title, s: t.d.art.site, at: Date.now() }].concat(P.fav || []).slice(0, 200);
+      savePrefs(); renderRead(t); B.toast(had ? '已取消收藏' : '已收藏，搜索首页能看到'); break;
+    }
+    case 'rd-copy': if (t) B.copy((t.d.art && t.d.art.u) || t.d.u); break;
+    case 'rd-send': if (t) B.forward(((t.d.art && t.d.art.title) ? t.d.art.title + '\n' : '') + ((t.d.art && t.d.art.u) || t.d.u)); break;
+  }
+}
+
+window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf };
+})();
