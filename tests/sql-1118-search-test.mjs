@@ -29,12 +29,15 @@ ok(stopped && !(await wrong.query(`select to_regclass('public.search_cache') r`)
 
 const sql = fs.readFileSync(FILE, 'utf8');
 let r = await db.exec(sql); console.log('第一遍：', JSON.stringify(r[r.length - 1].rows));
-ok(r[r.length - 1].rows.length === 5 && r[r.length - 1].rows.every(x => x.结果 !== '否'), '检查表五行都不是“否”');
+ok(r[r.length - 1].rows.length === 6 && r[r.length - 1].rows.every(x => x.结果 !== '否'), '检查表六行都不是“否”');
+ok(/先用 glm，模型 glm-4-flash-250414；知名网站 5\d 个/.test(r[r.length - 1].rows.find(x => x.序号 === 6).结果), '翻译设置和知名网站名单补上了 → ' + r[r.length - 1].rows.find(x => x.序号 === 6).结果);
 ok(r[r.length - 1].rows[3].结果.startsWith('每人每天不限次数'), '默认不限次数');
 // 用户改过上限后再跑一遍，不能被冲掉
-await db.exec(`update public.app_config set value = jsonb_set(value, '{per_user_day}', '5') where key = 'search'`);
+await db.exec(`update public.app_config set value = jsonb_set(jsonb_set(value, '{per_user_day}', '5'), '{tr_par}', '1') where key = 'search'`);
 r = await db.exec(sql); console.log('第二遍：', JSON.stringify(r[r.length - 1].rows));
 ok((await db.query(`select value->>'per_user_day' v from public.app_config where key='search'`)).rows[0].v === '5', '重复运行不会冲掉你改过的上限');
+ok((await db.query(`select value->>'tr_par' v from public.app_config where key='search'`)).rows[0].v === '1', '重复运行不会冲掉你改过的翻译设置');
+ok((await db.query(`select count(*)::int n from public.app_config where key='search'`)).rows[0].n === 1, '配置还是只有一行');
 ok((await db.query(`select value from public.app_config where key='ice'`)).rows[0].value.x === 1, '原来的 ice 配置没动');
 
 const as = async (role, sub, q) => {

@@ -3,7 +3,7 @@
 --   2. search_usage：每人每天搜索次数、每家搜索服务每月用了多少次（只有服务器能读写）
 --   3. search_prefs：每个人自己的搜索规则（置顶网站、不想看的网站、开关），换手机也在
 --   3b. search_keys：搜索服务的密钥（只有服务器能读）
---   4. app_config 里的 'search'：先用哪家、每人每天上限、营销号名单、优先网站名单——以后改只要运行 SQL
+--   4. app_config 里的 'search'：先用哪家、每人每天上限、营销号名单、优先网站名单、翻译设置、知名网站名单——以后改只要运行 SQL
 -- 整份在一个事务里，出错会全部撤销。最后列一张检查表。
 
 begin;
@@ -100,6 +100,16 @@ insert into public.app_config (key, value, updated_at) select 'search', jsonb_bu
 ), now()
 where not exists (select 1 from public.app_config where key = 'search');
 
+-- ========== 4b. 翻译设置、知名网站名单（11-18 下午加；已经有的不覆盖，只补没有的） ==========
+update public.app_config set value = jsonb_build_object(
+  'tr_order', jsonb_build_array('glm', 'groq'),                                   -- 翻译先用智谱（免费模型），被拒或太忙交给 Groq（没填密钥就跳过）
+  'tr_models', jsonb_build_object('glm', 'glm-4-flash-250414', 'groq', 'openai/gpt-oss-120b'),   -- 用哪个模型；以后换模型只改这里
+  'tr_par', 2,                                                                    -- 一次最多几组同时翻（智谱免费模型的并发上限官方没写，先保守用 2）
+  'tr_per_user_day', 1000000000,                                                  -- 每人每天翻译请求上限（10 亿 = 不限）
+  'popular', '[["bilibili.com", "哔哩哔哩"], ["baidu.com", "百度"], ["qq.com", "腾讯"], ["taobao.com", "淘宝"], ["tmall.com", "天猫"], ["jd.com", "京东"], ["zhihu.com", "知乎"], ["weibo.com", "微博"], ["douyin.com", "抖音"], ["xiaohongshu.com", "小红书"], ["163.com", "网易"], ["sina.com.cn", "新浪"], ["sohu.com", "搜狐"], ["douban.com", "豆瓣"], ["csdn.net", "CSDN"], ["iqiyi.com", "爱奇艺"], ["youku.com", "优酷"], ["pinduoduo.com", "拼多多"], ["meituan.com", "美团"], ["ctrip.com", "携程"], ["alipay.com", "支付宝"], ["12306.cn", "12306"], ["github.com", "GitHub"], ["google.com", "Google"], ["youtube.com", "YouTube"], ["youtu.be", "YouTube"], ["wikipedia.org", "维基百科"], ["twitter.com", "Twitter"], ["x.com", "X"], ["facebook.com", "Facebook"], ["instagram.com", "Instagram"], ["reddit.com", "Reddit"], ["amazon.com", "亚马逊"], ["apple.com", "苹果"], ["icloud.com", "iCloud"], ["microsoft.com", "微软"], ["outlook.com", "Outlook"], ["openai.com", "OpenAI"], ["chatgpt.com", "ChatGPT"], ["claude.ai", "Claude"], ["netflix.com", "Netflix"], ["tiktok.com", "TikTok"], ["telegram.org", "Telegram"], ["whatsapp.com", "WhatsApp"], ["paypal.com", "PayPal"], ["steampowered.com", "Steam"], ["stackoverflow.com", "Stack Overflow"], ["medium.com", "Medium"], ["pixiv.net", "pixiv"], ["acfun.cn", "AcFun"], ["hupu.com", "虎扑"], ["ithome.com", "IT之家"], ["sspai.com", "少数派"], ["v2ex.com", "V2EX"], ["nytimes.com", "纽约时报"], ["bbc.com", "BBC"], ["supabase.com", "Supabase"]]'::jsonb                                                    -- 知名网站：输入的网址和它们只差几个字母时提醒可能是仿冒的
+) || value, updated_at = now()
+where key = 'search';
+
 -- ========== 检查表 ==========
 insert into _chatter_1118
 select 1, '搜索缓存表', case when to_regclass('public.search_cache') is not null then '是' else '否' end
@@ -109,6 +119,8 @@ union all
 select 3, '个人搜索规则表（只能看到自己的）', case when exists (select 1 from pg_policies where tablename = 'search_prefs' and policyname = 'search_prefs_own') then '是' else '否' end
 union all
 select 4, '默认名单和上限', coalesce((select case when (value ->> 'per_user_day')::numeric >= 100000 then '每人每天不限次数' else '每人每天 ' || (value ->> 'per_user_day') || ' 次' end || '；先用 ' || initcap(value -> 'order' ->> 0) || '，用完换 ' || initcap(value -> 'order' ->> 1) from public.app_config where key = 'search'), '否')
+union all
+select 6, '翻译设置和知名网站名单', coalesce((select '先用 ' || (value -> 'tr_order' ->> 0) || '，模型 ' || (value -> 'tr_models' ->> 'glm') || '；知名网站 ' || jsonb_array_length(value -> 'popular') || ' 个' from public.app_config where key = 'search' and value ? 'popular'), '否')
 union all
 select 5, '密钥表（手机读不到）', case when to_regclass('public.search_keys') is not null and not has_table_privilege('anon', 'public.search_keys', 'select') and not has_table_privilege('authenticated', 'public.search_keys', 'select') then '是；已存 ' || (select count(*) from public.search_keys) || ' 个密钥' else '否' end;
 

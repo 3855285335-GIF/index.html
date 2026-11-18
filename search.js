@@ -45,10 +45,50 @@ const monoChar = h => { const s = h.replace(/^(m|mobile|zh|en|news|blog)\./, '')
 const CFG = {
   farms: ['baijiahao.baidu.com', 'mbd.baidu.com', 'jingyan.baidu.com', 'zhidao.baidu.com', 'wenku.baidu.com', 'toutiao.com', 'sohu.com/a/', '163.com/dy/', '360doc.com', 'docin.com', 'doc88.com', 'book118.com'],
   clean: ['wikipedia.org', 'github.com', 'stackoverflow.com', 'stackexchange.com', 'developer.mozilla.org', 'arxiv.org', 'britannica.com', 'nature.com', '.gov', '.edu', '.gov.cn', '.edu.cn'],
-  direct: ['x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'pinterest.com', 'quora.com', 'tiktok.com', 'weibo.com', 'weibo.cn', 'xiaohongshu.com', 'douyin.com', 'zhihu.com']
+  direct: ['x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'pinterest.com', 'quora.com', 'tiktok.com', 'weibo.com', 'weibo.cn', 'xiaohongshu.com', 'douyin.com', 'zhihu.com'],
+  // 知名网站：输入的网址和它们只差几个字母时，提醒可能是仿冒的（例如 blilblil.com 不是 B 站）
+  popular: [['bilibili.com', '哔哩哔哩'], ['baidu.com', '百度'], ['qq.com', '腾讯'], ['taobao.com', '淘宝'], ['tmall.com', '天猫'], ['jd.com', '京东'], ['zhihu.com', '知乎'], ['weibo.com', '微博'], ['douyin.com', '抖音'],
+    ['xiaohongshu.com', '小红书'], ['163.com', '网易'], ['sina.com.cn', '新浪'], ['sohu.com', '搜狐'], ['douban.com', '豆瓣'], ['csdn.net', 'CSDN'], ['iqiyi.com', '爱奇艺'], ['youku.com', '优酷'], ['pinduoduo.com', '拼多多'],
+    ['meituan.com', '美团'], ['ctrip.com', '携程'], ['alipay.com', '支付宝'], ['12306.cn', '12306'], ['github.com', 'GitHub'], ['google.com', 'Google'], ['youtube.com', 'YouTube'], ['youtu.be', 'YouTube'],
+    ['wikipedia.org', '维基百科'], ['twitter.com', 'Twitter'], ['x.com', 'X'], ['facebook.com', 'Facebook'], ['instagram.com', 'Instagram'], ['reddit.com', 'Reddit'], ['amazon.com', '亚马逊'], ['apple.com', '苹果'],
+    ['icloud.com', 'iCloud'], ['microsoft.com', '微软'], ['outlook.com', 'Outlook'], ['openai.com', 'OpenAI'], ['chatgpt.com', 'ChatGPT'], ['claude.ai', 'Claude'], ['netflix.com', 'Netflix'], ['tiktok.com', 'TikTok'],
+    ['telegram.org', 'Telegram'], ['whatsapp.com', 'WhatsApp'], ['paypal.com', 'PayPal'], ['steampowered.com', 'Steam'], ['stackoverflow.com', 'Stack Overflow'], ['medium.com', 'Medium'], ['pixiv.net', 'pixiv'],
+    ['acfun.cn', 'AcFun'], ['hupu.com', '虎扑'], ['ithome.com', 'IT之家'], ['sspai.com', '少数派'], ['v2ex.com', 'V2EX'], ['nytimes.com', '纽约时报'], ['bbc.com', 'BBC'], ['supabase.com', 'Supabase']]
 };
 let cfgAt = 0;
-function applyCfg(v) { if (!v || typeof v !== 'object') return; ['farms', 'clean', 'direct'].forEach(k => { if (Array.isArray(v[k])) CFG[k] = v[k].map(String); }); }
+function applyCfg(v) {
+  if (!v || typeof v !== 'object') return;
+  ['farms', 'clean', 'direct'].forEach(k => { if (Array.isArray(v[k])) CFG[k] = v[k].map(String); });
+  if (Array.isArray(v.popular)) { const p = v.popular.filter(x => Array.isArray(x) && x[0]).map(x => [String(x[0]).toLowerCase(), String(x[1] || x[0])]); if (p.length) CFG.popular = p; }
+}
+// 网址的主名字：blilblil.com → blilblil，sina.com.cn → sina，zh.wikipedia.org → wikipedia
+const mainLabel = h => { const p = String(h || '').replace(/^(www|m|wap|mobile)\./, '').split('.'); return p.length > 2 && /^(com|net|org|gov|edu|co|ac)$/.test(p[p.length - 2]) ? p[p.length - 3] : p.length >= 2 ? p[p.length - 2] : p[0]; };
+function osa(a, b) {   // 两个词差几个字母（调换相邻两个字母算 1 次）
+  if (Math.abs(a.length - b.length) > 4) return 99;
+  const d = []; for (let i = 0; i <= a.length; i++) { d[i] = [i]; for (let j = 1; j <= b.length; j++) d[i][j] = i ? 0 : j; }
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+function lookAlike(u) {   // 和知名网站只差几个字母、本身又不是那个网站：可能是仿冒的
+  const h = host(u); if (!h) return null;
+  const pop = CFG.popular || [];
+  if (pop.some(p => h === p[0] || h.endsWith('.' + p[0]))) return null;
+  const lab = mainLabel(h); if (lab.length < 4) return null;
+  let best = null, bd = 99;
+  pop.forEach(p => { const pl = mainLabel(p[0]); if (pl.length < 4 || pl === lab) return; const d = osa(lab, pl); if (d < bd) { bd = d; best = p; } });   // 名字一样只是后缀不同（apple.com.cn）多半是正规的地区网站，不提醒
+  if (!best) return null;
+  const pl = mainLabel(best[0]), set = s => Array.from(new Set(s)).sort().join('');
+  const near = (bd === 1 && pl.length >= 5) || (bd === 2 && pl.length >= 8) || (bd <= Math.floor(pl.length / 2) && lab[0] === pl[0] && set(lab) === set(pl) && Math.abs(lab.length - pl.length) <= 1);
+  return near ? { d: best[0], n: best[1] } : null;
+}
+const bare = h => String(h || '').replace(/^(www|m|wap|mobile)\./, '');
+function jumped(from, to) {   // 跳到了另一个网站（同一个网站换子域名、加 www 不算）
+  const a = bare(host(from)), b = bare(host(to));
+  return !!(a && b && a !== b && !a.endsWith('.' + b) && !b.endsWith('.' + a)) ? b : '';
+}
 async function loadCfg() {
   if (cfgAt && Date.now() - cfgAt < 600000) return;
   cfgAt = Date.now(); applyCfg(LSg('ch2wsCfg', null));
@@ -72,7 +112,7 @@ function hit(u, list) {
 const normSite = s => { s = String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''); return /^[a-z0-9.-]+\.[a-z0-9-]{2,}(\/\S*)?$/.test(s) ? s : ''; };
 
 /* ---------- 规则（存在账号里，换手机也在；本机也存一份，打开就有） ---------- */
-const prefsDef = () => ({ clean: true, hideFarms: true, src: '', pin: [], block: [], fav: [] });
+const prefsDef = () => ({ clean: true, hideFarms: true, src: '', pin: [], block: [], fav: [], autoTr: true });
 let P = null, saveT = 0;
 function loadPrefs() {
   const uid = B.uid() || '';
@@ -250,11 +290,25 @@ const CSS = `
 .ws-arch span{flex:1;min-width:150px}
 .ws-arch button{height:30px;padding:0 10px;border-radius:10px;background:var(--surface);color:var(--accent);font-size:12.5px}
 .ws-vd .th .pl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.ws-warn{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px;padding:12px 14px;border-radius:14px;background:color-mix(in srgb,#e3502d 13%,transparent);font-size:13.5px;line-height:1.6;text-align:left}
+.ws-warn b{color:#d4421f}
+.ws-warn button{align-self:flex-start;height:32px;padding:0 12px;border-radius:10px;background:var(--surface);color:var(--accent);font-size:13px}
+.ws-jump{margin:4px 0 14px;padding:10px 12px;border-radius:14px;background:var(--surface2);font-size:13px;line-height:1.55;color:var(--muted);text-align:left}
+.ws-trb{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 14px;padding:9px 10px 9px 12px;border-radius:14px;background:color-mix(in srgb,var(--ok) 13%,transparent);font-size:13px;line-height:1.5}
+.ws-trb span{flex:1;min-width:140px}
+.ws-trb button{height:30px;padding:0 11px;border-radius:10px;background:var(--surface);color:var(--accent);font-size:12.5px}
+.ws-trb.err{background:var(--surface2)}
+.ws-ot{font-size:13px;color:var(--muted);margin:-4px 0 10px;line-height:1.5}
+.ws-desc{font-size:14px;color:var(--muted);line-height:1.65;margin:0 0 14px}
+.ws-lks .ws-row{min-height:56px;cursor:pointer}
+.ws-lks .ws-tx{white-space:normal;line-height:1.45}
+.ws-qen{font-size:13px;color:var(--muted);padding:2px 4px 0;line-height:1.6}
+.ws-qen button{background:transparent;padding:0 2px;color:var(--accent);font-size:13px}
 `;
 
 /* ---------- 界面骨架 ---------- */
 let root = null;
-const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null };
+const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map() };
 if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
 function bar(id, ph, right) {
   return '<div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button>' +
@@ -374,12 +428,12 @@ function renderHome() {
 /* ---------- 搜索 ---------- */
 const URLISH = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)*\.(com|cn|net|org|io|dev|app|gov|edu|me|co|info|tv|cc|xyz|top|jp|hk|tw|uk|de|fr|ru|kr|sg)(\/\S*)?)$/i;
 const SRCN = { exa: 'Exa', tavily: 'Tavily', commons: '维基共享资源' };
-function search(q, type, src) {
+function search(q, type, src, from) {
   q = String(q || '').replace(/\s+/g, ' ').trim(); if (!q) return;
   if (URLISH.test(q) && q.indexOf(' ') < 0) { openUrl(/^https?:/i.test(q) ? q : 'https://' + q); return; }
   W.type = type || W.type || 'web';
-  addHist(q); W.showFarms = false;
-  W.cur = { q: q, type: W.type, tbs: W.type === 'deep' ? '' : W.tbs, src: src || '', items: [], data: null, used: '', loading: false, err: null, done: false };
+  addHist(from || q); W.showFarms = false;
+  W.cur = { q: q, from: from || '', type: W.type, tbs: W.type === 'deep' ? '' : W.tbs, src: src || '', items: [], data: null, used: '', loading: false, err: null, done: false };
   const t = top();
   if (t && t.v === 'res') { t.y = 0; show(); } else go('res');
   const sc = R('rsc'); if (sc) sc.scrollTop = 0;
@@ -398,6 +452,7 @@ async function fetchRes() {
     if (r.src && typeof r.used === 'number') W.used[r.src] = r.used;
   } else c.err = r || { code: 'net', msg: '出错了' };
   renderRes();
+  if (c.done && c.type !== 'images' && P.autoTr !== false && resForeign(c)) trRes(c);   // 外文结果：标题和摘要自动翻成中文
 }
 async function loadUsage() {
   const r = await B.call({ op: 'usage' }, 10000);
@@ -432,6 +487,7 @@ function renderRes() {
   if (c.type === 'web' || c.type === 'news') f += '<button type="button" class="ws-chip ' + (P.clean ? 'soft' : 'soft off') + '" data-act="tgl-clean">' + (P.clean ? ico(I.check, 13) : '') + '干净页面优先</button>' +
     '<button type="button" class="ws-chip ' + (P.hideFarms ? 'soft' : 'soft off') + '" data-act="tgl-farm">' + (P.hideFarms ? ico(I.check, 13) : '') + '不看营销号</button>';
   if (c.type !== 'deep') f += '<button type="button" class="ws-chip soft' + (c.tbs ? '' : ' off') + '" data-act="tbs">' + esc(tl) + ico(I.down, 13) + '</button>';
+  if (c.done && c.type !== 'images' && (c.tr || resForeign(c))) f += '<button type="button" class="ws-chip ' + (c.trOn ? 'soft' : 'soft off') + '" data-act="res-tr">' + (c.tr === 'busy' ? '正在翻译…' : (c.trOn ? ico(I.check, 13) + '已翻成中文' : '翻译成中文')) + '</button>';
   R('filters').innerHTML = f; R('filters').style.display = f ? '' : 'none';
   const box = R('res'); let h = '';
   W.view = [];
@@ -446,10 +502,14 @@ function renderRes() {
   if (c.loading) tail.push('<button type="button" class="ws-btn" disabled>正在搜…</button>');
   else if (c.err) tail.push(errCard(c.err, 'retry'));
   else if (c.type !== 'deep' && (c.used === 'exa' || c.used === 'tavily')) tail.push('<button type="button" class="ws-btn" data-act="swap">换 ' + SRCN[otherSrc(c.used)] + ' 再搜一次，看看别的结果</button>');
+  if (c.done && !c.from && /[㐀-鿿]/.test(c.q) && c.type !== 'images') tail.push('<button type="button" class="ws-btn" data-act="q-en">翻成英文再搜一次（外文资料多得多，结果自动翻成中文）</button>');
   if (c.type !== 'deep' && c.type !== 'images' && c.done) tail.push('<button type="button" class="ws-btn" data-act="tab" data-t="deep">去“深挖”看看（档案馆、论文、代码、讨论）</button>');
   if (c.data && c.data.partial) tail.unshift('<div class="ws-note">Exa 和 Tavily 这个月都用完了，上面只有维基共享资源的图</div>');
   if (W.left != null && W.left < 20 && c.type !== 'deep') tail.push('<div class="ws-note">今天还能搜 ' + W.left + ' 次（搜过的词再搜不算）</div>');
-  box.innerHTML = h + (tail.length ? '<div class="ws-list" style="padding-top:0">' + tail.join('') + '</div>' : '');
+  let head = '';
+  if (c.from) head += '<div class="ws-qen">已把「' + esc(c.from) + '」翻成英文「' + esc(c.q) + '」来搜<button type="button" data-act="q-back">搜回中文</button></div>';
+  if (c.trErr) head += '<div class="ws-qen">结果没翻成中文：' + esc(c.trErr.msg || '翻译出错了') + '</div>';
+  box.innerHTML = (head ? '<div class="ws-list" style="padding-bottom:0">' + head + '</div>' : '') + h + (tail.length ? '<div class="ws-list" style="padding-top:0">' + tail.join('') + '</div>' : '');
 }
 function skel() {
   const card = w => '<div class="ws-card ws-sk"><i style="width:40%"></i><i style="width:' + w + '%;height:16px"></i><i style="width:96%"></i><i style="width:70%;margin:0"></i></div>';
@@ -473,7 +533,7 @@ function renderWeb(c, all) {
   if (kg && kg.t) {
     W.view.push({ u: kg.u, t: kg.t }); const ki = W.view.length - 1;
     h += '<div class="ws-card ws-kg"' + (kg.u ? ' data-act="r-go" data-i="' + ki + '" style="cursor:pointer"' : '') + '>' + (kg.img ? '<img src="' + esc(kg.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy">' : '') +
-      '<div class="c"><b>' + esc(kg.t) + '</b>' + (kg.s ? '<span class="s">' + esc(kg.s) + '</span>' : '') + '<span class="src">' + esc(kg.src || '维基百科') + '</span></div></div>';
+      '<div class="c"><b>' + esc(tx(kg, 't')) + '</b>' + (kg.s ? '<span class="s">' + esc(tx(kg, 's')) + '</span>' : '') + '<span class="src">' + esc(kg.src || '维基百科') + '</span></div></div>';
   }
   const a = arrange(all); let rows = '';
   a.list.forEach(x => {
@@ -482,12 +542,12 @@ function renderWeb(c, all) {
     const tags = (x.pin ? '<span class="ws-tag">置顶</span>' : '') + (x.farm ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">营销号</span>' : '');
     const foot = [it.d, vid ? '点开直接播放' : direct ? '要登录，会用浏览器打开' : ''].filter(Boolean).join(' · ');
     if (c.type === 'news' && it.img) {
-      rows += '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
-        (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>' +
+      rows += '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(tx(it, 't') || it.u) + '</a>' +
+        (it.s ? '<div class="s">' + esc(tx(it, 's')) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>' +
         '<img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy"></div>';
     } else {
-      rows += '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' +
-        (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>';
+      rows += '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + siteRow(it.u, tags, i) + '<a class="t" href="' + esc(it.u) + '">' + esc(tx(it, 't') || it.u) + '</a>' +
+        (it.s ? '<div class="s">' + esc(tx(it, 's')) + '</div>' : '') + (foot ? '<div class="f">' + esc(foot) + '</div>' : '') + '</div>';
     }
   });
   if (rows) h += '<div class="ws-card">' + rows + '</div>';
@@ -512,7 +572,7 @@ function renderVids(all) {
     if (hit(it.u, P.block)) return;
     W.view.push(it); const i = W.view.length - 1;
     h += '<div class="ws-vd" data-act="vid-go" data-i="' + i + '"><div class="th"' + (it.img ? ' style="background-image:url(&quot;' + esc(it.img) + '&quot;)"' : '') + '>' + (it.dur ? '<em>' + esc(it.dur) + '</em>' : '') + (it.img ? '' : '<span class="pl">' + ico(I.play, 26) + '</span>') + '</div>' +
-      '<div class="c"><b>' + esc(it.t || it.u) + '</b><span class="f">' + esc([it.ch, it.src || host(it.u), it.d].filter(Boolean).join(' · ')) + '</span>' + (vidOf(it.u) ? '<span class="f" style="color:var(--ok)">点开直接播放</span>' : '') + '</div></div>';
+      '<div class="c"><b>' + esc(tx(it, 't') || it.u) + '</b><span class="f">' + esc([it.ch, it.src || host(it.u), it.d].filter(Boolean).join(' · ')) + '</span>' + (vidOf(it.u) ? '<span class="f" style="color:var(--ok)">点开直接播放</span>' : '') + '</div></div>';
   });
   return h + '</div></div>';
 }
@@ -525,7 +585,7 @@ function renderDeep(c) {   // 深挖：几个大数据库的结果按来源分�
       const foot = (it.f ? esc(it.f) : '') + (it.c ? (it.f ? ' · ' : '') + '<button type="button" class="ws-lnk" data-act="hn-c" data-i="' + i + '">看讨论</button>' : '');
       const body = '<div class="ws-rt"><span class="h">' + esc(host(it.u)) + '</span>' + (it.ext ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">用浏览器打开</span>' : '') +
         '<button type="button" class="ws-more" data-act="r-more" data-i="' + i + '" aria-label="更多">' + ico(I.more, 18) + '</button></div>' +
-        '<a class="t" href="' + esc(it.u) + '">' + esc(it.t || it.u) + '</a>' + (it.s ? '<div class="s">' + esc(it.s) + '</div>' : '') + (foot ? '<div class="f">' + foot + '</div>' : '');
+        '<a class="t" href="' + esc(it.u) + '">' + esc(tx(it, 't') || it.u) + '</a>' + (it.s ? '<div class="s">' + esc(tx(it, 's')) + '</div>' : '') + (foot ? '<div class="f">' + foot + '</div>' : '');
       h += it.img ? '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + body + '</div><img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy"></div>'
         : '<div class="ws-r" data-act="r-go" data-i="' + i + '">' + body + '</div>';
     });
@@ -598,6 +658,40 @@ function addSeen(d) {   // 最近看过：打开成功的文章记下来，结�
   list.unshift({ u: d.u, t: a.title, s: a.site, at: at, tm: Date.now() });
   LSs(uidKey('ch2wsSeen'), list.slice(0, 100));
 }
+function banners(d, final) {   // 阅读页顶部的提醒：仿冒网址、跳到了别的网站
+  let h = '';
+  const lk = lookAlike(d.u);
+  if (lk) h += '<div class="ws-warn"><span><b>小心：</b>' + esc(bare(host(d.u))) + ' 和「' + esc(lk.n) + '」（' + esc(lk.d) + '）只差几个字母，很可能不是' + esc(lk.n) + '，而是仿冒的网站。别在上面输入账号、密码，也别付款。</span>' +
+    '<button type="button" data-act="rd-goto" data-u="https://' + esc(lk.d) + '/">去真的' + esc(lk.n) + '（' + esc(lk.d) + '）</button></div>';
+  const j = final ? jumped(d.u, final) : '';
+  if (j) h += '<div class="ws-jump">这个网址自动跳转到了另一个网站：<b>' + esc(j) + '</b></div>';
+  return h;
+}
+function rdErr(d) {   // 打不开时按原因给按钮：被删了先给存档，要登录先给浏览器，限流先给重试，找不到网站先给搜索
+  const e = d.err || {}, look = lookAlike(d.u), q = (d.t && !/^https?:/i.test(d.t) && d.t.length < 80) ? d.t : mainLabel(host(d.u));
+  const b = (act, label, pri, extra) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '"' + (extra || '') + '>' + esc(label) + '</button>';
+  const arch = pri => d.at ? '' : b('rd-arch', '看互联网档案馆的存档', pri), orig = pri => b('rd-orig', d.at ? '用浏览器打开这一版存档' : (look ? '仍然用浏览器打开（小心）' : '用浏览器打开原网页'), pri && !look);   // 疑似仿冒的网站：不把“打开原网页”放第一个
+  const srch = (label, pri) => q ? b('rd-search', label || '搜索「' + q + '」', pri, ' data-q="' + esc(q) + '"') : '';
+  let tip = '', btns = '';
+  switch (e.code) {
+    case 'nohost': tip = '网址可能打错了，或者这个网站已经关了';
+      btns = (look ? b('rd-goto', '你要找的是' + look.n + '吗？去 ' + look.d, true, ' data-u="https://' + esc(look.d) + '/"') : '') + srch('', !look) + arch(false); break;
+    case 'gone': tip = '原网页被删了，互联网档案馆里可能还留着以前的版本'; btns = arch(true) + srch(d.t ? '搜这个标题，看别处有没有转载' : '', false) + orig(false); break;
+    case 'login': tip = '要登录才能看的网站，用浏览器打开更合适（登录状态在浏览器里）'; btns = orig(true) + arch(false); break;
+    case 'busy': tip = d.at ? '互联网档案馆经常这样，已经自动重试过一次；通常等一两分钟再点重试就好' : '对方网站暂时不让频繁访问，等一会儿再试，或者用浏览器打开';
+      btns = b('rd-retry', '重试', true) + orig(false) + arch(false); break;
+    case 'timeout': tip = d.at ? '互联网档案馆比较慢，再试一次通常就好' : '对方网站反应太慢，再试一次，或者看存档'; btns = b('rd-retry', '重试', true) + arch(false) + orig(false); break;
+    case 'down': tip = d.at ? '过一会儿再试' : '对方网站自己出问题了，过一会儿再试，或者看存档'; btns = b('rd-retry', '重试', true) + arch(false) + orig(false); break;
+    case 'noArticle': tip = look ? '' : '这种页面用原网页看更合适'; btns = (look ? b('rd-goto', '去真的' + look.n + '（' + look.d + '）', true, ' data-u="https://' + esc(look.d) + '/"') : '') + orig(true) + srch('', false); break;
+    case 'notHtml': btns = orig(true); break;
+    case 'noArchive': tip = d.at ? '这个网页没被互联网档案馆存过' : ''; btns = orig(true) + srch(d.t ? '搜这个标题，看别处有没有' : '', false); break;
+    case 'limit': btns = orig(true); break;
+    case 'bad': break;
+    case 'net': tip = '手机这边的网络不太好'; btns = b('rd-retry', '重试', true); break;
+    default: tip = d.at ? '' : '对方网站连不上，可能暂时出问题了'; btns = b('rd-retry', '重试', true) + arch(false) + orig(false);
+  }
+  return '<div class="ws-card ws-err"><p>' + esc(e.msg || '打不开') + '</p>' + (tip ? '<small>' + esc(tip) + '</small>' : '') + btns + '</div>';
+}
 function renderRead(t) {
   const d = t.d;
   R('rsite').textContent = host(d.u) + (d.at ? ' · 存档' : '');
@@ -608,31 +702,185 @@ function renderRead(t) {
   W.shownRead = t; d.dirty = false;
   const box = R('read');
   if (d.art) {
-    const a = d.art, mins = Math.max(1, Math.round((a.len || 0) / 450));
-    box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px">' +
-      (a.arch ? '<div class="ws-arch"><span>互联网档案馆 ' + esc(tsDay(a.arch)) + ' 的存档</span><button type="button" data-act="rd-vers">别的版本</button><button type="button" data-act="rd-now">看现在的</button></div>' : '') +
-      '<h1>' + esc(a.title) + '</h1><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
-      (a.img ? '<img class="ws-lead" src="' + esc(a.img) + '" alt="" referrerpolicy="no-referrer">' : '') + '<div class="ws-body"></div>' +
-      '<div class="ws-from">来源：<a href="' + esc(a.u || d.u) + '" data-act="rd-orig">' + esc(host(a.u || d.u)) + '</a></div></article>';
-    box.querySelector('.ws-body').appendChild(sanitize(a.html));
+    const a = d.art;
+    const arch = a.arch ? '<div class="ws-arch"><span>互联网档案馆 ' + esc(tsDay(a.arch)) + ' 的存档</span><button type="button" data-act="rd-vers">别的版本</button><button type="button" data-act="rd-now">看现在的</button></div>' : '';
+    const from = '<div class="ws-from">来源：<a href="' + esc(a.u || d.u) + '" data-act="rd-orig">' + esc(host(a.u || d.u)) + '</a></div>';
+    if (a.kind === 'links') {   // 首页、目录页：页面上的链接，点了接着在 App 里看
+      const ls = a.links || [];
+      box.innerHTML = '<div class="ws-art">' + banners(d, a.u) + arch + '<div class="ws-trb" hidden></div><h1>' + esc(a.title || host(a.u || d.u)) + '</h1><div class="ws-ot" hidden></div>' +
+        '<div class="meta">' + esc([a.site, '不是文章，下面是页面上的 ' + ls.length + ' 个链接'].filter(Boolean).join(' · ')) + '</div>' + (a.desc ? '<p class="ws-desc">' + esc(a.desc) + '</p>' : '') +
+        '<div class="ws-card ws-lks">' + ls.map((l, i) => '<div class="ws-row" data-act="lk-go" data-i="' + i + '"><span class="ws-tx"><span class="lt">' + esc(l.t) + '</span><span class="ws-sub">' + esc(host(l.u)) + '</span></span>' + ico(I.chev, 15) + '</div>').join('') + '</div>' + from + '</div>';
+    } else {
+      const mins = Math.max(1, Math.round((a.len || 0) / 450));
+      box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px">' + banners(d, a.u) + arch + '<div class="ws-trb" hidden></div>' +
+        '<h1>' + esc(a.title) + '</h1><div class="ws-ot" hidden></div><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
+        (a.img ? '<img class="ws-lead" src="' + esc(a.img) + '" alt="" referrerpolicy="no-referrer">' : '') + '<div class="ws-body"></div>' + from + '</article>';
+      box.querySelector('.ws-body').appendChild(sanitize(a.html));
+    }
+    initTr(t);
     return;
   }
   R('rdsc').scrollTop = 0;
-  if (d.err) {
-    const e = d.err, transient = /^(fetch|net|http|server|upstream|db)$/.test(e.code);
-    const tip = e.code === 'noArticle' ? '这种页面用原网页看更合适' : e.code === 'noArchive' ? '' : /^(limit|bad)$/.test(e.code) ? '' : '可能要登录、已经删掉了，或者网站不让直接取内容';
-    box.innerHTML = '<div class="ws-list" style="padding-top:30px"><div class="ws-card ws-err"><p>' + esc(e.msg || '打不开') + '</p>' + (tip ? '<small>' + tip + '</small>' : '') +
-      (!d.at && !/^(limit|bad)$/.test(e.code) ? '<button type="button" class="ws-btn pri" data-act="rd-arch">看互联网档案馆的存档</button>' : '') +
-      '<button type="button" class="ws-btn' + (d.at ? ' pri' : '') + '" data-act="rd-orig">用浏览器打开原网页</button>' +
-      (transient ? '<button type="button" class="ws-btn" data-act="rd-retry">重试</button>' : '') + '</div></div>';
-    return;
-  }
-  box.innerHTML = '<div class="ws-art"><h1 style="opacity:.55">' + esc(d.t || '正在打开…') + '</h1><div class="meta">' + esc(host(d.u)) + (d.at ? ' · 正在从互联网档案馆取存档' : ' · 正在整理成简洁版') + '</div>' + skel().replace('ws-list', 'ws-list" style="padding:0') + '</div>';
+  if (d.err) { box.innerHTML = '<div class="ws-list" style="padding-top:18px">' + banners(d, d.err.to) + rdErr(d) + '</div>'; return; }
+  box.innerHTML = '<div class="ws-art">' + banners(d, '') + '<h1 style="opacity:.55">' + esc(d.t || '正在打开…') + '</h1><div class="meta">' + esc(host(d.u)) + (d.at ? ' · 正在从互联网档案馆取存档（档案馆比较慢，可能要等半分钟）' : ' · 正在整理成简洁版') + '</div>' + skel().replace('ws-list', 'ws-list" style="padding:0') + '</div>';
   if (!d.loading) fetchRead(t);
+}
+
+/* ---------- 翻译：外文网页、外文搜索结果换成中文（服务器用智谱翻；同一段 30 天内不重复翻，手机里也记一份） ---------- */
+const FL = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ֐-׿؀-ۿ฀-๿぀-ヿ가-힯]/g, HAN = /[㐀-鿿]/g, JK = /[぀-ヿ가-힯]/g;
+function foreign(s, min) {   // 外文为主（日文、韩文也算外文）
+  s = String(s || '').slice(0, 4000);
+  const han = (s.match(HAN) || []).length, jk = (s.match(JK) || []).length, fl = (s.match(FL) || []).length;
+  if (jk >= 3 && jk >= han * 0.2) return true;
+  return fl >= (min || 2) && han < fl * 0.3;
+}
+const BLK = 'p,h2,h3,h4,h5,h6,li,blockquote,figcaption,td,th,dt,dd,div';
+function trUnits(root) {   // 要翻译的最小段落；段落里面还套着段落的，把直接写在里面的零散文字包起来单独翻
+  const out = []; if (!root) return out;
+  root.querySelectorAll(BLK).forEach(el => {
+    if (el.closest('pre')) return;
+    if (!el.querySelector(BLK)) { out.push(el); return; }
+    let run = [];
+    const flush = () => {
+      if (run.some(n => (n.textContent || '').trim())) { const sp = document.createElement('span'); sp.className = 'ws-run'; el.insertBefore(sp, run[0]); run.forEach(n => sp.appendChild(n)); out.push(sp); }
+      run = [];
+    };
+    Array.from(el.childNodes).forEach(n => {
+      if (n.nodeType === 1 && (n.matches(BLK) || /^(UL|OL|TABLE|PRE|FIGURE|HR|IMG|BLOCKQUOTE)$/.test(n.tagName))) flush();
+      else if (n.nodeType === 3 || n.nodeType === 1) run.push(n);
+    });
+    flush();
+  });
+  return out;
+}
+function packUnit(el) {   // 发给服务器的段落：链接地址、图片换成编号（省字数，也防止被翻坏），回来再换回去
+  const map = [], c = el.cloneNode(true);
+  c.querySelectorAll('*').forEach(n => {
+    const tag = n.tagName.toLowerCase(), keep = tag === 'a' ? (n.getAttribute('href') || '') : tag === 'img' ? n.cloneNode(false) : null;
+    Array.from(n.attributes).forEach(x => n.removeAttribute(x.name));
+    if (keep !== null) { n.setAttribute('i', String(map.length)); map.push(keep); }
+  });
+  return { html: c.innerHTML.replace(/\s+/g, ' ').trim(), map: map };
+}
+function unpack(str, map) {   // 译文按白名单重建：只留文字、加粗斜体代码、换行，链接和图片按编号还原
+  const doc = new DOMParser().parseFromString('<!doctype html><body>' + String(str || ''), 'text/html');
+  const frag = document.createDocumentFragment();
+  (function copy(src, dst) {
+    Array.prototype.forEach.call(src.childNodes, n => {
+      if (n.nodeType === 3) { dst.appendChild(document.createTextNode(n.nodeValue)); return; }
+      if (n.nodeType !== 1) return;
+      const t = n.tagName.toLowerCase();
+      if (t === 'img') { const o = map[+n.getAttribute('i')]; if (o && o.nodeType === 1) dst.appendChild(o.cloneNode(false)); return; }
+      if (BAD_TAG.test(t)) return;
+      if (!/^(a|b|strong|i|em|u|s|sub|sup|code|br)$/.test(t)) { copy(n, dst); return; }
+      const e = document.createElement(t);
+      if (t === 'a') { const h = map[+n.getAttribute('i')]; if (typeof h === 'string' && /^https?:\/\//i.test(h)) e.setAttribute('href', h); }
+      copy(n, e); dst.appendChild(e);
+    });
+  })(doc.body, frag);
+  return frag;
+}
+const TRWHY = { blocked: '翻译服务按国内规定拒绝翻译这些内容', busy: '翻译服务太忙', toolong: '段落太长', upstream: '翻译服务出错', badkey: '翻译密钥不对', empty: '翻译额度用完了' };
+function trBar(t) {
+  const d = t.d, tr = d.tr, box = R('read'); if (top() !== t || !tr) return;
+  const bar = box.querySelector('.ws-trb'); if (!bar) return;
+  const ot = box.querySelector('.ws-ot'), tu = (tr.units || []).find(u => u.el.tagName === 'H1');
+  if (ot) { const t0 = (d.art && d.art.title) || ''; ot.hidden = !(tr.on && tu && tu.t && tu.t.textContent.trim() !== t0.trim()); ot.textContent = '原标题：' + t0; }
+  let h = '', cls = '';
+  if (!tr.foreign) h = '';
+  else if (tr.err) { cls = 'err'; h = '<span>' + esc(tr.err.msg || '翻译出错了') + '</span>' + (tr.err.code === 'nokey' ? '' : '<button type="button" data-act="tr-go">重试</button>'); }
+  else if (tr.busy) h = '<span>正在翻译成中文… ' + tr.done + ' / ' + tr.total + ' 段</span><button type="button" data-act="tr-orig">看原文</button>';
+  else if (tr.on) h = '<span>已翻译成中文' + (tr.failed ? '（有 ' + tr.failed + ' 段没翻成：' + esc(tr.why.map(w => TRWHY[w] || w).join('、') || '翻译服务出错') + '，显示原文）' : '') + '</span>' + (tr.failed ? '<button type="button" data-act="tr-go">再试一次</button>' : '') + '<button type="button" data-act="tr-orig">看原文</button>';
+  else if (tr.started) h = '<span>正在看原文</span><button type="button" data-act="tr-go">看译文</button>';
+  else h = '<span>这是外文网页</span><button type="button" data-act="tr-go">翻译成中文</button>';
+  bar.hidden = !h; bar.className = 'ws-trb' + (cls ? ' ' + cls : ''); bar.innerHTML = h;
+}
+function initTr(t) {   // 页面画好以后：找出外文段落；外文为主就自动翻（规则里可以关）
+  const d = t.d, box = R('read'), links = d.art.kind === 'links';
+  const els = [box.querySelector('h1')].concat(links ? [box.querySelector('.ws-desc')].concat(Array.from(box.querySelectorAll('.ws-lks .lt'))) : trUnits(box.querySelector('.ws-body')));
+  let all = 0, fz = 0; const units = [];
+  els.forEach(el => { if (!el) return; const s = el.textContent || '', n = s.replace(/\s+/g, '').length; all += n; if (foreign(s)) { fz += n; units.push(el); } });
+  const tr = d.tr || (d.tr = { on: false, started: false });
+  tr.gen = (tr.gen || 0) + 1; tr.busy = false; tr.err = null;
+  tr.units = units.map(el => Object.assign({ el: el }, packUnit(el))).filter(u => u.html);
+  tr.foreign = tr.units.length > 0 && fz >= 40 && fz >= all * 0.5;
+  if (tr.foreign && (tr.on || (!tr.started && P.autoTr !== false))) { startTr(t); return; }
+  trBar(t);
+}
+function applyUnit(u) {
+  const s = W.trc.get(u.html); if (s == null) return false;
+  if (!u.o) { u.o = document.createDocumentFragment(); while (u.el.firstChild) u.o.appendChild(u.el.firstChild); }
+  if (!u.t) u.t = unpack(s, u.map);
+  u.el.replaceChildren(u.t.cloneNode(true));
+  return true;
+}
+function showOrig(t) {
+  const tr = t.d.tr; if (!tr) return;
+  tr.on = false; (tr.units || []).forEach(u => { if (u.o) u.el.replaceChildren(u.o.cloneNode(true)); });
+  trBar(t);
+}
+async function startTr(t) {
+  const d = t.d, tr = d.tr; if (!tr || !tr.units) return;
+  tr.on = true; tr.started = true; tr.err = null; tr.failed = 0; tr.why = [];
+  const gen = tr.gen, pending = tr.units.filter(u => !applyUnit(u));   // 手机里记着的先直接换上
+  tr.total = tr.units.length; tr.done = tr.total - pending.length;
+  if (!pending.length || tr.busy) { trBar(t); return; }
+  tr.busy = true; trBar(t);
+  const batches = []; let cur = [], n = 0;   // 第一批小一点（标题和开头几段），几秒就能先看到
+  pending.forEach(u => { const lim = batches.length ? 6000 : 1500; if (cur.length && (cur.length >= 30 || n + u.html.length > lim)) { batches.push(cur); cur = []; n = 0; } cur.push(u); n += u.html.length; });
+  if (cur.length) batches.push(cur);
+  for (const bt of batches) {
+    const r = await B.call({ op: 'translate', html: true, items: bt.map(u => u.html) }, 90000);
+    if (tr.gen !== gen) return;   // 页面重画过了：这批结果交给新的那一轮
+    if (!r || !r.ok) { tr.err = r || { code: 'net', msg: '翻译出错了' }; break; }
+    bt.forEach((u, k) => { const s = r.items && r.items[k]; if (s) { if (W.trc.size > 4000) W.trc.clear(); W.trc.set(u.html, s); if (tr.on) applyUnit(u); tr.done++; } else tr.failed++; });
+    (r.why || []).forEach(w => { if (tr.why.indexOf(w) < 0) tr.why.push(w); });
+    trBar(t);
+  }
+  tr.busy = false; trBar(t);
+}
+async function trRes(c) {   // 搜索结果：外文的标题和摘要翻成中文
+  if (!c || c.tr === 'busy') return;
+  const items = [], tgt = [];
+  const push = (o, k) => { const s = o && o[k]; if (s && foreign(s)) { tgt.push([o, k]); items.push(String(s)); } };
+  const list = c.type === 'deep' ? [].concat.apply([], ((c.data && c.data.groups) || []).map(g => g.items || [])) : (c.items || []);
+  list.forEach(it => { push(it, 't'); push(it, 's'); });
+  if (c.data && c.data.wiki) { push(c.data.wiki, 't'); push(c.data.wiki, 's'); }
+  const need = [];
+  tgt.forEach((x, i) => { const z = W.trc.get('p|' + items[i]); if (z != null) x[0][x[1] + 'z'] = z; else need.push(i); });
+  c.trOn = true; c.trErr = null;
+  if (!need.length) { c.tr = 'done'; renderRes(); return; }
+  c.tr = 'busy'; renderRes();
+  for (let s = 0; s < need.length; s += 40) {
+    const part = need.slice(s, s + 40);
+    const r = await B.call({ op: 'translate', items: part.map(i => items[i]) }, 90000);
+    if (W.cur !== c) return;
+    if (!r || !r.ok) { c.tr = 'err'; c.trErr = r || { msg: '翻译出错了' }; c.trOn = false; renderRes(); return; }
+    part.forEach((i, k) => { const z = r.items && r.items[k]; if (z) { W.trc.set('p|' + items[i], z); tgt[i][0][tgt[i][1] + 'z'] = z; } });
+    renderRes();
+  }
+  c.tr = 'done'; renderRes();
+}
+function resForeign(c) {   // 结果大多是外文吗
+  const list = c.type === 'deep' ? [].concat.apply([], ((c.data && c.data.groups) || []).map(g => g.items || [])) : (c.items || []);
+  const n = list.filter(it => foreign(it.t) || foreign(it.s)).length;
+  return c.type === 'deep' ? n >= 3 : n >= Math.max(2, list.length * 0.4);
+}
+const tx = (it, k) => (W.cur && W.cur.trOn && it[k + 'z']) || it[k];
+async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多得多，结果再自动翻成中文
+  let en = W.trc.get('en|' + c.q);
+  if (!en) {
+    B.toast('正在把搜索词翻成英文…');
+    const r = await B.call({ op: 'translate', to: 'en', items: [c.q] }, 30000);
+    if (!r || !r.ok || !r.items || !r.items[0]) { B.toast((r && r.msg) || '没翻成英文，稍后再试'); return; }
+    en = String(r.items[0]).replace(/^["'“”‘’]+|["'“”‘’。.]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    W.trc.set('en|' + c.q, en);
+  }
+  if (W.cur === c) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
 }
 async function fetchRead(t) {
   const d = t.d; d.loading = true;
-  const r = await B.call({ op: 'read', url: d.u, at: d.at || '' }, d.at ? 30000 : 25000);
+  const r = await B.call({ op: 'read', url: d.u, at: d.at || '' }, d.at ? 45000 : 25000);
   d.loading = false; d.dirty = true;
   if (r && r.ok) { d.art = r; addSeen(d); } else d.err = r || { code: 'net', msg: '出错了' };
   if (top() === t) renderRead(t);
@@ -689,6 +937,11 @@ function renderRules() {
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Exa<span class="ws-sub" style="white-space:normal">网页、新闻、视频默认用它；每月免费约 ' + (W.free.exa || 2500) + ' 次</span></span><span class="ws-val">' + esc(use('exa')) + '</span></div>' +
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Tavily<span class="ws-sub" style="white-space:normal">图片先用它，Exa 用完时顶上；每月免费 ' + (W.free.tavily || 1000) + ' 次</span></span><span class="ws-val">' + esc(use('tavily')) + '</span></div></div>' +
     '<div class="ws-hint">每月 1 号恢复。同一个词 24 小时内再搜不算次数；“深挖”和打开网页不花这些次数。' + (W.left != null ? '你今天还能搜 ' + W.left + ' 次。' : '') + '</div>' +
+    '<div class="ws-sec">翻译</div><div class="ws-card">' +
+      sw('tgl-tr', P.autoTr !== false, '外文自动翻译成中文', '外文网页、外文搜索结果打开就翻；关掉以后要自己点“翻译成中文”') +
+      '<div class="ws-row"><span class="ws-tx" style="white-space:normal">智谱（免费）<span class="ws-sub" style="white-space:normal">主要的翻译服务；按国内规定会拒绝翻译一些内容</span></span><span class="ws-val">' + (W.keys ? (W.keys.glm ? '已开通' : '还没填密钥') : '…') + '</span></div>' +
+      '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Groq（备用，可不填）<span class="ws-sub" style="white-space:normal">智谱拒绝或太忙的段落交给它</span></span><span class="ws-val">' + (W.keys ? (W.keys.groq ? '已开通' : '没填') : '…') + '</span></div></div>' +
+    '<div class="ws-hint">翻过的段落 30 天内再看不用重翻。</div>' +
     '<div class="ws-sec">置顶网站</div><div class="ws-card">' + list('pin', '还没有') + '</div>' +
     '<div class="ws-sec">不看的网站</div><div class="ws-card">' + list('block', '还没有') + '</div>' +
     '<div class="ws-sec">默认名单</div><div class="ws-card">' +
@@ -726,7 +979,7 @@ function onClick(e) {
       const q = V('home').querySelector('input').value.trim(); if (q) search(q, W.type);
       break;
     }
-    case 'tab': if (c && (c.type !== el.dataset.t || el.dataset.t === 'deep')) { W.type = el.dataset.t; search(c.q, W.type); } break;
+    case 'tab': if (c && (c.type !== el.dataset.t || el.dataset.t === 'deep')) { W.type = el.dataset.t; search(c.q, W.type, '', c.from); } break;
     case 'go-q': search(el.dataset.q, W.type); break;
     case 'hist-del': e.stopPropagation(); LSs(uidKey('ch2wsHist'), hist().filter(x => x !== el.dataset.q)); renderHome(); break;
     case 'hist-clear': LSs(uidKey('ch2wsHist'), []); renderHome(); break;
@@ -740,13 +993,13 @@ function onClick(e) {
     case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;
     case 'hn-c': e.stopPropagation(); if (it && it.c) openUrl(it.c, it.t); break;
     case 'retry': if (c) { c.err = null; c.done = false; fetchRes(); } break;
-    case 'swap': if (c && c.used) search(c.q, c.type, otherSrc(c.used)); break;
-    case 'src': if (c) B.acts('用哪家搜', [['exa', 'Exa'], ['tavily', 'Tavily']].map(x => ({ label: x[1] + usageText(x[0]) + (c.used === x[0] ? ' ✓' : ''), fn: () => { if (c.used !== x[0]) search(c.q, c.type, x[0]); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'swap': if (c && c.used) search(c.q, c.type, otherSrc(c.used), c.from); break;
+    case 'src': if (c) B.acts('用哪家搜', [['exa', 'Exa'], ['tavily', 'Tavily']].map(x => ({ label: x[1] + usageText(x[0]) + (c.used === x[0] ? ' ✓' : ''), fn: () => { if (c.used !== x[0]) search(c.q, c.type, x[0], c.from); } })).concat([{ label: '取消', fn: null }])); break;
     case 'show-farms': W.showFarms = true; renderRes(); break;
     case 'hide-farms': W.showFarms = false; renderRes(); break;
     case 'tgl-clean': P.clean = !P.clean; savePrefs(); renderTop(); break;
     case 'tgl-farm': P.hideFarms = !P.hideFarms; W.showFarms = false; savePrefs(); renderTop(); break;
-    case 'tbs': B.acts('时间范围', TBS.map(x => ({ label: x[1] + ((c && (c.tbs || '') === x[0]) ? ' ✓' : ''), fn: () => { W.tbs = x[0]; if (c) search(c.q, c.type, c.src); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'tbs': B.acts('时间范围', TBS.map(x => ({ label: x[1] + ((c && (c.tbs || '') === x[0]) ? ' ✓' : ''), fn: () => { W.tbs = x[0]; if (c) search(c.q, c.type, c.src, c.from); } })).concat([{ label: '取消', fn: null }])); break;
     case 'pref-src': B.acts('网页先用哪家搜', [['exa', 'Exa（免费次数多，推荐）'], ['tavily', 'Tavily']].map(x => ({ label: x[1] + ((P.src === 'tavily' ? 'tavily' : 'exa') === x[0] ? ' ✓' : ''), fn: () => { P.src = x[0] === 'exa' ? '' : x[0]; savePrefs(); renderTop(); } })).concat([{ label: '取消', fn: null }])); break;
     case 'rule-add': addSite(el.dataset.k); break;
     case 'rule-del': P[el.dataset.k] = (P[el.dataset.k] || []).filter(x => x !== el.dataset.d); savePrefs(); renderTop(); break;
@@ -774,8 +1027,17 @@ function onClick(e) {
     }
     case 'rd-copy': if (t) B.copy(archUrl(t.d)); break;
     case 'rd-send': if (t) B.forward(((t.d.art && t.d.art.title) ? t.d.art.title + '\n' : '') + archUrl(t.d)); break;
+    case 'rd-goto': if (el.dataset.u) openUrl(el.dataset.u); break;
+    case 'rd-search': if (el.dataset.q) search(el.dataset.q, 'web'); break;
+    case 'lk-go': { const a = t && t.d.art, l = a && a.links && a.links[+el.dataset.i]; if (l) { if (a.arch) go('read', { u: l.u, t: l.t, at: a.arch }); else openUrl(l.u, l.t); } break; }
+    case 'tr-go': if (t && t.d.tr) startTr(t); break;
+    case 'tr-orig': if (t) showOrig(t); break;
+    case 'res-tr': if (c) { if (c.trOn) { c.trOn = false; renderRes(); } else if (c.tr === 'done') { c.trOn = true; renderRes(); } else trRes(c); } break;
+    case 'q-en': if (c) qEn(c); break;
+    case 'q-back': if (c && c.from) search(c.from, c.type === 'images' ? 'web' : c.type); break;
+    case 'tgl-tr': P.autoTr = P.autoTr === false; savePrefs(); renderTop(); break;
   }
 }
 
-window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf };
+window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
 })();

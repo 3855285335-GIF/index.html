@@ -30,7 +30,14 @@ const DEEP = { ok: true, type: 'deep', q: '量子计算', down: ['GitHub'], grou
   { k: 'papers', n: '论文', items: [{ t: '量子计算的现状与挑战', u: 'https://arxiv.org/pdf/0000.pdf', s: '张三、李四', f: '2020 · 被引用 12 次 · 可以免费看全文', ext: true }] },
   { k: 'hn', n: 'Hacker News 讨论', items: [{ t: 'Quantum computing, explained simply', u: 'https://gone.example.com/post', c: 'https://news.ycombinator.com/item?id=123', f: '321 分 · 45 条评论 · 2026-01-01' }] }] };
 const OLD = { ok: true, u: 'https://gone.example.com/post', title: 'Quantum computing, explained simply', site: 'gone.example.com', date: '2019-02-20', len: 900, arch: '20190302000000',
-  html: '<p>This is the version saved by the Internet Archive in 2019. The original page has since been deleted.</p><p>Quantum computers use qubits, which can be in a superposition of 0 and 1 until they are measured.</p>' };
+  html: '<p>This is the version saved by the Internet Archive in 2019. The original page has since been deleted.</p><p>Quantum computers use <a href="https://en.wikipedia.org/wiki/Qubit">qubits</a>, which can be in a superposition of 0 and 1 until they are measured.</p><pre>print("hello qubit")</pre>' };
+const EN = { ok: true, type: 'web', q: 'quantum computing', src: 'exa', used: 121, items: [
+  { t: 'Quantum computing - Wikipedia', u: 'https://en.wikipedia.org/wiki/Quantum_computing', s: 'A quantum computer is a computer that exploits quantum mechanical phenomena.' },
+  { t: 'What Is Quantum Computing? | IBM', u: 'https://www.ibm.com/topics/quantum-computing', s: 'Quantum computing is a rapidly-emerging technology that harnesses the laws of quantum mechanics.' },
+  { t: 'Quantum computers explained for beginners', u: 'https://blog.example.com/qc', s: 'A friendly introduction to qubits, gates and measurement.' }] };
+const PORTAL = { ok: true, kind: 'links', u: 'https://portal.example.com/', title: 'Portal Home', site: 'portal.example.com', desc: 'A portal with many links', lang: 'en', links: [
+  { t: 'First big headline today', u: 'https://portal.example.com/story/0' }, { t: 'Second story about space travel', u: 'https://portal.example.com/story/1' }, { t: 'Third story on world markets', u: 'https://portal.example.com/story/2' },
+  { t: 'BLOCKME sensitive headline', u: 'https://portal.example.com/story/3' }, { t: 'Partner site article link', u: 'https://other.example.org/x' }] };
 const P = t => '<p>' + t + '</p>';
 const READ = { ok: true, u: 'https://example.org/quantum-intro', title: '量子计算入门：从量子比特到量子门', site: 'example.org', date: '2026-10-21', len: 1800,
   html: P('普通电脑里的一个比特，要么是 0，要么是 1。量子计算机里的量子比特不一样：在被测量之前，它可以处在 0 和 1 的叠加状态。') +
@@ -42,16 +49,31 @@ const READ = { ok: true, u: 'https://example.org/quantum-intro', title: '量子�
 const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${CSS}</style></head>
 <body><div class="app-container"></div><script>
 window.__log = []; window.__opened = []; window.open = u => { __opened.push(u); };
-const DATA = ${JSON.stringify({ WEB, TAV, IMGS, VIDS, READ, DEEP, OLD })};
+const DATA = ${JSON.stringify({ WEB, TAV, IMGS, VIDS, READ, DEEP, OLD, EN, PORTAL })};
 window.__chWS = {
   call: async b => {
     __log.push(b); await new Promise(r => setTimeout(r, 60));
-    if (b.op === 'usage') return { ok: true, used: { exa: 120, tavily: 31 }, free: { exa: 2500, tavily: 1000 }, keys: { exa: true, tavily: true } };
+    if (b.op === 'usage') return { ok: true, used: { exa: 120, tavily: 31 }, free: { exa: 2500, tavily: 1000 }, keys: { exa: true, tavily: true, glm: true, groq: false } };
+    if (b.op === 'translate') {
+      if (window.__trMode === 'nokey') return { ok: false, code: 'nokey', msg: '翻译还没开通：服务器里还没填智谱的密钥' };
+      if (b.to === 'en') return { ok: true, items: b.items.map(x => x === '量子计算' ? 'quantum computing' : 'english ' + x) };
+      const blk = x => /BLOCKME/.test(x);
+      return { ok: true, items: b.items.map(x => blk(x) ? null : '译：' + x), failed: b.items.filter(blk).length, why: b.items.some(blk) ? ['blocked'] : [] };
+    }
     if (b.op === 'versions') return { ok: true, url: b.url, list: ['20240501000000', '20190302000000', '20150101000000'] };
-    if (b.op === 'read') { if (b.url.indexOf('gone.example.com') >= 0) return b.at ? DATA.OLD : { ok: false, code: 'fetch', msg: '这个网页已经不存在了' }; return DATA.READ; }
+    if (b.op === 'read') {
+      if (b.url.indexOf('gone.example.com') >= 0) return b.at ? DATA.OLD : { ok: false, code: 'gone', msg: '这个网页已经不存在了（404）' };
+      if (b.url.indexOf('blilblil.com') >= 0) return { ok: false, code: 'noArticle', msg: '这个网页不是文章，页面上也没有能接着点的链接', to: 'https://gotowww.aipages.dev/6d/?blilblil.com' };
+      if (b.url.indexOf('bilibilii.com') >= 0) return { ok: false, code: 'nohost', msg: '找不到 bilibilii.com 这个网站', to: b.url };
+      if (b.url.indexOf('busyarch.example.com') >= 0) return b.at ? { ok: false, code: 'busy', msg: '互联网档案馆现在太忙（同一时间请求的人太多）' } : { ok: false, code: 'gone', msg: '这个网页已经不存在了（404）' };
+      if (/portal\\.example\\.com\\/?$/.test(b.url)) return DATA.PORTAL;
+      if (b.url.indexOf('en.example.com') >= 0 || b.url.indexOf('en.wikipedia.org') >= 0 || b.url.indexOf('portal.example.com/story') >= 0) return Object.assign({}, DATA.OLD, { u: b.url, arch: undefined, title: 'English article at ' + b.url, html: DATA.OLD.html.replace('2019', b.url) });
+      return DATA.READ;
+    }
     if (b.type === 'deep') return DATA.DEEP;
     if (b.type === 'images') return DATA.IMGS;
     if (b.type === 'videos') return DATA.VIDS;
+    if (/^[\\x00-\\x7f]+$/.test(b.q)) return Object.assign({}, DATA.EN, { q: b.q });
     return b.src === 'tavily' ? Object.assign({}, DATA.TAV, { q: b.q }) : Object.assign({}, DATA.WEB, { q: b.q });
   },
   toast: m => __log.push({ toast: m }), acts: (t, items) => { window.__acts = items; }, form: () => {}, copy: () => {}, logErr: () => {}, forward: t => __log.push({ fwd: t }),
@@ -133,12 +155,23 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('.ws-r a.t >> text=量子计算导论（扫描版）'); ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('archive.org/details'), '档案馆的书：用浏览器打开');
     }
     await pg.click('.ws-r a.t >> text=Quantum computing, explained simply'); await pg.waitForSelector('[data-act="rd-arch"]');
-    if (theme === 'light') ok(/已经不存在了/.test(await pg.$eval('[data-r="read"]', e => e.textContent)), '网页没了：说清楚，并给出“看存档”');
-    await pg.click('[data-act="rd-arch"]'); await pg.waitForSelector('.ws-arch');
-    await shot('8-存档');
+    if (theme === 'light') ok(/已经不存在了/.test(await pg.$eval('[data-r="read"]', e => e.textContent)) && await pg.$eval('.ws-err .ws-btn.pri', e => e.dataset.act === 'rd-arch'), '网页没了：说清楚，“看存档”是第一个按钮');
+    await pg.click('[data-act="rd-arch"]'); await pg.waitForSelector('.ws-arch'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+    await shot('8-存档（自动翻译）');
     if (theme === 'light') {
       const b = await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0]);
       ok(b.at === 'latest' && /2019-03-02 的存档/.test(await pg.$eval('.ws-arch', e => e.textContent)), '看存档：显示是哪一天存的');
+      const rd = () => pg.evaluate(() => { const b = document.querySelector('.ws-body'), ot = document.querySelector('.ws-ot'); return { p: Array.from(b.querySelectorAll('p')).map(x => x.textContent), a: (b.querySelector('a[href="https://en.wikipedia.org/wiki/Qubit"]') || {}).textContent, pre: b.querySelector('pre').textContent, h1: document.querySelector('.ws-art h1').textContent, ot: ot.textContent, otHidden: ot.hidden, bar: document.querySelector('.ws-trb').textContent }; });
+      const ntr = () => pg.evaluate(() => __log.filter(x => x.op === 'translate').length);
+      let x = await rd();
+      ok(x.p.length === 2 && x.p.every(t => t.startsWith('译：')) && x.a === 'qubits' && x.pre === 'print("hello qubit")', '外文文章自动翻成中文：每段都换了，正文里的链接还在，代码块不翻 → ' + x.p[1].slice(0, 30));
+      ok(x.h1.startsWith('译：') && !x.otHidden && x.ot === '原标题：Quantum computing, explained simply' && /已翻译成中文/.test(x.bar), '标题也翻了，下面小字留着原标题；顶部写着“已翻译成中文”');
+      const n1 = await ntr();
+      ok(n1 === 1, '标题和开头几段第一批一起翻（一次请求）→ ' + n1);
+      await pg.click('.ws-trb [data-act="tr-orig"]'); x = await rd();
+      ok(x.p[0].startsWith('This is the version') && x.a === 'qubits' && x.otHidden && /正在看原文/.test(x.bar), '点“看原文”：换回英文原文（链接还在），原标题小字收起');
+      await pg.click('.ws-trb [data-act="tr-go"]'); x = await rd();
+      ok(x.p.every(t => t.startsWith('译：')) && await ntr() === n1, '点“看译文”：马上换回中文，不再请求翻译');
       await pg.click('.ws-tool [data-act="rd-vers"]'); await pg.waitForFunction(() => window.__acts && /2015/.test(__acts.map(x => x.label).join()));
       const lab = await pg.evaluate(() => __acts.map(x => x.label));
       ok(lab[0] === '2024 年 5 月 1 日' && lab[1] === '2019 年 3 月 2 日（正在看）', '历史版本：列出每一版，标出正在看的 → ' + lab.slice(0, 2).join(' / '));
@@ -155,6 +188,79 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.goBack(); await pg.waitForTimeout(150);
       ok(await pg.$eval('#ws', e => !e.classList.contains('on')), '首页再返回：关掉搜索');
       ok(!errs.length, '没有报错 ' + errs.join(' | '));
+    }
+    // ---- 这次新加的：仿冒网址提醒、按原因的出错页、链接列表、外文结果翻译、翻成英文再搜、没填翻译密钥 ----
+    const typeGo = async q => { await pg.fill('.ws-v.on input[type="search"]', q); await pg.press('.ws-v.on input[type="search"]', 'Enter'); await pg.evaluate(() => document.activeElement && document.activeElement.blur()); };
+    const readTxt = () => pg.$eval('[data-r="read"]', e => e.textContent);
+    await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch._w.type = 'web'; ChatterSearch.open(); }); await pg.waitForTimeout(80);
+    await typeGo('www.blilblil.com'); await pg.waitForSelector('.ws-warn');
+    await shot('9-仿冒网址提醒');
+    if (theme === 'light') {
+      const w = await readTxt();
+      ok(/blilblil\.com 和「哔哩哔哩」（bilibili\.com）只差几个字母/.test(w) && /跳转到了另一个网站：gotowww\.aipages\.dev/.test(w), '输入 www.blilblil.com：提醒可能是仿冒的哔哩哔哩，并说跳到了 gotowww.aipages.dev');
+      ok(await pg.$eval('.ws-warn [data-act="rd-goto"]', e => e.dataset.u === 'https://bilibili.com/' && /去真的哔哩哔哩/.test(e.textContent)), '提醒里有“去真的哔哩哔哩（bilibili.com）”');
+      const eb = await pg.$$eval('.ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
+      ok(eb[0] === '★去真的哔哩哔哩（bilibili.com）' && eb.indexOf('仍然用浏览器打开（小心）') > 0 && !eb.some(x => x === '★仍然用浏览器打开（小心）'), '疑似仿冒：第一个按钮是去真的网站，“打开原网页”放后面并提醒小心 → ' + eb.join(' / '));
+      const la = await pg.evaluate(() => ['https://www.blilblil.com/', 'https://gitlab.com/', 'https://www.bilibili.com/video/x', 'https://githud.com/', 'https://apple.com.cn/', 'https://twitch.tv/', 'https://goggle.com/', 'https://taobaoo.com/', 'https://zhibo.tv/', 'https://example.org/', 'https://space.bilibili.com/1'].map(u => (ChatterSearch._lookAlike(u) || {}).n || '-'));
+      ok(la.join(',') === '哔哩哔哩,-,-,GitHub,-,-,Google,淘宝,-,-,-', '仿冒判断：只提醒真像的，不误伤正规网站 → ' + la.join(','));
+    }
+    await pg.goBack(); await pg.waitForTimeout(120);
+    await typeGo('www.bilibilii.com'); await pg.waitForSelector('.ws-err .ws-btn');
+    if (theme === 'light') {
+      const bs = await pg.$$eval('.ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
+      ok(/找不到 bilibilii\.com 这个网站/.test(await readTxt()) && bs[0] === '★你要找的是哔哩哔哩吗？去 bilibili.com' && bs[1] === '搜索「bilibilii」', '网站不存在：先问“你要找的是不是哔哩哔哩”，再给搜索 → ' + bs.join(' / '));
+      await pg.click('.ws-err [data-act="rd-search"]'); await pg.waitForSelector('[data-v="res"].on');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].q)) === 'bilibilii', '点“搜索”：直接搜这个词');
+      await pg.goBack(); await pg.waitForTimeout(120);
+    }
+    await pg.goBack(); await pg.waitForTimeout(120);
+    await typeGo('busyarch.example.com/p'); await pg.waitForSelector('.ws-err [data-act="rd-arch"]');
+    await pg.click('.ws-err [data-act="rd-arch"]'); await pg.waitForFunction(() => /太忙/.test((document.querySelector('[data-r="read"]') || {}).textContent || ''));
+    await shot('10-档案馆限流');
+    if (theme === 'light') {
+      const t = await readTxt(), pri = await pg.$eval('.ws-err .ws-btn.pri', e => e.textContent);
+      ok(/互联网档案馆现在太忙/.test(t) && /已经自动重试过一次/.test(t) && pri === '重试' && !/可能要登录/.test(t), '档案馆限流（就是截图那种情况）：说清楚是档案馆太忙、已经自动重试过，第一个按钮是“重试”');
+    }
+    await pg.goBack(); await pg.goBack(); await pg.waitForTimeout(150);
+    await typeGo('portal.example.com'); await pg.waitForSelector('.ws-lks'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+    await shot('11-链接列表');
+    if (theme === 'light') {
+      const lt = await pg.$$eval('.ws-lks .lt', a => a.map(x => x.textContent));
+      ok(lt[0] === '译：First big headline today' && lt[3] === 'BLOCKME sensitive headline' && await pg.$eval('.ws-art h1', e => e.textContent === '译：Portal Home'), '首页这类：列出页面上的链接，外文的自动翻成中文');
+      ok(/有 1 段没翻成：翻译服务按国内规定拒绝翻译这些内容/.test(await pg.$eval('.ws-trb', e => e.textContent)) && await pg.$('.ws-trb [data-act="tr-go"]'), '有一段被拒绝翻译：说清楚原因，显示原文，可以再试');
+      await pg.click('.ws-lks [data-i="1"]'); await pg.waitForSelector('.ws-body p');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://portal.example.com/story/1', '点列表里的链接：接着在 App 里打开');
+      await pg.goBack(); await pg.waitForTimeout(120);
+    }
+    await pg.goBack(); await pg.waitForTimeout(120);
+    await typeGo('quantum computing'); await pg.waitForFunction(() => { const a = document.querySelector('.ws-r a.t'); return a && a.textContent.startsWith('译：'); });
+    await shot('12-外文结果自动翻译');
+    if (theme === 'light') {
+      ok((await pg.$$eval('.ws-r a.t', a => a.map(x => x.textContent))).every(t => t.startsWith('译：')) && /译：A quantum computer/.test(await pg.$eval('.ws-r .s', e => e.textContent)), '外文搜索结果：标题和摘要自动翻成中文');
+      await pg.click('[data-act="res-tr"]');
+      ok((await pg.$eval('.ws-r a.t', e => e.textContent)) === 'Quantum computing - Wikipedia', '点“已翻成中文”：换回原文，不重新搜');
+      await pg.click('[data-act="res-tr"]');
+      ok((await pg.$eval('.ws-r a.t', e => e.textContent)).startsWith('译：'), '再点：换回译文');
+      await typeGo('量子计算'); await pg.waitForSelector('[data-act="q-en"]');
+      await pg.click('[data-act="q-en"]'); await pg.waitForFunction(() => /已把「量子计算」翻成英文「quantum computing」来搜/.test((document.querySelector('[data-r="res"]') || {}).textContent || ''));
+      await pg.waitForFunction(() => { const a = document.querySelector('.ws-r a.t'); return a && a.textContent.startsWith('译：'); });
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].q)) === 'quantum computing', '“翻成英文再搜”：中文词翻成英文去搜，结果自动翻回中文');
+      await pg.click('[data-act="q-back"]'); await pg.waitForFunction(() => (document.querySelector('.ws-r a.t') || {}).textContent === 'qiskit/qiskit：开源的量子计算工具包');
+      ok(true, '点“搜回中文”：回到中文结果');
+      await pg.evaluate(() => { window.__trMode = 'nokey'; });
+      await typeGo('en.example.com/a'); await pg.waitForFunction(() => /翻译还没开通/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+      ok(!(await pg.$('.ws-trb [data-act="tr-go"]')), '还没填翻译密钥：说清楚，不给没用的“重试”');
+      await pg.evaluate(() => { window.__trMode = ''; });
+      await pg.goBack(); await pg.waitForTimeout(120);
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-tr"]');
+      ok(/外文自动翻译成中文[\s\S]*智谱（免费）[\s\S]*已开通[\s\S]*Groq（备用，可不填）[\s\S]*没填/.test(await pg.$eval('[data-r="rules"]', e => e.textContent)), '规则页：有翻译开关和两家翻译服务的状态');
+      await pg.click('.ws-sw[data-act="tgl-tr"]'); const n0 = await pg.evaluate(() => __log.filter(x => x.op === 'translate').length);
+      await pg.goBack(); await pg.waitForTimeout(120);
+      await typeGo('en.example.com/b'); await pg.waitForFunction(() => /这是外文网页/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+      ok(await pg.evaluate(() => __log.filter(x => x.op === 'translate').length) === n0 && await pg.$('.ws-trb [data-act="tr-go"]'), '关掉自动翻译：外文网页不自动翻，顶部给一个“翻译成中文”按钮');
+      await pg.click('.ws-trb [data-act="tr-go"]'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+      ok(true, '点“翻译成中文”：照样能翻');
+      ok(!errs.length, '新功能也没有报错 ' + errs.join(' | '));
     }
     await ctx.close();
   }

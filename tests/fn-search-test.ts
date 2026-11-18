@@ -14,7 +14,8 @@ let CONF: Any = {}, DBKEYS: Any[] = [];
 const cache = new Map<string, Any>(), counts = new Map<string, number>();
 let rpcMissing = false, siteCalls: string[] = [], exaBodies: Any[] = [], tavBodies: Any[] = [];
 const calls: Record<string, number> = {};
-let exaMode = 'ok', tavMode = 'ok', deepDown = '';
+let exaMode = 'ok', tavMode = 'ok', deepDown = '', glmMode = 'ok', flakyOnce = false;
+const trBodies: Any[] = [];
 const hitc = (k: string) => { calls[k] = (calls[k] || 0) + 1; };
 const gbk = (n: number) => { const a: number[] = []; for (let i = 0; i < n; i++) a.push(0xc4, 0xe3, 0xba, 0xc3); return a; };   // “你好”的 GBK 编码
 const ascii = (s: string) => Array.from(new TextEncoder().encode(s));
@@ -46,7 +47,7 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
         const ks = f.startsWith('in.(') ? f.slice(4, -1).split(',') : [f.replace(/^eq\./, '')];
         return J(ks.filter(k => cache.has(k)).map(k => ({ k, ...cache.get(k) })));
       }
-      if (m === 'POST') { const b = JSON.parse(init.body); cache.set(b.k, { v: b.v, at: b.at }); return new Response(null, { status: 201 }); }
+      if (m === 'POST') { const b = JSON.parse(init.body); (Array.isArray(b) ? b : [b]).forEach((x: Any) => cache.set(x.k, { v: x.v, at: x.at })); return new Response(null, { status: 201 }); }
       if (m === 'DELETE') return new Response(null, { status: 204 });
     }
     if (u.pathname === '/rest/v1/search_usage') {
@@ -69,7 +70,7 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     if (exaMode === 'down') return J({ error: 'boom' }, 503);
     if (exaMode === 'nolite' && b.contents) return J({ error: 'contents not supported' }, 400);
     if (b.includeDomains) return J({ results: [{ title: '视频一', url: 'https://www.youtube.com/watch?v=abcdefghijk', image: 'https://i.ytimg.com/a.jpg', author: '频道', publishedDate: '2026-10-01T00:00:00Z' }] });
-    return J({ results: [{ title: '量子计算 - 维基百科', url: 'https://zh.wikipedia.org/wiki/x', highlights: ['量子计算是……', '第二句'], publishedDate: '2025-01-02T00:00:00.000Z', image: 'https://img.example/q.jpg' }, { title: '营销号', url: 'https://baijiahao.baidu.com/s?id=1', highlights: ['震惊'] }, { title: '没有链接的' }] });
+    return J({ results: [{ title: '量子计算 - 维基百科', url: 'https://zh.wikipedia.org/wiki/x', highlights: ['量子计算 - 维基百科\n\n## 量子计算 - 维基百科 2025-01-02 来源：维基\\_百科\n\n量子计算是……', '第二句'], publishedDate: '2025-01-02T00:00:00.000Z', image: 'https://img.example/q.jpg' }, { title: '营销号', url: 'https://baijiahao.baidu.com/s?id=1', highlights: ['震惊'] }, { title: '没有链接的' }] });
   }
   if (u.host === 'api.tavily.com') {
     hitc('tavily'); const b = JSON.parse(init.body); tavBodies.push(b);
@@ -104,6 +105,8 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
   }
   if (u.host === 'web.archive.org') {
     hitc('wb'); siteCalls.push(u.href);
+    if (u.pathname.includes('busyarch.example.com')) return new Response('Too Many Requests', { status: 429 });
+    if (u.pathname.includes('flaky.example.com') && !flakyOnce) { flakyOnce = true; return new Response('Too Many Requests', { status: 429 }); }
     const m = /^\/web\/(\d+)id_\/(.*)$/.exec(u.pathname + u.search);
     if (m && m[1] !== '20190302000000') return new Response(null, { status: 302, headers: { location: '/web/20190302000000id_/' + m[2] } });
     return new Response(OLD_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -111,7 +114,28 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
   if (u.host === 'api.openalex.org') { hitc('openalex'); if (deepDown.includes('openalex')) return J({}, 500); return J({ results: [{ id: 'https://openalex.org/W1', display_name: '量子计算综述', publication_year: 2020, doi: 'https://doi.org/10.1/x', open_access: { oa_url: 'https://arxiv.org/pdf/0000.pdf' }, authorships: [{ author: { display_name: '张三' } }, { author: { display_name: '李四' } }], cited_by_count: 12 }] }); }
   if (u.host === 'api.github.com') { hitc('github'); if (!H.get('user-agent')) return J({ message: 'UA required' }, 403); return J({ items: [{ full_name: 'qiskit/qiskit', html_url: 'https://github.com/qiskit/qiskit', description: '开源工具包', stargazers_count: 5000, language: 'Python', pushed_at: '2026-11-01T00:00:00Z' }] }); }
   if (u.host === 'hn.algolia.com') { hitc('hn'); return J({ hits: [{ objectID: '123', title: 'Quantum computing explained', url: 'https://blog.example.com/q', points: 321, num_comments: 45, created_at: '2026-01-01T00:00:00Z' }, { objectID: '124', title: 'Ask HN: quantum?', url: null, points: 3, num_comments: 2 }] }); }
+  if (u.host === 'open.bigmodel.cn' || u.host === 'api.groq.com') {   // 假的翻译服务：每段前面加“智:”或“G:”，含“敏感”的整次请求被拒
+    const glm = u.host === 'open.bigmodel.cn'; hitc(glm ? 'glm' : 'groq');
+    const b = JSON.parse(init.body); trBodies.push({ host: u.host, b });
+    if (H.get('authorization') !== 'Bearer ' + (glm ? 'zp-test' : 'gq-test')) return J({ error: { code: '1000', message: '令牌已过期或验证不正确' } }, 401);
+    const segs: string[] = []; const user = b.messages[1].content; const re = /⟦(\d+)⟧\n([\s\S]*?)(?=\n⟦\d+⟧\n|$)/g; let mm;
+    while ((mm = re.exec(user))) segs.push(mm[2]);
+    if (glm && glmMode === 'busyOnce') { glmMode = 'ok'; return J({ error: { code: '1302', message: '您的账户已达到速率限制' } }, 429); }
+    if (glm && segs.some(s => s.includes('敏感'))) return J({ error: { code: '1301', message: '系统检测到输入或生成内容可能包含不安全或敏感内容' } }, 400);
+    const pre = glm ? '智:' : 'G:';
+    const body = (glm && glmMode === 'nomarkers' && segs.length > 1) ? segs.map(s => pre + s).join('\n') : segs.map((s, i) => '⟦' + (i + 1) + '⟧\n' + pre + s).join('\n');
+    return J({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: segs.length === 1 && glmMode === 'nomarkers' ? pre + segs[0] : body } }] });
+  }
   siteCalls.push(u.href);
+  if (u.hostname.endsWith('.invalid')) throw new TypeError('error sending request for url (' + u.href + '): client error (Connect): dns error: failed to lookup address information: Name or service not known');
+  if (u.host === 'nohost.example.com') throw new TypeError('error sending request for url (https://nohost.example.com/): client error (Connect): dns error: failed to lookup address information: Name or service not known');
+  if (u.host === 'login.example.com') return new Response('forbidden', { status: 403, headers: { 'content-type': 'text/html' } });
+  if (u.host === 'busy.example.com') return new Response('slow down', { status: 429, headers: { 'content-type': 'text/html' } });
+  if (u.host === 'down.example.com') return new Response('oops', { status: 503, headers: { 'content-type': 'text/html' } });
+  if (u.host === 'parked.example.com') return new Response(null, { status: 302, headers: { location: 'https://gotowww.parking.example/6d/?parked.example.com' } });
+  if (u.host === 'gotowww.parking.example') return new Response('<html><head><title>welcome</title></head><body><div>welcome</div><a href="/x">Click here now</a></body></html>', { headers: { 'content-type': 'text/html' } });
+  if (u.host === 'portal.example.com') return new Response('<html lang="en"><head><title>Portal Home</title><meta name="description" content="A portal with many links"></head><body><a href="/login">Log in</a><a href="/privacy">Privacy Policy</a>' +
+    ['First big headline today', 'Second story about space', 'Third story on markets', 'Fourth item: weather report', 'Fifth piece of local news', 'Sixth long-form feature'].map((t, i) => '<a href="/story/' + i + '">' + t + '</a>').join('') + '<a href="/story/0#top">First big headline today</a><a href="https://other.example.org/x">Partner site article link</a><a href="javascript:void(0)">Broken javascript link</a></body></html>', { headers: { 'content-type': 'text/html' } });
   if (u.host === 'news.example.com') return new Response(GBK_PAGE, { headers: { 'content-type': 'text/html' } });
   if (u.host === 'utf.example.com') return new Response(UTF_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
   if (u.host === 'hop.example.com') return new Response(null, { status: 302, headers: { location: 'https://utf.example.com/post' } });
@@ -156,7 +180,7 @@ r = await call({ op: 'search', q: '  量子计算 ', type: 'web', tbs: 'week' })
 ok(r.j.ok && r.j.src === 'exa' && r.j.items.length === 2, '搜网页：默认用 Exa，拿到 2 条（没有链接的丢掉）');
 const eb = exaBodies[exaBodies.length - 1];
 ok(eb.type === 'lite' && eb.numResults === 10 && eb.contents && eb.startPublishedDate && Date.now() - Date.parse(eb.startPublishedDate) > 6 * 86400000, 'Exa 请求：简版、10 条、带摘要、“一周内”换成起始日期');
-ok(r.j.items[0].s === '量子计算是…… … 第二句' && r.j.items[0].d === '2025-01-02', '摘要和日期整理好了 → ' + r.j.items[0].s);
+ok(r.j.items[0].s === '2025-01-02 来源：维基_百科 量子计算是…… … 第二句' && r.j.items[0].d === '2025-01-02', '摘要去掉开头重复的标题和转义符号、日期整理好了 → ' + r.j.items[0].s);
 ok(r.j.wiki && r.j.wiki.t === '量子计算' && r.j.wiki.s.length <= 290 && r.j.wiki.u.includes('zh.m.wikipedia.org'), '百科卡片：标题对得上才显示、摘要截短、链到手机版');
 ok(r.j.used === 1 && r.j.left === undefined, '记下 Exa 本月用了 1 次；默认不限次数，所以不报还剩几次');
 await settle();
@@ -286,9 +310,23 @@ ok(!r.j.ok && r.j.code === 'bad', '公开网站跳转到内网地址：拦住');
 r = await call({ op: 'read', url: 'https://files.example.com/a.pdf' });
 ok(!r.j.ok && r.j.code === 'notHtml', 'PDF：提示用原网页打开');
 r = await call({ op: 'read', url: 'https://gone.example.com/' });
-ok(!r.j.ok && r.j.code === 'fetch' && /不存在/.test(r.j.msg), '网页不存在：说清楚');
+ok(!r.j.ok && r.j.code === 'gone' && /不存在/.test(r.j.msg), '网页不存在：单独的“被删了”代码（手机上先给存档）→ ' + r.j.msg);
 r = await call({ op: 'read', url: 'https://home.example.com/' });
-ok(!r.j.ok && r.j.code === 'noArticle', '首页这类不是文章的：说清楚');
+ok(!r.j.ok && r.j.code === 'noArticle', '不是文章、链接也太少：说清楚');
+r = await call({ op: 'read', url: 'https://nohost.example.com/' });
+ok(!r.j.ok && r.j.code === 'nohost' && /找不到 nohost\.example\.com/.test(r.j.msg), '域名根本不存在：说“找不到这个网站” → ' + r.j.msg);
+r = await call({ op: 'read', url: 'https://login.example.com/' });
+ok(!r.j.ok && r.j.code === 'login', '403：说要登录 → ' + r.j.msg);
+r = await call({ op: 'read', url: 'https://busy.example.com/' });
+ok(!r.j.ok && r.j.code === 'busy' && /限制了访问次数/.test(r.j.msg), '网站 429：说限流，不再说“可能要登录” → ' + r.j.msg);
+r = await call({ op: 'read', url: 'https://down.example.com/' });
+ok(!r.j.ok && r.j.code === 'down' && /503/.test(r.j.msg), '网站 5xx：说对方出错 → ' + r.j.msg);
+r = await call({ op: 'read', url: 'https://parked.example.com/' });
+ok(!r.j.ok && r.j.code === 'noArticle' && r.j.to === 'https://gotowww.parking.example/6d/?parked.example.com', '跳到别的网站的停放页：告诉手机最后跳到了哪 → ' + r.j.to);
+r = await call({ op: 'read', url: 'https://portal.example.com/' });
+ok(r.j.ok && r.j.kind === 'links' && r.j.title === 'Portal Home' && r.j.desc === 'A portal with many links' && r.j.lang === 'en', '首页这类：给出标题、简介和页面里的链接');
+const lk = (r.j.links || []).map((x: Any) => x.t);
+ok(lk.length === 7 && lk[0] === 'First big headline today' && lk[6] === 'Partner site article link' && !lk.some((t: string) => /Log in|Privacy|javascript/i.test(t)), '链接：去掉登录、隐私政策、坏链接和重复的，同站的排前面 → ' + lk.length + ' 条');
 const t0 = Date.now();
 r = await call({ op: 'read', url: 'https://big.example.com/' });
 ok(r.st === 200 && Date.now() - t0 < 8000, '超大网页（5 MB）：只读前 3 MB，不卡死');
@@ -305,6 +343,12 @@ r = await call({ op: 'read', url: 'https://never.example.com/x', at: 'latest' })
 ok(!r.j.ok && r.j.code === 'noArchive', '档案馆没存过：说清楚 → ' + r.j.msg);
 r = await call({ op: 'read', url: 'https://gone.example.com/post/1', at: 'abc' });
 ok(!r.j.ok && r.j.code === 'bad', '存档时间乱填：拒绝');
+let wb0 = calls.wb || 0;
+r = await call({ op: 'read', url: 'https://flaky.example.com/p', at: '20190302000000' });
+ok(r.j.ok && r.j.arch === '20190302000000' && calls.wb - wb0 === 2, '档案馆第一次限流（429）：等 1.5 秒自动再试，第二次拿到了');
+wb0 = calls.wb;
+r = await call({ op: 'read', url: 'https://busyarch.example.com/p', at: '20190302000000' });
+ok(!r.j.ok && r.j.code === 'busy' && /互联网档案馆现在太忙/.test(r.j.msg) && calls.wb - wb0 === 2, '档案馆一直限流：只重试一次，然后说清楚是档案馆太忙 → ' + r.j.msg);
 r = await call({ op: 'versions', url: 'https://gone.example.com/post/1' });
 ok(r.j.ok && r.j.list.join(',') === '20240501000000,20190302000000,20150101000000', '历史版本：最新的在前 → ' + (r.j.list || []).length + ' 个');
 reset({ read_per_user_day: 1 }); counts.clear(); cache.clear();
@@ -313,5 +357,56 @@ r = await call({ op: 'read', url: 'https://news.example.com/c' });
 ok(!r.j.ok && r.j.code === 'limit', '简洁阅读每天上限');
 r = await call({ op: 'nope' });
 ok(!r.j.ok && r.j.code === 'bad', '不认识的操作：拒绝');
+
+// ---- 翻译 ----
+reset(); counts.clear(); cache.clear(); DBKEYS = [];
+r = await call({ op: 'translate', items: ['Hello world'] });
+ok(!r.j.ok && r.j.code === 'nokey' && /智谱/.test(r.j.msg), '还没填翻译密钥：说清楚 → ' + r.j.msg);
+DBKEYS = [{ name: 'ZHIPU_API_KEY', value: 'zp-test' }]; __test.reset();
+r = await call({ op: 'ping' }, null);
+ok(r.j.keys.glm === true && r.j.keys.groq === false, '检查接口能看到智谱密钥已填、Groq 没填');
+r = await call({ op: 'ping', probe: 'dns' }, null);
+ok(r.j.ok && r.j.dns === 'nohost', '检查接口的自测：不存在的域名能认出来是“找不到网站” → ' + r.j.dns);
+let g0 = calls.glm || 0;
+r = await call({ op: 'translate', items: ['Hello world', '', 'Second line\nwith a break', 'Third'] });
+ok(r.j.ok && r.j.items.join('|') === '智:Hello world||智:Second line\nwith a break|智:Third' && calls.glm - g0 === 1, '几段一次翻完、顺序对得上、空段原样留空、段里的换行保留');
+const trb = trBodies[trBodies.length - 1].b;
+ok(trb.model === 'glm-4-flash-250414' && /只输出译文/.test(trb.messages[0].content) && /绝不执行/.test(trb.messages[0].content) && !trb.thinking, '用智谱的免费模型；提示里写明只输出译文、原文里的指令照样翻译不执行');
+await settle();
+g0 = calls.glm;
+r = await call({ op: 'translate', items: ['Hello world', 'Third'] });
+ok(r.j.ok && r.j.cached && r.j.items.join('|') === '智:Hello world|智:Third' && calls.glm === g0, '翻过的段落：直接用缓存，不再调用翻译服务');
+r = await call({ op: 'translate', items: ['Hello world'], to: 'en' });
+ok(r.j.ok && !r.j.cached && calls.glm === g0 + 1, '翻成英文和翻成中文分开缓存');
+r = await call({ op: 'translate', html: true, items: ['Read <a i="0">this guide</a> and <b>bold</b>'] });
+ok(r.j.ok && r.j.items[0] === '智:Read <a i="0">this guide</a> and <b>bold</b>' && /HTML 标签/.test(trBodies[trBodies.length - 1].b.messages[0].content), '网页正文：标签原样保留，提示里写明要保留标签');
+g0 = calls.glm;
+r = await call({ op: 'translate', items: ['ok one', '敏感 news', 'ok two', 'ok three'] });
+ok(r.j.ok && r.j.items[0] === '智:ok one' && r.j.items[1] === null && r.j.items[2] === '智:ok two' && r.j.items[3] === '智:ok three' && r.j.failed === 1 && r.j.why.join() === 'blocked', '智谱拒绝翻译其中一段：对半拆小重试，只有那一段没翻，其余照常 → 调用 ' + (calls.glm - g0) + ' 次');
+DBKEYS = [{ name: 'ZHIPU_API_KEY', value: 'zp-test' }, { name: 'GROQ_API_KEY', value: 'gq-test' }]; __test.reset();
+let q0 = calls.groq || 0;
+r = await call({ op: 'translate', items: ['敏感 news', 'fresh line'] });
+ok(r.j.ok && r.j.items[0] === 'G:敏感 news' && r.j.items[1] === '智:fresh line' && !r.j.failed && calls.groq - q0 === 1, '填了 Groq：智谱拒绝的那段交给 Groq 翻，别的段还是智谱');
+glmMode = 'busyOnce'; g0 = calls.glm;
+r = await call({ op: 'translate', items: ['busy test line'] });
+ok(r.j.ok && r.j.items[0] === '智:busy test line' && calls.glm - g0 === 2, '智谱太忙（429）：等一下自动再试一次');
+glmMode = 'nomarkers';
+r = await call({ op: 'translate', items: ['no marker A', 'no marker B', 'no marker C'] });
+ok(r.j.ok && r.j.items.join('|') === '智:no marker A|智:no marker B|智:no marker C', '译文没按编号分段：拆成一段一段重翻，结果照样对得上');
+glmMode = 'ok';
+DBKEYS = [{ name: 'ZHIPU_API_KEY', value: 'wrong' }]; __test.reset();
+r = await call({ op: 'translate', items: ['bad key line'] });
+ok(!r.j.ok && r.j.code === 'nokey' && /密钥不对/.test(r.j.msg), '翻译密钥填错：说清楚 → ' + r.j.msg);
+DBKEYS = [{ name: 'ZHIPU_API_KEY', value: 'zp-test' }]; __test.reset();
+r = await call({ op: 'translate', items: ['x'.repeat(6000), 'y'.repeat(6000), 'z'.repeat(6000), 'w'.repeat(6000), 'v'.repeat(6000), 'u'.repeat(10)] });
+ok(!r.j.ok && r.j.code === 'bad', '一次送来太多（超过 3 万字）：拒绝');
+r = await call({ op: 'translate', items: [] });
+ok(!r.j.ok && r.j.code === 'bad', '没有内容：拒绝');
+r = await call({ op: 'translate', items: ['Hello'] }, null);
+ok(r.st === 401, '翻译也要登录');
+g0 = calls.glm;
+const many = Array.from({ length: 30 }, (_, i) => 'Paragraph number ' + i + ' ' + 'word '.repeat(30));
+r = await call({ op: 'translate', items: many });
+ok(r.j.ok && r.j.items.every((t: string, i: number) => t === '智:' + many[i].trim()) && calls.glm - g0 === 3, '长文章分成几组同时翻（每组不超过约 2400 字），拼回来顺序不乱 → ' + (calls.glm - g0) + ' 组');
 console.log(bad ? `\n有 ${bad} 项没通过` : '\n全部通过');
 Deno.exit(bad ? 1 : 0);
