@@ -4,6 +4,7 @@
 Deno.env.set('CHATTER_TEST', '1');
 Deno.env.set('SUPABASE_URL', 'https://proj.supabase.co');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'service.jwt.key');
+Deno.env.set('SUPABASE_PUBLISHABLE_KEYS', JSON.stringify({ default: 'sb_publishable_test' }));
 Deno.env.set('EXA_API_KEY', 'exa-test-key');
 Deno.env.set('TAVILY_API_KEY', 'tvly-test-key');
 // deno-lint-ignore no-explicit-any
@@ -33,7 +34,8 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
   const u = new URL(typeof input === 'string' ? input : input.url), m = (init.method || 'GET').toUpperCase();
   const H = new Headers(init.headers || {});
   if (u.host === 'proj.supabase.co') {
-    if (H.get('apikey') !== 'service.jwt.key') return J({ msg: 'no key' }, 401);
+    if (u.pathname === '/auth/v1/user' && H.get('apikey') !== 'sb_publishable_test') return J({ msg: 'auth 要用公开密钥' }, 401);
+    if (u.pathname !== '/auth/v1/user' && H.get('apikey') !== 'service.jwt.key') return J({ msg: 'no key' }, 401);
     if (u.pathname === '/auth/v1/user') return H.get('authorization') === 'Bearer ' + TOK ? J({ id: UID }) : J({ msg: 'bad jwt' }, 403);
     if (H.get('authorization') !== 'Bearer service.jwt.key') return J({ msg: 'no auth' }, 401);
     if (u.pathname === '/rest/v1/app_config') return J([{ value: CONF }]);
@@ -79,7 +81,7 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     hitc('wiki');
     if (!/Chatter/.test(H.get('user-agent') || '')) return J({ error: 'ua' }, 403);
     if (deepDown.includes('wiki')) return J({}, 503);
-    if (u.searchParams.get('list') === 'search') return J({ query: { search: [{ title: '量子计算', snippet: '<span class="searchmatch">量子</span>计算是一种……', timestamp: '2026-09-01T00:00:00Z' }, { title: '量子比特', snippet: '量子比特是……' }] } });
+    if (u.searchParams.get('gsrlimit') === '6') { ok(u.searchParams.get('prop') === 'extracts|info' && u.searchParams.get('variant') === 'zh-cn', '深挖·维基百科：用“搜索 + 简体摘要”的取法'); return J({ query: { pages: [{ title: '量子比特', index: 2, extract: '量子比特是……' }, { title: '量子計算', displaytitle: '量子计算', index: 1, extract: '量子计算是一种……', touched: '2026-09-01T00:00:00Z' }] } }); }
     const q = u.searchParams.get('gsrsearch');
     if (q === '量子计算') return J({ query: { pages: [{ title: '量子計算', displaytitle: '量子计算', extract: '量子计算是一种遵循量子力学规律调控量子信息单元进行计算的新型计算模式。它和经典计算不同。第三句话。第四句话很长' + '很长'.repeat(200), fullurl: 'https://zh.wikipedia.org/wiki/%E9%87%8F', thumbnail: { source: 'https://upload.wikimedia.org/a.png' } }] } });
     return J({ query: { pages: [{ title: '完全无关', extract: '这一条和搜的词没关系，不应该显示成卡片。'.repeat(3) }] } });
@@ -149,7 +151,7 @@ const eb = exaBodies[exaBodies.length - 1];
 ok(eb.type === 'lite' && eb.numResults === 10 && eb.contents && eb.startPublishedDate && Date.now() - Date.parse(eb.startPublishedDate) > 6 * 86400000, 'Exa 请求：简版、10 条、带摘要、“一周内”换成起始日期');
 ok(r.j.items[0].s === '量子计算是…… … 第二句' && r.j.items[0].d === '2025-01-02', '摘要和日期整理好了 → ' + r.j.items[0].s);
 ok(r.j.wiki && r.j.wiki.t === '量子计算' && r.j.wiki.s.length <= 290 && r.j.wiki.u.includes('zh.m.wikipedia.org'), '百科卡片：标题对得上才显示、摘要截短、链到手机版');
-ok(r.j.used === 1 && r.j.left === 79, '记下 Exa 本月用了 1 次、今天还能搜 79 次');
+ok(r.j.used === 1 && r.j.left === 299, '记下 Exa 本月用了 1 次、今天还能搜 299 次（默认每人每天 300 次）');
 await settle();
 const e1 = calls.exa;
 r = await call({ op: 'search', q: '量子计算', type: 'web', tbs: 'week' });
@@ -240,7 +242,7 @@ const ex0 = calls.exa || 0, tv0 = calls.tavily || 0;
 r = await call({ op: 'search', q: '量子计算', type: 'deep' });
 const g = (k: string) => (r.j.groups || []).find((x: Any) => x.k === k);
 ok(r.j.ok && r.j.groups.length === 5 && calls.exa === ex0 && calls.tavily === tv0, '深挖：5 个数据库都有结果，而且不花 Exa、Tavily 的次数');
-ok(g('wiki').items[0].s === '量子计算是一种……' && g('wiki').items[0].u.includes('zh.m.wikipedia.org'), '深挖·维基百科：去掉高亮标签、链到手机版');
+ok(g('wiki').items[0].t === '量子计算' && g('wiki').items[0].s === '量子计算是一种……' && g('wiki').items[0].f === '更新于 2026-09-01' && g('wiki').items[1].t === '量子比特' && g('wiki').items[0].u.includes('zh.m.wikipedia.org'), '深挖·维基百科：按搜索顺序排、用简体标题和摘要、链到手机版');
 ok(g('archive').items[0].f === '书 / 文档 · 2001 · 某作者' && g('archive').items[0].ext && g('archive').items[0].img, '深挖·互联网档案馆：类型、年份、作者、封面');
 ok(g('papers').items[0].u === 'https://arxiv.org/pdf/0000.pdf' && g('papers').items[0].ext && /被引用 12 次/.test(g('papers').items[0].f), '深挖·论文：优先给免费全文（PDF 用浏览器打开）');
 ok(g('github').items[0].f.startsWith('★ 5000 · Python'), '深挖·GitHub：星数、语言、更新时间');

@@ -66,7 +66,7 @@ grant select, insert, update on public.search_prefs to authenticated;
 -- ========== 4. 默认名单和上限（已经有就不覆盖，你改过的不会被冲掉） ==========
 insert into public.app_config (key, value, updated_at) select 'search', jsonb_build_object(
   'enabled', true,
-  'per_user_day', 80,            -- 每人每天最多搜几次（网页、图片、视频、新闻；搜过的词 24 小时内再搜不算）
+  'per_user_day', 300,           -- 每人每天最多搜几次（网页、图片、视频、新闻；搜过的词 24 小时内再搜不算）
   'read_per_user_day', 300,      -- 每人每天最多打开几次简洁阅读（含看存档）
   'deep_per_user_day', 200,      -- 每人每天最多“深挖”几次（含查历史版本；这些都免费，上限只是防止被滥用）
   'order', jsonb_build_array('exa', 'tavily'),       -- 网页、新闻、视频：先用 Exa，用完换 Tavily

@@ -12,11 +12,17 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261118-2';
+const VER = '20261118-4';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
-const SRK = env('SUPABASE_SERVICE_ROLE_KEY');
+// 访问数据库的密钥：和推送函数一样，优先用新式密钥（SUPABASE_SECRET_KEYS），没有再用旧的 service_role 密钥
+const pickKey = (name: string, legacy: string) => {
+  try { const j = JSON.parse(env(name) || '{}'); if (j && j.default) return String(j.default); const v = j && Object.values(j)[0]; if (v) return String(v); } catch { /* 不是 JSON：改用旧版变量 */ }
+  return env(legacy);
+};
+const SRK = pickKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
+const PUBK = pickKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY');
 const KEY: Record<string, () => string> = { exa: () => env('EXA_API_KEY'), tavily: () => env('TAVILY_API_KEY') };
 const NAME: Record<string, string> = { exa: 'Exa', tavily: 'Tavily' };
 const CORS: Record<string, string> = {
@@ -58,13 +64,13 @@ async function postJson(u: string, headers: Record<string, string>, body: Any, m
 }
 function dbh(extra: Record<string, string> = {}) {
   const h: Record<string, string> = { apikey: SRK, 'Content-Type': 'application/json', ...extra };
-  if (!SRK.startsWith('sb_')) h.Authorization = 'Bearer ' + SRK;   // 新式密钥（sb_secret_…）不能放在 Authorization 里
+  if (SRK.split('.').length === 3) h.Authorization = 'Bearer ' + SRK;   // 旧版 service_role 密钥本身是登录凭证格式；新式密钥（sb_secret_…）不能放在这里
   return h;
 }
 const monthStart = () => { const d = new Date(Date.now() + 8 * 3600000); return d.toISOString().slice(0, 8) + '01'; };   // 北京时间的本月 1 号
 
 /* ---------- 配置（数据库里改，1 分钟内生效） ---------- */
-const CFG_DEF = { enabled: true, per_user_day: 80, read_per_user_day: 300, deep_per_user_day: 200, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000 };
+const CFG_DEF = { enabled: true, per_user_day: 300, read_per_user_day: 300, deep_per_user_day: 200, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000 };
 let CFG: Any = null, CFG_AT = 0;
 async function cfg() {
   if (CFG && Date.now() - CFG_AT < 60000) return CFG;
@@ -82,7 +88,7 @@ async function uidOf(req: Request) {
   const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   if (!tok || tok.split('.').length !== 3) return null;
   const hit = UIDS.get(tok); if (hit && Date.now() - hit.at < 300000) return hit.uid;
-  const r = await tfetch(SB_URL + '/auth/v1/user', { headers: { apikey: SRK, Authorization: 'Bearer ' + tok } }, 5000);
+  const r = await tfetch(SB_URL + '/auth/v1/user', { headers: { apikey: PUBK || SRK, Authorization: 'Bearer ' + tok } }, 5000);
   if (!r.ok) return null;
   const u = await r.json().catch(() => null); if (!u || !u.id) return null;
   if (UIDS.size > 500) UIDS.clear();
@@ -215,12 +221,13 @@ async function commons(q: string) {   // 维基共享资源的图片：免费、
 }
 
 /* ---------- 深挖：几个大数据库，全部免费 ---------- */
-async function wikiList(q: string) {
+async function wikiList(q: string) {   // 用“搜索 + 摘要”一次取回：摘要会转成简体（搜索自带的片段繁简混杂）
   const host = wikiHost(q);
-  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', list: 'search', srsearch: q, srlimit: '6', srprop: 'snippet|timestamp' });
+  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrlimit: '6', gsrnamespace: '0', prop: 'extracts|info', exintro: '1', explaintext: '1', exchars: '160', exlimit: '6', inprop: 'url|displaytitle' });
   if (CJK.test(q)) p.set('variant', 'zh-cn');
   const j = await getJson('https://' + host + '/w/api.php?' + p, { 'Api-User-Agent': BOT_UA });
-  return ((j && j.query && j.query.search) || []).map((x: Any) => ({ t: str(x.title, 160), u: wikiLink(host, x.title), s: str(strip(x.snippet), 240), f: day10(x.timestamp) && '更新于 ' + day10(x.timestamp) }));
+  return ((j && j.query && j.query.pages) || []).slice().sort((a: Any, b: Any) => (a.index || 0) - (b.index || 0))
+    .map((x: Any) => ({ t: str(strip(x.displaytitle || x.title), 160), u: wikiLink(host, x.title), s: str(String(x.extract || '').replace(/\s+/g, ' '), 240), f: day10(x.touched) && '更新于 ' + day10(x.touched) }));
 }
 const MEDIA: Record<string, string> = { texts: '书 / 文档', movies: '视频', audio: '音频', image: '图片', software: '软件', web: '网页', data: '数据', collection: '合集', etree: '现场录音' };
 async function archiveSearch(q: string) {
