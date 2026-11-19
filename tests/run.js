@@ -505,6 +505,174 @@ test('半屏：键盘开着时切出去再回来、或者 iPhone 没通知就收
   } finally { env.close(); }
 });
 
+test('拒绝好友申请：失败保留申请，重复点击只发送一次，成功后移除', async () => {
+  const request = { id: '1', from_acc: 'bob', to_acc: ME, status: 'pending' };
+  const db = baseDb(Date.now(), { friend_requests: [request] });
+  let resolve, failUpdate = true;
+  const env = makeEnv({ db, onQuery: q => {
+    if (q.table === 'friend_requests' && q.op === 'update' && failUpdate) {
+      return new Promise(r => { resolve = r; });
+    }
+  } });
+  try {
+    await env.login(); env.T.S.requests = [request];
+    const action = env.T.declineRequest('1');
+    await env.T.declineRequest('1');
+    ok(env.log.filter(q => q.table === 'friend_requests' && q.op === 'update').length === 1, '重复提交');
+    resolve({ error: { message: '离线' } });
+    await action;
+    ok(env.T.S.requests.length === 1 && request.status === 'pending', '失败把申请藏掉了');
+    failUpdate = false;
+    await env.T.declineRequest('1');
+    ok(env.T.S.requests.length === 0 && request.status === 'declined', '成功后状态没有一致');
+  } finally { env.close(); }
+});
+
+test('好友搜索：输入改回原文时，迟到的同一查询结果不能覆盖最新结果', async () => {
+  let resolveOld, old = true;
+  const env = makeEnv({ db: baseDb(Date.now()), onQuery: q => {
+    if (q.table !== 'profiles' || !q.or?.startsWith('account_id.ilike')) return;
+    if (old) {
+      old = false;
+      return new Promise(r => { resolveOld = r; });
+    }
+    return { data: [prof('new', '新结果')], error: null };
+  } });
+  try {
+    await env.login();
+    env.$('search-input').value = 'bob';
+    const first = env.T.runSearch('bob');
+    await sleep(0);
+    await env.T.runSearch('bob');
+    resolveOld({ data: [prof('old', '旧结果')], error: null });
+    await first;
+    ok(env.$('search-results').textContent.includes('新结果') && !env.$('search-results').textContent.includes('旧结果'), '显示了迟到的数据');
+  } finally { env.close(); }
+});
+
+test('历史分页：同一时间戳的 93 条消息跨多页，ID 完整且顺序稳定', async () => {
+  const t = Date.now();
+  const expected = Array.from({ length: 93 }, (_, i) => uid(i + 1));
+  const db = baseDb(t, { messages: expected.map((id, i) => msg(i + 1, 'bob', 'bob::me', id, t)).reverse() });
+  const env = makeEnv({ db });
+  try {
+    await env.login();
+    await env.T.openConv('bob::me', 'bob');
+    ok(env.T.S.msgs.length === 40, '首屏消息数错误');
+    await env.T.loadOlder();
+    await env.T.loadOlder();
+    ok(env.T.S.msgs.map(m => m.id).join() === expected.join(), '分页漏掉消息或者顺序错乱');
+    ok(!env.T.S.hasMore, '最后一页仍然显示可继续翻页');
+  } finally { env.close(); }
+});
+
+test('快速关闭并重开同一聊天：旧请求、旧媒体预览不能覆盖或发送', async () => {
+  const t = Date.now();
+  let resolveOld, queries = 0;
+  const db = baseDb(t, { messages: [msg(71, 'bob', 'bob::me', '当前聊天数据', t)] });
+  const env = makeEnv({ db, onQuery: q => {
+    if (q.table === 'messages' && q.limit === 40 && ++queries === 1) return new Promise(r => { resolveOld = r; });
+  } });
+  try {
+    await env.login();
+    const first = env.T.openConv('bob::me', 'bob');
+    await sleep(0);
+    const pending = env.T.sendFiles([
+      new env.w.File(['x'], 'photo.png', { type: 'image/png' }),
+      new env.w.File(['y'], 'doc.txt', { type: 'text/plain' })
+    ]);
+    ok(env.$('ipv-sheet').classList.contains('active'), '图片预览未打开');
+    env.T.closeChat();
+    await env.T.openConv('bob::me', 'bob');
+    click(env, env.$('ipv-send'));
+    resolveOld({ data: [msg(77, 'bob', 'bob::me', '过期请求', t)], error: null });
+    await Promise.all([pending, first]);
+    ok(env.T.S.msgs.map(m => m.id).join() === uid(71), '旧回包污染重开的聊天');
+    ok(db.messages.length === 1 && !env.$('ipv-sheet').classList.contains('active'), '关闭后的附件仍然发出');
+  } finally { env.close(); }
+});
+
+test('发送结果丢失：同一 ID 重试读取已提交的行，只出现一条消息', async () => {
+  const t = Date.now();
+  let loseResponse = true;
+  const db = baseDb(t);
+  const env = makeEnv({ db, onQuery: (q, d) => {
+    if (q.table !== 'messages' || q.op !== 'insert' || !loseResponse) return;
+    loseResponse = false;
+    d.messages.push({ ...q.rows, created_at: iso(t) });
+    return { data: null, error: { message: 'Failed to fetch' } };
+  } });
+  try {
+    await env.login(); await env.T.openConv('bob::me', 'bob');
+    const m = env.T.newMsg('text', '已提交');
+    env.T.addLocal(m);
+    await sleep(30);
+    ok(env.T.S.out.get(m.id)._st === 'failed', '丢失响应应进入重试队列');
+    await env.T.deliver(m);
+    const rows = env.T.S.msgs.filter(x => x.id === m.id);
+    ok(rows.length === 1 && rows[0].created_at === iso(t) && !rows[0]._st, '没有恢复数据库中的发送结果');
+    ok(db.messages.length === 1 && !env.T.S.out.has(m.id), '重复入库或待发队列未清理');
+  } finally { env.close(); }
+});
+
+test('快速广播只按会话和发送人核验数据库，过期行不会盖掉撤回', async () => {
+  const t = Date.now();
+  const db = baseDb(t);
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await env.T.openConv('bob::me', 'bob');
+    const hint = { id: uid(31), from: 'bob', to: ME, conv: 'bob::me', body: '广播内容' };
+    await env.T.onFastMsg(hint);
+    ok(!msgEl(env, uid(31)), '不存在于数据库的消息被展示');
+    db.messages.push(msg(31, 'bob', 'bob::me', '服务器内容', t));
+    await env.T.onFastMsg(hint);
+    ok(msgEl(env, uid(31)).textContent.includes('服务器内容'), '展示了广播内容');
+    await env.T.onFastRecall(hint);
+    ok(env.T.S.msgs.find(m => m.id === hint.id).type === 'text', '数据库未撤回却显示撤回');
+    db.messages[0] = { ...db.messages[0], type: 'recalled', body: '' };
+    await env.T.onFastRecall(hint);
+    env.rtFire('INSERT', 'messages', msg(31, 'bob', 'bob::me', '过期数据', t));
+    ok(env.T.S.msgs.find(m => m.id === hint.id).type === 'recalled', '迟到的消息覆盖了撤回状态');
+  } finally { env.close(); }
+});
+
+test('换账号：旧账号的查询回包不能渲染进新账号', async () => {
+  let release, user = ME;
+  const db = baseDb(Date.now(), { profiles: [prof(ME), prof('bob', 'Bob'), prof('other', '其他账户')] });
+  const env = makeEnv({ db, onQuery: q => {
+    if (q.table === 'profiles' && q.or?.startsWith('account_id.ilike')) return new Promise(r => { release = r; });
+  }, onRpc: name => {
+    if (name === 'bootstrap') return { data: { me: db.profiles.find(p => p.account_id === user),
+      convs: [], friends: [], peers: [], requests: [] }, error: null };
+  } });
+  try {
+    await env.login(); env.$('search-input').value = 'bob';
+    const pending = env.T.runSearch('bob');
+    await sleep(0);
+    user = 'other';
+    await env.T.onAuth('SIGNED_IN', { user: { id: 'u-other' }, access_token: 'test-another-token' });
+    release({ data: [prof('old', '旧账号结果')], error: null });
+    await pending;
+    ok(env.T.S.me.account_id === 'other' && !env.T.S.profiles.old, '旧回包写入了新账号');
+    ok(!env.$('search-results').textContent.includes('旧账号结果'), '串号后显示了旧账号结果');
+  } finally { env.close(); }
+});
+
+test('动态点赞：数据库返回错误时恢复计数，可重新提交', async () => {
+  let failLike = true;
+  const env = makeEnv({ db: baseDb(Date.now()), onQuery: q => {
+    if (q.table === 'moment_likes' && q.op === 'insert' && failLike) return { error: { message: '离线' } };
+  } });
+  try {
+    await env.login();
+    await env.T.toggleMomentLike('moment-1');
+    ok(env.T.MO.likes['moment-1'].length === 0, '数据库错误后仍显示已点赞');
+    failLike = false;
+    await env.T.toggleMomentLike('moment-1');
+    ok(env.T.MO.likes['moment-1'].includes(ME) && env.db.moment_likes.length === 1, '重试没有保存点赞');
+  } finally { env.close(); }
+});
+
 // ---------------- 代码检查 ----------------
 async function lint() {
   const { ESLint } = require('eslint');

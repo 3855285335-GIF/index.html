@@ -68,7 +68,10 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   // 6 清除缓存后重开：清缓存键 + IndexedDB + Cache Storage，保留登录和设置
   await pg.evaluate(async () => {
     localStorage.setItem('ch2:u1', '{"x":1}'); localStorage.setItem('ch2m:u1:c', '[]'); localStorage.setItem('ch2grp', '{}'); localStorage.setItem('ch2pushpub', 'x');
-    localStorage.setItem('ch2theme', 'dark'); localStorage.setItem('ch2bubble', '3'); localStorage.setItem('sb-uaoiqbxptnbrvkzjwguc-auth-token', '{"t":1}'); localStorage.setItem('ch2lib4:x', 'lib');
+    localStorage.setItem('ch2theme', 'dark'); localStorage.setItem('ch2bubble', '3'); localStorage.setItem('sb-uaoiqbxptnbrvkzjwguc-auth-token', JSON.stringify({
+      access_token: 'test-access', refresh_token: 'test-refresh', expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: '00000000-0000-4000-8000-000000000001' }
+    })); localStorage.setItem('ch2lib4:x', 'lib');
     await new Promise(r => { const q = indexedDB.open('chatter', 1); q.onupgradeneeded = () => q.result.createObjectStore('m'); q.onsuccess = () => { q.result.close(); r(); }; });
     const c = await caches.open('chatter-img-v1'); await c.put('/x.png', new Response('x'));
   });
@@ -83,6 +86,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   ok(k.includes('ch2theme') && k.includes('ch2bubble') && k.includes('sb-uaoiqbxptnbrvkzjwguc-auth-token') && k.includes('ch2lib4:x'), '清缓存：登录、主题、气泡、依赖库都保留');
   ok(!after.cache, '清缓存：图片缓存已删');
   ok(/v=\d{10,}/.test(after.url), '清缓存后自动重开 ' + after.url);
+  await pg.evaluate(() => localStorage.removeItem('sb-uaoiqbxptnbrvkzjwguc-auth-token'));
   // 7 ?reset=1
   await pg.evaluate(() => localStorage.setItem('ch2:u2', '1'));
   await pg.goto('http://localhost:8766/?reset=1'); await pg.waitForTimeout(2500);
@@ -126,7 +130,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
     await ctx2.addInitScript(() => {
       const uid = '11111111-1111-4111-8111-111111111111';
       if (!localStorage.getItem('sb-uaoiqbxptnbrvkzjwguc-auth-token')) {
-        localStorage.setItem('sb-uaoiqbxptnbrvkzjwguc-auth-token', JSON.stringify({ access_token: 'x', user: { id: uid } }));
+        localStorage.setItem('sb-uaoiqbxptnbrvkzjwguc-auth-token', JSON.stringify({ access_token: 'test-access', refresh_token: 'test-refresh', expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: uid } }));
         localStorage.setItem('ch2:' + uid, JSON.stringify({ me: { id: uid, account_id: 'me', nickname: '我' }, friends: [], profiles: {}, convs: [], requests: [] }));
         localStorage.setItem('ch2a2hs', String(Date.now()));
       }
@@ -142,7 +146,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
     const done = await p2.waitForFunction(() => document.body.innerText.indexOf('已更新到新版本（20991231a1）') >= 0, null, { timeout: 6000 }).then(() => true, () => false);
     const tab = await p2.evaluate(() => { const b = document.querySelector('.app-nav button.active'); return b && b.dataset.tab; });
     const ver1 = await p2.evaluate(() => document.getElementById('app-ver').textContent);
-    ok(/版本 20261118d\d/.test(ver0) && told && done && tab === 'me' && /20991231a1/.test(ver1), '在“我”页手动更新：先提示、换完回到“我”页、提示已更新到哪个版本 ' + JSON.stringify({ ver0, told, done, tab, ver1 }));
+    ok(ver0.includes('版本 ' + CURV + ' ·') && told && done && tab === 'me' && /20991231a1/.test(ver1), '在“我”页手动更新：先提示、换完回到“我”页、提示已更新到哪个版本 ' + JSON.stringify({ ver0, told, done, tab, ver1 }));
     await ctx2.close();
   }
   // 14 不是由程序自己换的新版（比如彻底关掉重开时拿到了新页面）：打开后也提示一次“已更新到新版本”，再打开不重复提示

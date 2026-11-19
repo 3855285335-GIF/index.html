@@ -3,13 +3,22 @@
    2) 加速打开：带版本号的程序文件（app.js?v=…）和依赖库存在手机里，第二次打开不用再下载；
       页面本身先联网取，2.5 秒取不到才用手机里存的（所以新版本照样第一次打开就生效，网不好时也能秒开）；
    3) 聊天和朋友圈的图片存在手机里（最多 300 张），看过的图再打开不用重新下载。 */
-const SW_BUILD = '4.1';
+const SW_BUILD = '4.2';
 const SHELL = 'chatter-shell-v1', IMG = 'chatter-img-v1', IMG_MAX = 300;
 const IMG_PREFIX = 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/';
 
-self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('install', e => e.waitUntil((async () => {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const vendor = new URL('vendor/supabase-2.45.4.js', self.registration.scope);
+    const request = new Request(vendor.href, { signal: controller.signal });
+    await (await caches.open(SHELL)).add(request);
+  } catch (x) { /* The shell can still load and cache the dependency on demand. */ }
+  finally { clearTimeout(timer); }
+  await self.skipWaiting();
+})()));
 self.addEventListener('activate', e => e.waitUntil((async () => {
-  try { const ks = await caches.keys(); await Promise.all(ks.filter(k => k !== SHELL && k !== IMG).map(k => caches.delete(k))); } catch (x) {}   // 只清旧版本留下的缓存
+  try { const ks = await caches.keys(); await Promise.all(ks.filter(k => /^chatter-(shell|img)-/.test(k) && k !== SHELL && k !== IMG).map(k => caches.delete(k))); } catch (x) {}   // 只清旧版本留下的缓存
   await self.clients.claim();
 })()));
 
@@ -25,21 +34,36 @@ self.addEventListener('fetch', e => {
   if (u.origin !== self.location.origin) return;
   const scope = new URL(self.registration.scope);
   if (u.pathname.indexOf(scope.pathname) !== 0 || u.pathname.indexOf('/review/') >= 0) return;
-  if (req.mode === 'navigate') { e.respondWith(pageFirst(req, u)); return; }
+  if (req.mode === 'navigate' && (u.pathname === scope.pathname || u.pathname === scope.pathname + 'index.html')) {
+    const c = caches.open(SHELL), key = scope.href;
+    const net = fetch(req).then(async r => {
+      if (r.ok && (r.headers.get('content-type') || '').includes('text/html')) {
+        try { await (await c).put(key, r.clone()); } catch (x) {}
+      }
+      return r;
+    });
+    e.waitUntil(net.catch(() => {}));
+    e.respondWith(pageFirst(net, c, key, u));
+    return;
+  }
   if (u.searchParams.has('retry')) return;
   if (u.searchParams.has('v') || u.pathname.indexOf('/vendor/') >= 0) e.respondWith(keepFirst(req));
 });
 
-async function pageFirst(req, u) {   // 页面：联网优先；2.5 秒没回来、或者断网，就先用存着的
-  const c = await caches.open(SHELL);
-  const key = u.origin + u.pathname;
-  const net = fetch(req).then(r => { if (r && r.ok) { try { c.put(key, r.clone()); } catch (x) {} } return r; });
-  const saved = await c.match(key);
+async function pageFirst(net, cache, key, u) {
+  let saved;
+  try {
+    const c = await cache;
+    saved = await c.match(key) || await c.match(u.origin + u.pathname);
+  } catch (x) {}
   if (!saved) return net;
-  return Promise.race([
-    net.then(r => (r && r.ok) ? r : saved, () => saved),
-    new Promise(res => setTimeout(() => res(saved), 2500))
-  ]);
+  let timer;
+  try {
+    return await Promise.race([
+      net.then(r => r.ok ? r : saved, () => saved),
+      new Promise(res => { timer = setTimeout(() => res(saved), 2500); })
+    ]);
+  } finally { clearTimeout(timer); }
 }
 async function keepFirst(req) {   // 带版本号的文件内容不会变：有就直接用
   const c = await caches.open(SHELL);
@@ -60,7 +84,7 @@ async function imgFirst(req) {
   catch (x) { return fetch(req); }   // 跨域取不了就按原样取（不存）
   if (r && r.ok) {
     try { await c.put(key, r.clone()); } catch (x) {}
-    if (++imgPuts % 20 === 0) trimImgs(c);
+    if (++imgPuts % 20 === 0) await trimImgs(c);
   }
   return r;
 }
@@ -98,9 +122,14 @@ async function show(d) {
 }
 
 async function openUrl(u) {
-  const url = new URL(u || './', self.registration.scope).href;
+  const scope = new URL(self.registration.scope);
+  let url = scope.href;
+  try {
+    const dest = new URL(u || './', scope);
+    if (dest.origin === scope.origin && (dest.pathname === scope.pathname || dest.pathname === scope.pathname + 'index.html') && !dest.search) url = dest.href;
+  } catch (x) {}
   const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const c = list.find(x => x.url.indexOf(self.registration.scope) === 0) || list[0];
+  const c = list.find(x => x.url.indexOf(scope.href) === 0);
   if (c) {   // App 已经开着（可能在后台）：切到前台，让它自己打开那个聊天
     try { c.postMessage({ t: 'open', url }); } catch (x) {}
     try { await c.focus(); } catch (x) {}
