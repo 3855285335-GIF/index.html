@@ -817,18 +817,37 @@ test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊
   } finally { env.close(); }
 });
 
-test('图片画质：默认发原图；“我”里有“图片：原图/压缩”“发送前编辑”两个开关（以前按钮不在页面上，默认一直在压缩）', async () => {
-  const env = makeEnv({ db: baseDb(Date.now()) });
+test('图片画质：默认发原图，聊天预览跟随画质设置，关闭发送前编辑后直接发送', async () => {
+  const db = baseDb(Date.now());
+  const env = makeEnv({ db });
   try {
     await env.login(); await sleep(200);
     const q = env.$('btn-imgq'), ed = env.$('btn-imgedit');
+    const sheet = env.$('ipv-sheet'), orig = env.$('ipv-orig');
+    const photo = new env.w.File(['图片'], 'photo.png', { type: 'image/png' });
     ok(q && ed, '设置里没有“图片”或“发送前编辑”按钮');
     ok(q.textContent === '🖼 图片：原图', '默认应该是原图：' + q.textContent);
+    ok(ed.textContent === '✂️ 发送前编辑：开', '发送前编辑默认开：' + ed.textContent);
+    await env.T.openConv('bob::me', 'bob');
+    const originalPreview = env.T.sendFiles([photo]);
+    ok(sheet.classList.contains('active') && orig.classList.contains('on'), '聊天图片预览默认应选中原图');
+    click(env, env.$('ipv-cancel'));
+    await originalPreview;
     click(env, q); await sleep(20);
     ok(q.textContent === '🖼 图片：压缩' && env.w.localStorage.getItem('ch2imgq') === '"auto"', '点一下应该改成压缩：' + q.textContent + ' ' + env.w.localStorage.getItem('ch2imgq'));
+    const compressedPreview = env.T.sendFiles([photo]);
+    ok(sheet.classList.contains('active') && !orig.classList.contains('on'), '预览应该跟随压缩设置');
+    click(env, orig);
+    ok(orig.classList.contains('on'), '应允许单张切回原图');
+    click(env, env.$('ipv-cancel'));
+    await compressedPreview;
     click(env, q); await sleep(20);
     ok(q.textContent === '🖼 图片：原图', '再点改回原图');
-    ok(ed.textContent === '✂️ 发送前编辑：开', '发送前编辑默认开：' + ed.textContent);
+    click(env, ed);
+    const directSend = env.T.sendFiles([photo]);
+    ok(ed.textContent === '✂️ 发送前编辑：关' && !sheet.classList.contains('active'), '关闭编辑后不应再打开预览');
+    await directSend;
+    ok(db.messages.length === 1 && db.messages[0].type === 'image', '关闭编辑后应该直接发出图片');
   } finally { env.close(); }
 });
 
