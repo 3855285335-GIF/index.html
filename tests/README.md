@@ -90,3 +90,12 @@ npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   #
 ```
 
 Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/deno`。
+
+## 修复版权限和推送回归
+
+```bash
+node sql-chatter-repair-test.mjs
+deno run -A --node-modules-dir=none fn-push-test.ts
+```
+
+SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查迁移、越权拒绝及逆序回滚，不连接生产数据库。推送测试用假的 Auth、会话检查和推送 RPC。

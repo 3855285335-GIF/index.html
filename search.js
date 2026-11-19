@@ -121,8 +121,10 @@ function loadPrefs() {
   syncPrefs();
 }
 async function syncPrefs() {
+  const prefs = P;
   try {
     const r = await B.sb().from('search_prefs').select('prefs, updated_at').maybeSingle();
+    if (P !== prefs || B.uid() !== prefs._uid) return;
     const d = r && r.data;
     if (d && d.prefs && (Date.parse(d.updated_at) || 0) > (P._at || 0)) {
       P = Object.assign(prefsDef(), d.prefs, { _uid: P._uid, _at: Date.parse(d.updated_at) || 0 });
@@ -133,10 +135,12 @@ async function syncPrefs() {
 function savePrefs() {
   P._at = Date.now(); LSs('ch2ws:' + P._uid, P);
   clearTimeout(saveT);
+  const prefs = P;
   saveT = setTimeout(async () => {
-    const body = Object.assign({}, P); delete body._uid; delete body._at;
+    if (P !== prefs || B.uid() !== prefs._uid) return;
+    const body = Object.assign({}, prefs); delete body._uid; delete body._at;
     try {
-      const r = await B.sb().from('search_prefs').upsert({ uid: B.uid(), prefs: body, updated_at: new Date().toISOString() }, { onConflict: 'uid' });
+      const r = await B.sb().from('search_prefs').upsert({ uid: prefs._uid, prefs: body, updated_at: new Date().toISOString() }, { onConflict: 'uid' });
       if (r && r.error) B.logErr('ws-prefs', r.error);
     } catch (e) { B.logErr('ws-prefs', e); }
   }, 800);
@@ -307,7 +311,7 @@ const CSS = `
 `;
 
 /* ---------- 界面骨架 ---------- */
-let root = null;
+let root = null, accountRevision = 0;
 const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map() };
 if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
 function bar(id, ph, right) {
@@ -319,7 +323,9 @@ function bar(id, ph, right) {
 const rulesBtn = '<button type="button" class="ws-ib" data-act="rules" aria-label="搜索规则">' + ico(I.rules) + '</button>';
 function build() {
   if (root) return;
-  const st = document.createElement('style'); st.id = 'ws-css'; st.textContent = CSS; document.head.appendChild(st);
+  if (!document.getElementById('ws-css')) {
+    const st = document.createElement('style'); st.id = 'ws-css'; st.textContent = CSS; document.head.appendChild(st);
+  }
   root = document.createElement('div'); root.id = 'ws'; root.className = 'ws'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '搜索');
   root.innerHTML =
     '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
@@ -376,6 +382,14 @@ function close() {
   W.on = false; W.stack.length = 0;
   if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }
   document.body.classList.remove('ws-open');
+}
+function resetAccount() {
+  accountRevision++;
+  clearTimeout(saveT); P = null;
+  close();
+  W.seq++; W.cur = null; W.shownRead = null; W.view = []; W.trc.clear();
+  W.type = 'web'; W.tbs = ''; W.showFarms = false; W.left = null; W.used = {}; W.keys = null;
+  if (root) { root.remove(); root = null; }
 }
 function onPop(e) {
   if (!W.on) return false;
@@ -455,8 +469,9 @@ async function fetchRes() {
   if (c.done && c.type !== 'images' && P.autoTr !== false && resForeign(c)) trRes(c);   // 外文结果：标题和摘要自动翻成中文
 }
 async function loadUsage() {
+  const account = accountRevision;
   const r = await B.call({ op: 'usage' }, 10000);
-  if (!r || !r.ok) return;
+  if (account !== accountRevision || !r || !r.ok) return;
   W.used = Object.assign({}, W.used, r.used || {}); W.free = Object.assign({}, W.free, r.free || {}); W.keys = r.keys || W.keys;
   const t = top(); if (W.on && t && t.v === 'rules') renderRules();
 }
@@ -822,7 +837,7 @@ function showOrig(t) {
 async function startTr(t) {
   const d = t.d, tr = d.tr; if (!tr || !tr.units) return;
   tr.on = true; tr.started = true; tr.err = null; tr.failed = 0; tr.why = [];
-  const gen = tr.gen, pending = tr.units.filter(u => !applyUnit(u));   // 手机里记着的先直接换上
+  const account = accountRevision, gen = tr.gen, pending = tr.units.filter(u => !applyUnit(u));   // 手机里记着的先直接换上
   tr.total = tr.units.length; tr.done = tr.total - pending.length;
   if (!pending.length || tr.busy) { trBar(t); return; }
   tr.busy = true; trBar(t);
@@ -831,7 +846,7 @@ async function startTr(t) {
   if (cur.length) batches.push(cur);
   for (const bt of batches) {
     const r = await B.call({ op: 'translate', html: true, items: bt.map(u => u.html) }, 90000);
-    if (tr.gen !== gen) return;   // 页面重画过了：这批结果交给新的那一轮
+    if (account !== accountRevision || tr.gen !== gen) return;   // 页面重画过了：这批结果交给新的那一轮
     if (!r || !r.ok) { tr.err = r || { code: 'net', msg: '翻译出错了' }; break; }
     bt.forEach((u, k) => { const s = r.items && r.items[k]; if (s) { if (W.trc.size > 4000) W.trc.clear(); W.trc.set(u.html, s); if (tr.on) applyUnit(u); tr.done++; } else tr.failed++; });
     (r.why || []).forEach(w => { if (tr.why.indexOf(w) < 0) tr.why.push(w); });
@@ -872,6 +887,7 @@ async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多
   if (!en) {
     B.toast('正在把搜索词翻成英文…');
     const r = await B.call({ op: 'translate', to: 'en', items: [c.q] }, 30000);
+    if (W.cur !== c) return;
     if (!r || !r.ok || !r.items || !r.items[0]) { B.toast((r && r.msg) || '没翻成英文，稍后再试'); return; }
     en = String(r.items[0]).replace(/^["'“”‘’]+|["'“”‘’。.]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
     W.trc.set('en|' + c.q, en);
@@ -879,15 +895,18 @@ async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多
   if (W.cur === c) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
 }
 async function fetchRead(t) {
-  const d = t.d; d.loading = true;
+  const account = accountRevision, d = t.d; d.loading = true;
   const r = await B.call({ op: 'read', url: d.u, at: d.at || '' }, d.at ? 45000 : 25000);
+  if (account !== accountRevision) return;
   d.loading = false; d.dirty = true;
   if (r && r.ok) { d.art = r; addSeen(d); } else d.err = r || { code: 'net', msg: '出错了' };
   if (top() === t) renderRead(t);
 }
 async function showVersions(d) {
+  const account = accountRevision;
   B.toast('正在查互联网档案馆…');
   const r = await B.call({ op: 'versions', url: d.u }, 25000);
+  if (account !== accountRevision) return;
   if (!r || !r.ok) { B.toast((r && r.msg) || '查不到存档'); return; }
   if (!r.list || !r.list.length) { B.toast('互联网档案馆里没有这个网页的存档'); return; }
   const cur = d.art && d.art.arch;
@@ -1039,5 +1058,5 @@ function onClick(e) {
   }
 }
 
-window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
+window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
 })();

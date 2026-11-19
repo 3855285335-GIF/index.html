@@ -13,7 +13,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261118-7';
+const VER = '20261119-1';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -93,7 +93,7 @@ const monthStart = () => { const d = new Date(Date.now() + 8 * 3600000); return 
 
 /* ---------- 配置（数据库里改，1 分钟内生效） ---------- */
 const CFG_DEF = { enabled: true, per_user_day: 1000000000, read_per_user_day: 1000000000, deep_per_user_day: 1000000000, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000,
-  tr_order: ['glm', 'groq'], tr_models: { glm: 'glm-4-flash-250414', groq: 'openai/gpt-oss-120b' }, tr_par: 2, tr_per_user_day: 1000000000 };
+  tr_order: ['glm', 'groq'], tr_models: { glm: ['glm-4-flash-250414', 'glm-4.7-flash'], groq: 'openai/gpt-oss-120b' }, tr_par: 3, tr_per_user_day: 1000000000 };
 let CFG: Any = null, CFG_AT = 0;
 async function cfg() {
   if (CFG && Date.now() - CFG_AT < 60000) return CFG;
@@ -114,17 +114,18 @@ async function loadKeys() {
   DBK_AT = Date.now();
 }
 
-/* ---------- 谁在用（用登录凭证向登录服务确认，5 分钟内不重复问） ---------- */
-const UIDS = new Map<string, { uid: string; at: number }>();
+/* ---------- 登录与会话 ---------- */
 async function uidOf(req: Request) {
-  const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  if (!tok || tok.split('.').length !== 3) return null;
-  const hit = UIDS.get(tok); if (hit && Date.now() - hit.at < 300000) return hit.uid;
-  const r = await tfetch(SB_URL + '/auth/v1/user', { headers: { apikey: PUBK || SRK, Authorization: 'Bearer ' + tok } }, 5000);
+  const match = /^Bearer\s+([^\s]+)$/i.exec(req.headers.get('authorization') || '');
+  const tok = match?.[1];
+  if (!tok || tok.split('.').length !== 3 || !PUBK) return null;
+  const headers = { apikey: PUBK, Authorization: 'Bearer ' + tok };
+  const r = await tfetch(SB_URL + '/auth/v1/user', { headers }, 5000);
   if (!r.ok) return null;
-  const u = await r.json().catch(() => null); if (!u || !u.id) return null;
-  if (UIDS.size > 500) UIDS.clear();
-  UIDS.set(tok, { uid: u.id, at: Date.now() }); return u.id as string;
+  const u = await r.json().catch(() => null);
+  if (!u?.id) return null;
+  const alive = await tfetch(SB_URL + '/rest/v1/rpc/session_alive', { method: 'POST', headers }, 5000);
+  return alive.ok && await alive.json() === true ? u.id as string : null;
 }
 
 /* ---------- 缓存、记号和计数 ---------- */
@@ -299,7 +300,7 @@ async function hackernews(q: string) {
 }
 const DEEP: [string, string, (q: string) => Promise<Any[]>][] = [['wiki', '维基百科', wikiList], ['archive', '互联网档案馆', archiveSearch], ['papers', '论文', openalex], ['github', 'GitHub', github], ['hn', 'Hacker News 讨论', hackernews]];
 async function doDeep(uid: string, q: string, c: Any) {
-  const key = 'd' + await sha(q.toLowerCase());
+  const key = 'd' + await sha(JSON.stringify([uid, q.toLowerCase()]));
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
   if (await bump(uid, 'd', c.deep_per_user_day) < 0) return fail('limit', '今天“深挖”用得太多了，明天再来');
@@ -326,7 +327,7 @@ async function doSearch(uid: string, b: Any, c: Any) {
   let want: string[] = SRC[b.src] ? [b.src] : base.filter((s: string) => SRC[s]);
   if (!SRC[b.src] && SRC[b.pref] && type !== 'images') want = [b.pref].concat(want.filter(s => s !== b.pref));   // 你在规则里选了先用哪家
   const ck: Record<string, string> = {};
-  for (const s of want) ck[s] = 's' + await sha([type, q.toLowerCase(), tbs, s].join('|'));
+  for (const s of want) ck[s] = 's' + await sha(JSON.stringify([uid, type, q.toLowerCase(), tbs, s]));
   const got = await cgetMany(want.map(s => ck[s]).concat(want.map(s => 'x-' + s)));
   for (const s of want) { const x = got[ck[s]]; if (x && Date.now() - x.at <= TTL) return json({ ok: true, cached: true, ...x.v }); }
   const why: Record<string, string> = {}, avail: string[] = [];
@@ -366,22 +367,26 @@ function failAll(list: string[], why: Record<string, string>) {
   const named = (code: string) => list.filter(s => why[s] === code).map(s => NAME[s]).join('、');
   if (codes.every(x => x === 'nokey')) return fail('nokey', '搜索还没开通：服务器里还没填' + (list.length > 1 ? ' Exa 或 Tavily ' : ' ' + NAME[list[0]] + ' ') + '的密钥');
   if (codes.includes('badkey')) return fail('nokey', named('badkey') + ' 的密钥不对：检查服务器里填的密钥');
-  if (codes.every(x => x === 'empty' || x === 'nokey')) return fail('empty', named('empty') + ' 这个月的免费次数用完了，下个月 1 号恢复；“深挖”还能用');
+  if (codes.every(x => x === 'empty' || x === 'nokey')) return fail('empty', named('empty') + ' 这个月的免费次数用完了，到下个月会自动恢复；“深挖”还能用');
   if (codes.includes('busy')) return fail('busy', '搜得太快了，等几秒再试');
   return fail('upstream', '搜索服务暂时没响应，稍后再试');
 }
 
 /* ---------- 简洁阅读 ---------- */
+function publicV4(host: string) {
+  const [a, b, c] = host.split('.').map(Number);
+  return a > 0 && a < 224 && a !== 10 && a !== 127 &&
+    !(a === 100 && b >= 64 && b <= 127) && !(a === 169 && b === 254) &&
+    !(a === 172 && b >= 16 && b <= 31) && !(a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)))) &&
+    !(a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) && !(a === 203 && b === 0 && c === 113);
+}
 function safeUrl(s: Any) {   // 只取公开网站：不让拿来访问内网、本机、自己的数据库接口
   let u: URL; try { u = new URL(String(s || '').trim()); } catch { return null; }
   if (!/^https?:$/.test(u.protocol) || u.username || u.password) return null;
   const h = u.hostname.toLowerCase().replace(/\.$/, '');
   if (!h || h.startsWith('[') || !h.includes('.')) return null;
   if (/(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain|arpa)$/.test(h)) return null;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
-    const [a, b2] = h.split('.').map(Number);
-    if (a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b2 === 254) || (a === 172 && b2 >= 16 && b2 <= 31) || (a === 192 && b2 === 168) || (a === 100 && b2 >= 64 && b2 <= 127) || (a === 198 && (b2 === 18 || b2 === 19))) return null;
-  }
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && !publicV4(h)) return null;
   if (SB_HOST && h === SB_HOST) return null;
   if (u.port && !['80', '443', '8080', '8443'].includes(u.port)) return null;
   u.hash = ''; return u;
@@ -407,9 +412,32 @@ function decode(buf: Uint8Array, ct: string) {   // 国内很多网站还是 GBK
 }
 // 打不开的原因要分清楚：找不到网站、限流、要登录、被删、对方出错，手机上按原因给不同的按钮
 const NOHOST = /dns error|failed to lookup|name or service not known|no address associated|nodename nor servname|getaddrinfo|could not resolve|nxdomain/i;
-async function noHost(h: string) {   // 再确认一次域名是不是根本不存在（运行环境不支持查域名就跳过）
-  try { const rd = (Deno as Any).resolveDns; if (typeof rd !== 'function') return false; await rd(h, 'A'); return false; }
-  catch (e) { return (e as Any)?.name === 'NotFound'; }
+async function checkPublicDns(u: URL, signal: AbortSignal) {
+  const host = u.hostname.replace(/\.$/, '');
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return;
+  const lookup = Promise.allSettled([Deno.resolveDns(host, 'A'), Deno.resolveDns(host, 'AAAA')]);
+  let onAbort: (() => void) | undefined;
+  try {
+    const records = await Promise.race([lookup, new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    })]);
+    // DNS names can return multiple addresses. Require every returned address to be public.
+    for (const result of records) {
+      if (result.status === 'rejected' && !['NotFound', 'NotConnected'].includes(result.reason?.name)) throw result.reason;
+    }
+    const addresses = records.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    if (!addresses.length) throw new Oops('nohost', '找不到 ' + host + ' 这个网站', u.href);
+    if (addresses.some(ip => {
+      if (!ip.includes(':')) return !publicV4(ip);
+      const prefix = parseInt(ip.split(':')[0], 16);
+      return prefix < 0x2000 || prefix >= 0x4000 || prefix === 0x2002 ||
+        prefix === 0x3fff || /^2001:(0?db8|[0-1]?[0-9a-f]{1,2}):/i.test(ip);
+    })) throw new Oops('bad', '这个网址不能打开', u.href);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 function httpErr(st: number, arch: boolean, to: string) {
   if (st === 429) return new Oops('busy', arch ? '互联网档案馆现在太忙（同一时间请求的人太多）' : '这个网站限制了访问次数', to);
@@ -425,31 +453,41 @@ function httpErr(st: number, arch: boolean, to: string) {
 }
 async function grab(u0: URL, ms = 9000, arch = false) {
   let cur = u0;
-  for (let hop = 0; hop < 6; hop++) {
-    let r: Response;
-    try { r = await tfetch(cur.href, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' } }, ms); }
-    catch (e) {
-      const m = String((e as Any)?.message || e);
-      if ((e as Any)?.name === 'AbortError') throw new Oops('timeout', arch ? '互联网档案馆太久没响应' : '这个网页太久没响应', cur.href);
-      if (!arch && (NOHOST.test(m) || await noHost(cur.hostname))) throw new Oops('nohost', '找不到 ' + cur.hostname.replace(/^www\./, '') + ' 这个网站', cur.href);
-      if (/certificate|tls|ssl|handshake/i.test(m)) throw new Oops('fetch', '这个网站的安全证书有问题，连不上', cur.href);
-      throw new Oops('fetch', arch ? '互联网档案馆连不上' : '这个网站连不上（对方没响应）', cur.href);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ms);
+  try {
+    for (let hop = 0; hop < 6; hop++) {
+      await checkPublicDns(cur, controller.signal);
+      const r = await fetch(cur.href, {
+        redirect: 'manual', signal: controller.signal,
+        headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' }
+      });
+      if (r.status >= 300 && r.status < 400) {
+        const loc = r.headers.get('location'); try { await r.body?.cancel(); } catch { /* 不要正文 */ }
+        if (!loc) break;
+        const nx = safeUrl(new URL(loc, cur).href);
+        if (!nx) throw new Oops('bad', '这个网页跳到了不能打开的地址', cur.href);
+        cur = nx; continue;
+      }
+      if (!r.ok) {
+        try { await r.body?.cancel(); } catch { /* 不要正文 */ }
+        throw httpErr(r.status, arch, cur.href);
+      }
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (ct && !/html|xml|text\/plain/.test(ct)) {
+        try { await r.body?.cancel(); } catch { /* 不要正文 */ }
+        throw new Oops('notHtml', /pdf/.test(ct) ? '这是 PDF 文件，用原网页打开' : '这不是网页（是文件），用原网页打开', cur.href);
+      }
+      return { html: decode(await readCapped(r, MAX_PAGE), ct), url: cur.href };
     }
-    if (r.status >= 300 && r.status < 400) {
-      const loc = r.headers.get('location'); try { await r.body?.cancel(); } catch { /* 不要正文 */ }
-      if (!loc) break;
-      const nx = safeUrl(new URL(loc, cur).href); if (!nx) throw new Oops('bad', '这个网页跳到了不能打开的地址', cur.href);
-      cur = nx; continue;
-    }
-    if (!r.ok) {
-      try { await r.body?.cancel(); } catch { /* 不要正文 */ }
-      throw httpErr(r.status, arch, cur.href);
-    }
-    const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (ct && !/html|xml|text\/plain/.test(ct)) { try { await r.body?.cancel(); } catch { /* 不要正文 */ } throw new Oops('notHtml', /pdf/.test(ct) ? '这是 PDF 文件，用原网页打开' : '这不是网页（是文件），用原网页打开', cur.href); }
-    return { html: decode(await readCapped(r, MAX_PAGE), ct), url: cur.href };
-  }
-  throw new Oops('fetch', '这个网页跳转太多次了', cur.href);
+    throw new Oops('fetch', '这个网页跳转太多次了', cur.href);
+  } catch (e) {
+    if (e instanceof Oops) throw e;
+    const m = String((e as Any)?.message || e);
+    if (controller.signal.aborted) throw new Oops('timeout', arch ? '互联网档案馆太久没响应' : '这个网页太久没响应', cur.href);
+    if (!arch && NOHOST.test(m)) throw new Oops('nohost', '找不到 ' + cur.hostname.replace(/^www\./, '') + ' 这个网站', cur.href);
+    if (/certificate|tls|ssl|handshake/i.test(m)) throw new Oops('fetch', '这个网站的安全证书有问题，连不上', cur.href);
+    throw new Oops('fetch', arch ? '互联网档案馆连不上' : '这个网站连不上（对方没响应）', cur.href);
+  } finally { clearTimeout(timer); }
 }
 // 互联网档案馆经常对同一批服务器限流：太忙或出错时等 1.5 秒自动再试一次
 async function grabArch(u: URL) {
@@ -545,7 +583,7 @@ async function doRead(uid: string, b: Any, c: Any) {
   const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
   let at = String(b.at || '');
   if (at && at !== 'latest' && !/^\d{4,14}$/.test(at)) return fail('bad', '存档时间不对');
-  const key = 'r' + await sha(u0.href + '|' + at);
+  const key = 'r' + await sha(JSON.stringify([uid, u0.href, at]));
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
   if (await bump(uid, 'r', c.read_per_user_day) < 0) return fail('limit', '今天简洁阅读打开太多次了，明天再来；可以先点“原网页”');
@@ -568,7 +606,7 @@ async function doRead(uid: string, b: Any, c: Any) {
 }
 async function doVersions(uid: string, b: Any, c: Any) {
   const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
-  const key = 'v' + await sha(u0.href);
+  const key = 'v' + await sha(JSON.stringify([uid, u0.href]));
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
   if (await bump(uid, 'd', c.deep_per_user_day) < 0) return fail('limit', '今天查存档太多次了，明天再来');
@@ -616,8 +654,18 @@ function splitMarked(raw: string, n: number) {   // 按 ⟦编号⟧ 把译文�
   return res;
 }
 type TrCtx = { items: string[]; out: (string | null)[]; why: Record<number, string>; to: string; html: boolean; c: Any; calls: Record<string, number>; dead: Record<string, string> };
-async function trCall(p: string, texts: string[], x: TrCtx) {
-  const P = TRP[p], model = String((x.c.tr_models && x.c.tr_models[p]) || P.model);
+async function trCall(p: string, texts: string[], x: TrCtx) {   // 可以填几个模型：前一个“访问量过大”（1305）或者已经下线，就换下一个
+  const ms = ([] as Any[]).concat((x.c.tr_models && x.c.tr_models[p]) || TRP[p].model).map(String).filter(Boolean);
+  let last: Any = null;
+  for (const model of ms) {
+    try { return await trCall1(p, model, texts, x); }
+    catch (e) { last = e; if (!(e instanceof Oops && (e.code === 'busy' || e.code === 'nomodel'))) throw e; }
+  }
+  if (last instanceof Oops && last.code === 'nomodel') throw new Oops('upstream', TRP[p].n + ' 的翻译模型已经下线（要在数据库里换一个模型名）');
+  throw last;
+}
+async function trCall1(p: string, model: string, texts: string[], x: TrCtx) {
+  const P = TRP[p];
   const body: Any = { model, temperature: 0.3, max_tokens: p === 'groq' ? 6000 : 4000, messages: [{ role: 'system', content: trSys(x.to, x.html) }, { role: 'user', content: texts.map((s, i) => '⟦' + (i + 1) + '⟧\n' + s).join('\n') }] };
   if (p === 'groq' && /gpt-oss/.test(model)) body.reasoning_effort = 'low';
   if (p === 'glm' && /glm-(4\.[5-9]|[5-9])/.test(model)) body.thinking = { type: 'disabled' };   // 新一些的模型默认先“思考”，翻译用不着，关掉更快
@@ -629,6 +677,7 @@ async function trCall(p: string, texts: string[], x: TrCtx) {
     if (code === '1113' || code === '1308' || code === '1310' || r.status === 402 || /quota|balance|欠费|额度/i.test(msg)) throw new Oops('empty', P.n + ' 的额度用完了');
     if (r.status === 429 || code === '1302' || code === '1305') throw new Oops('busy', P.n + ' 现在太忙');
     if (code === '1261' || r.status === 413 || /too long|超长|context length/i.test(msg)) throw new Oops('toolong', '这段太长');
+    if (code === '1211' || /模型不存在|model[^.]{0,30}(not exist|not found|does not exist|decommissioned)/i.test(msg)) throw new Oops('nomodel', P.n + ' 没有这个模型：' + model);
     throw new Oops('upstream', P.n + ' 出错（' + r.status + '）');
   }
   const ch = r.j && r.j.choices && r.j.choices[0];
@@ -666,7 +715,7 @@ async function doTranslate(uid: string, b: Any, c: Any) {
   const items: string[] = (Array.isArray(b.items) ? b.items : []).slice(0, 80).map((s: Any) => typeof s === 'string' ? s.slice(0, 6000) : '');
   if (!items.some(s => s.trim())) return fail('bad', '没有要翻译的内容');
   if (items.reduce((n, s) => n + s.length, 0) > 30000) return fail('bad', '一次要翻译的内容太多了');
-  const keys = await Promise.all(items.map(s => sha([to, html ? 'h' : 'p', s].join('|')).then(h => 't' + h)));
+  const keys = await Promise.all(items.map(s => sha(JSON.stringify([uid, to, html, s])).then(h => 't' + h)));
   const got = await cgetMany(Array.from(new Set(keys)));
   const out: (string | null)[] = items.map((s, i) => { if (!s.trim()) return ''; const g = got[keys[i]]; return g && Date.now() - g.at <= TR_TTL && g.v && typeof g.v.t === 'string' ? g.v.t : null; });
   const todo = out.map((t, i) => t === null ? i : -1).filter(i => i >= 0);
@@ -699,8 +748,8 @@ export async function handle(req: Request): Promise<Response> {
   if (req.method !== 'POST') return fail('bad', '只接受 POST', 405);
   let b: Any; try { b = await req.json(); } catch { return fail('bad', '请求格式不对', 400); }
   if (!b || typeof b !== 'object') return fail('bad', '请求格式不对', 400);
-  await loadKeys();
   if (b.op === 'ping') {
+    await loadKeys();
     const out: Any = { ok: true, v: VER, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily(), openalex: !!sec('OPENALEX_API_KEY'), glm: !!sec('ZHIPU_API_KEY'), groq: !!sec('GROQ_API_KEY') } };
     if (b.probe === 'dns') {   // 自测：连一个按规定永远不存在的 .invalid 域名，确认“找不到网站”认得出来（固定地址，不接受外部传入）
       try { await grab(new URL('https://chatter-probe-' + Date.now() + '.invalid/'), 5000); out.dns = 'resolved?'; } catch (e) { out.dns = e instanceof Oops ? e.code : 'error'; out.dnsMsg = String((e as Any)?.message || e).slice(0, 120); }
@@ -710,6 +759,7 @@ export async function handle(req: Request): Promise<Response> {
   let uid: string | null = null; try { uid = await uidOf(req); } catch { uid = null; }
   if (!uid) return fail('auth', '登录过期了，重新登录一下', 401);
   try {
+    await loadKeys();
     const c = await cfg();
     if (c.enabled === false) return fail('off', '搜索暂时关闭了');
     if (b.op === 'search') return await doSearch(uid, b, c);
@@ -720,9 +770,9 @@ export async function handle(req: Request): Promise<Response> {
     return fail('bad', '不认识的操作');
   } catch (e) {
     if (e instanceof Oops) return json({ ok: false, code: e.code, msg: e.message, to: e.to });
-    console.error('chatter-search', e);
-    return fail('server', '服务器出错了：' + String((e as Any)?.message || e).slice(0, 120));
+    console.error('chatter-search request failed', e instanceof Error ? e.name : 'Error');
+    return fail('server', '服务器出错了，请稍后重试');
   }
 }
-export const __test = { tidy, dropTitle, reset() { CFG = null; CFG_AT = 0; UIDS.clear(); DBK = {}; DBK_AT = 0; } };
+export const __test = { tidy, dropTitle, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; } };
 if (!env('CHATTER_TEST')) Deno.serve(handle);

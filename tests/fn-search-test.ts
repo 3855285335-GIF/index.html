@@ -10,7 +10,8 @@ Deno.env.set('TAVILY_API_KEY', 'tvly-test-key');
 // deno-lint-ignore no-explicit-any
 type Any = any;
 const UID = '11111111-1111-4111-8111-111111111111', TOK = 'aaa.bbb.ccc', ALL = '00000000-0000-0000-0000-000000000000';
-let CONF: Any = {}, DBKEYS: Any[] = [];
+const UID2 = '22222222-2222-4222-8222-222222222222', TOK2 = 'ddd.eee.fff';
+let CONF: Any = {}, DBKEYS: Any[] = [], sessionAlive = true;
 const cache = new Map<string, Any>(), counts = new Map<string, number>();
 let rpcMissing = false, siteCalls: string[] = [], exaBodies: Any[] = [], tavBodies: Any[] = [];
 const calls: Record<string, number> = {};
@@ -35,9 +36,14 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
   const u = new URL(typeof input === 'string' ? input : input.url), m = (init.method || 'GET').toUpperCase();
   const H = new Headers(init.headers || {});
   if (u.host === 'proj.supabase.co') {
-    if (u.pathname === '/auth/v1/user' && H.get('apikey') !== 'sb_publishable_test') return J({ msg: 'auth 要用公开密钥' }, 401);
-    if (u.pathname !== '/auth/v1/user' && H.get('apikey') !== 'service.jwt.key') return J({ msg: 'no key' }, 401);
-    if (u.pathname === '/auth/v1/user') return H.get('authorization') === 'Bearer ' + TOK ? J({ id: UID }) : J({ msg: 'bad jwt' }, 403);
+    if (u.pathname === '/auth/v1/user' || u.pathname === '/rest/v1/rpc/session_alive') {
+      if (H.get('apikey') !== 'sb_publishable_test') return J({ msg: 'auth 要用公开密钥' }, 401);
+      const token = H.get('authorization');
+      const id = token === 'Bearer ' + TOK ? UID : token === 'Bearer ' + TOK2 ? UID2 : null;
+      if (!id) return J({ msg: 'bad jwt' }, 403);
+      return u.pathname === '/auth/v1/user' ? J({ id }) : J(sessionAlive);
+    }
+    if (H.get('apikey') !== 'service.jwt.key') return J({ msg: 'no key' }, 401);
     if (H.get('authorization') !== 'Bearer service.jwt.key') return J({ msg: 'no auth' }, 401);
     if (u.pathname === '/rest/v1/app_config') return J([{ value: CONF }]);
     if (u.pathname === '/rest/v1/search_keys') return J(DBKEYS);
@@ -149,6 +155,10 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
   if (u.host === 'home.example.com') return new Response('<html><body><a href="/a">首页链接</a><a href="/b">另一个</a></body></html>', { headers: { 'content-type': 'text/html' } });
   return realFetch(input, init);
 };
+Object.defineProperty(Deno, 'resolveDns', { value: async (host: string, type: string) => {
+  if (host.endsWith('.invalid') || host === 'nohost.example.com') throw new Deno.errors.NotFound();
+  return type === 'A' ? ['93.184.215.14'] : [];
+}, configurable: true });
 const { handle, __test } = await import('../supabase/functions/chatter-search/index.ts');
 let bad = 0; const ok = (c: unknown, msg: string) => { if (!c) bad++; console.log((c ? '✅ ' : '❌ ') + msg); };
 const call = async (body: Any, tok: string | null = TOK) => {
@@ -230,7 +240,7 @@ ok(r.j.ok && r.j.src === 'tavily' && calls.exa === e2, '刚发现 Exa 用完：6
 ok(counts.get(UID + '|s|false') === 2, '换来换去只算一次搜索次数');
 tavMode = 'empty';
 r = await call({ op: 'search', q: '都用完了', type: 'web' });
-ok(!r.j.ok && r.j.code === 'empty' && /Exa、Tavily/.test(r.j.msg) && /下个月 1 号/.test(r.j.msg) && /深挖/.test(r.j.msg), '两家都用完：说清楚什么时候恢复、深挖还能用 → ' + r.j.msg);
+ok(!r.j.ok && r.j.code === 'empty' && /Exa、Tavily/.test(r.j.msg) && /下个月/.test(r.j.msg) && /深挖/.test(r.j.msg), '两家都用完：说清楚什么时候恢复、深挖还能用 → ' + r.j.msg);
 r = await call({ op: 'search', q: '量子计算', type: 'web', tbs: 'week' });
 ok(r.j.ok && r.j.cached, '都用完了以后，搜过的词照样能看（走缓存）');
 r = await call({ op: 'search', q: '都用完的图', type: 'images' });
@@ -301,6 +311,12 @@ ok(r.j.site === '测试站' && r.j.date === '2026-11-01' && h.includes('<th>项�
 const sc = siteCalls.length;
 r = await call({ op: 'read', url: 'https://hop.example.com/x' });
 ok(r.j.ok && r.j.cached && siteCalls.length === sc, '同一篇再打开：用缓存，不再去取');
+r = await call({ op: 'read', url: 'https://hop.example.com/x' }, TOK2);
+ok(r.j.ok && !r.j.cached && siteCalls.length > sc, '另一账号读取同一网页时需建立自己的缓存');
+sessionAlive = false;
+r = await call({ op: 'read', url: 'https://hop.example.com/x' }, TOK2);
+ok(r.st === 401, '服务端撤销会话后不能再取缓存');
+sessionAlive = true;
 for (const b2 of ['http://127.0.0.1/', 'http://localhost:8080/', 'http://10.1.2.3/', 'http://192.168.1.1/', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/', 'http://kong:8000/', 'file:///etc/passwd', 'https://proj.supabase.co/rest/v1/profiles', 'http://0x7f.1/', 'https://a.b.internal/', 'https://user:pw@x.com/', 'https://x.com:22/']) {
   r = await call({ op: 'read', url: b2 });
   ok(!r.j.ok && r.j.code === 'bad', '不能拿来访问内网/本机/自己的数据库：' + b2);

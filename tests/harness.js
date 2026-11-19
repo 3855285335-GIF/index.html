@@ -44,11 +44,23 @@ function makeEnv(opts) {
       else if (op === 'neq') rows = rows.filter(r => String(r[c]) !== String(v));
       else if (op === 'gt') rows = rows.filter(r => r[c] > v);
       else if (op === 'lt') rows = rows.filter(r => r[c] < v);
+      else if (op === 'lte') rows = rows.filter(r => r[c] <= v);
       else if (op === 'is') rows = rows.filter(r => (r[c] == null) === (v === null));
       else if (op === 'in') rows = rows.filter(r => v.indexOf(r[c]) >= 0);
       else if (op === 'ilike') { const s = String(v).replace(/%/g, '').toLowerCase(); rows = rows.filter(r => String(r[c] || '').toLowerCase().indexOf(s) >= 0); }
     }
-    if (q.order) { const { c, asc } = q.order; rows.sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (asc ? 1 : -1)); }
+    if (q.or && q.or.startsWith('created_at.lt.')) {
+      const match = /^created_at\.lt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.lt\.([^)]+)\)$/.exec(q.or);
+      if (!match) throw new Error('Invalid pagination filter');
+      rows = rows.filter(r => r.created_at < match[1] || (r.created_at === match[2] && r.id < match[3]));
+    }
+    if (q.order) rows.sort((a, b) => {
+      for (const { c, asc } of q.order) {
+        const result = (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (asc ? 1 : -1);
+        if (result) return result;
+      }
+      return 0;
+    });
     if (q.range) rows = rows.slice(q.range[0], q.range[1] + 1);
     if (q.limit != null) rows = rows.slice(0, q.limit);
     return rows;
@@ -71,16 +83,23 @@ function makeEnv(opts) {
         return { data: null, error: null };
       }
       if (q.table === 'messages') {
+        const inserted = [];
         for (const r of rows) {
           if (['text', 'image', 'voice', 'call', 'sticker', 'video', 'file'].indexOf(r.type) < 0) return { data: null, error: { code: 'P0001', message: 'invalid message type' } };   // 触发器 messages_before_insert
-          db.messages.push(Object.assign({ created_at: iso(Date.now()) }, r));
+          if (db.messages.some(m => m.id === r.id)) return { data: null, error: { code: '23505', message: 'duplicate' } };
+          const row = Object.assign({ created_at: iso(Date.now()) }, r);
+          db.messages.push(row);
+          inserted.push(row);
         }
-        return q.single ? { data: { created_at: iso(Date.now()) }, error: null } : { data: null, error: null };
+        return q.single ? { data: inserted[0], error: null } : { data: null, error: null };
       }
       rows.forEach(r => (db[q.table] = db[q.table] || []).push(Object.assign({ id: 'id' + Math.random().toString(36).slice(2), created_at: iso(Date.now()) }, r)));
       return { data: q.single ? rows[0] : null, error: null };
     }
-    if (q.op === 'update') { const rows = rowsOf(q); rows.forEach(r => Object.assign(r, q.values)); return { data: rows, error: null }; }
+    if (q.op === 'update') {
+      const rows = rowsOf(q); rows.forEach(r => Object.assign(r, q.values));
+      return { data: q.single ? (rows[0] || null) : rows, error: null };
+    }
     if (q.op === 'delete') { const rows = rowsOf(q); db[q.table] = (db[q.table] || []).filter(r => rows.indexOf(r) < 0); return { data: rows, error: null }; }
     return { data: null, error: null };
   }
@@ -90,9 +109,9 @@ function makeEnv(opts) {
       select(c) { q.cols = c; return b; }, insert(r) { q.op = 'insert'; q.rows = r; return b; }, upsert(r, o) { q.op = 'upsert'; q.rows = r; q.opts = o; return b; },
       update(v) { q.op = 'update'; q.values = v; return b; }, delete() { q.op = 'delete'; return b; },
       eq(c, v) { q.filters.push(['eq', c, v]); return b; }, neq(c, v) { q.filters.push(['neq', c, v]); return b; },
-      gt(c, v) { q.filters.push(['gt', c, v]); return b; }, lt(c, v) { q.filters.push(['lt', c, v]); return b; },
-      in(c, v) { q.filters.push(['in', c, v]); return b; }, ilike(c, v) { q.filters.push(['ilike', c, v]); return b; }, or() { return b; }, is(c, v) { q.filters.push(['is', c, v]); return b; },
-      order(c, o) { q.order = { c, asc: !(o && o.ascending === false) }; return b; }, limit(n) { q.limit = n; return b; }, range(a, z) { q.range = [a, z]; return b; },
+      gt(c, v) { q.filters.push(['gt', c, v]); return b; }, lt(c, v) { q.filters.push(['lt', c, v]); return b; }, lte(c, v) { q.filters.push(['lte', c, v]); return b; },
+      in(c, v) { q.filters.push(['in', c, v]); return b; }, ilike(c, v) { q.filters.push(['ilike', c, v]); return b; }, or(v) { q.or = v; return b; }, is(c, v) { q.filters.push(['is', c, v]); return b; },
+      order(c, o) { (q.order ||= []).push({ c, asc: !(o && o.ascending === false) }); return b; }, limit(n) { q.limit = n; return b; }, range(a, z) { q.range = [a, z]; return b; },
       maybeSingle() { q.single = 'maybe'; return b; }, single() { q.single = 'one'; return b; }, abortSignal() { return b; },
       then(res, rej) { return Promise.resolve().then(() => run(q)).then(res, rej); }, catch(f) { return Promise.resolve().then(() => run(q)).catch(f); }
     };
@@ -106,6 +125,7 @@ function makeEnv(opts) {
     const p = (opts.slowInbox && name === 'poll_inbox' && args && args.p_wait_ms > 0) ? new Promise(r => setTimeout(() => r(out), args.p_wait_ms)) : Promise.resolve(out); p.abortSignal = () => p; return p;
   }
   function defRpc(name, args) {
+    if (name === 'my_kick_at') return { data: null, error: { code: 'PGRST202' } };
     if (name === 'mark_read') { db.conversations.filter(c => c.owner_acc === ME && c.conv_key === (args && args.p_conv)).forEach(c => { c.unread = 0; c.last_read_ts = iso(Date.now()); }); return { data: null, error: null }; }   // 像线上一样：标记已读就把未读清零
     if (name === 'bootstrap') return { data: { me: db.profiles.find(p => p.account_id === ME), friends: db.profiles.filter(p => p.account_id !== ME && db.friendships.some(f => f.friend_acc === p.account_id)), convs: db.conversations.filter(c => c.owner_acc === ME), peers: [], requests: [] }, error: null };
     if (name === 'chatter_schema') return { data: 8, error: null };
