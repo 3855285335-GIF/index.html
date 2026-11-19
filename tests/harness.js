@@ -144,8 +144,14 @@ function makeEnv(opts) {
     auth: { onAuthStateChange(cb) { authCb = cb; return { data: { subscription: { unsubscribe() {} } } }; }, getSession: async () => ({ data: { session: { access_token: 'tok', user: { id: UID } } } }), getUser: async () => ({ data: { user: { id: UID, email: 'me@chatter.local' } } }), signOut: async () => ({}) },
     channel: chan, removeChannel() {}, realtime: { setAuth() {} },
     storage: { from() { return {
-      list: async (dir, o) => ({ data: storage.files.slice(o.offset, o.offset + o.limit), error: null }),
-      remove: async keys => { storage.removed.push(...keys); storage.files = storage.files.filter(f => keys.indexOf(ME + '/' + f.name) < 0); return { data: keys.map(k => ({ name: k })), error: null }; },
+      list: async (dir, o) => opts.onStorageList?.(dir, o, storage) || { data: storage.files.slice(o.offset, o.offset + o.limit), error: null },
+      remove: async keys => {
+        storage.removed.push(...keys);
+        const custom = opts.onStorageRemove?.(keys, storage);
+        if (custom) return custom;
+        storage.files = storage.files.filter(f => keys.indexOf(ME + '/' + f.name) < 0);
+        return { data: keys.map(k => ({ name: k })), error: null };
+      },
       upload: async () => ({ data: {}, error: null }),
       getPublicUrl: p => ({ data: { publicUrl: 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/' + p } })
     }; } }

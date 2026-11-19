@@ -282,6 +282,111 @@ test('群链接卡片：取到信息显示“加入”；取不到显示“重�
 }, true);
 
 // ---------------- 缓存 / 图片 ----------------
+test('附件管理：识别新旧文件、保护表情和待发送文件，只删除确认的范围', async () => {
+  const t = Date.now(), old = t - 31 * 86400000;
+  const db = baseDb(t, { stickers: [] });
+  const records = [
+    [`${old}_abcde.jpg`, old], [`${old}_abcde.jpg.t`, old],
+    [`${uid(2)}.mp4`, old], [`${uid(2)}.mp4.jpg`, old],
+    [`${uid(3)}.jpg`, old], [`${uid(3)}.jpg.t`, old],
+    [`${uid(4)}.wav`, old], [`${uid(5)}.jpg`, t], [`${uid(7)}.png`, old], [`${uid(7)}.png.t`, t],
+    [`${uid(6)}.png`, old], ['avatar_123.jpg', old], ['gf_group.pdf', old], ['moment_123.png', old]
+  ];
+  const files = records.map(([name, time]) => ({ id: name, name, created_at: iso(time), metadata: { size: 1024 } }));
+  const base = IMG.replace(/bob\/[^/]+$/, 'me/');
+  db.stickers.push({ owner_acc: ME, url: base + uid(3) + '.jpg#t=1' });
+  const env = makeEnv({ db, files });
+  try {
+    await env.login();
+    env.T.S.out.set(uid(4), { id: uid(4), from_acc: ME, _ext: 'wav', _st: 'failed' });
+    env.$('btn-store').click(); await sleep(40);
+    ok(env.$('st-30').textContent.includes('（5）'), '新旧附件和预览图未按同一口径列出');
+    env.$('st-30').click();
+    ok(env.$('as-title').textContent.includes('双方') && env.$('as-title').textContent.includes('无法撤销'), '确认前未说明影响双方和不可撤销');
+    env.$('as-items').querySelector('[data-i="0"]').click();
+    ok(env.storage.removed.length === 0, '点取消也删除了文件');
+    env.$('st-30').click();
+    db.stickers.push({ owner_acc: ME, url: base + uid(6) + '.png' });
+    env.$('as-items').querySelector('[data-i="1"]').click(); await sleep(60);
+    const expected = records.slice(0, 4).map(([name]) => ME + '/' + name).sort();
+    ok(env.storage.removed.slice().sort().join() === expected.join(), '删除范围越过了确认清单或漏掉附件');
+    ok(env.toasts.some(s => /已删除 4 个.*跳过 1 个/.test(s)), '未通知重新检查时被保护的文件');
+  } finally { env.close(); }
+});
+
+test('附件管理：部分删除没有确认时报告实际数量，退出登录后不再发送下一批', async () => {
+  const old = Date.now() - 86400000 * 31;
+  const files = Array.from({ length: 52 }, (_, i) => ({ id: uid(i), name: uid(i) + '.png', created_at: iso(old) }));
+  let firstBatch = true, deferRemoval = false, finishRemoval;
+  const env = makeEnv({ db: baseDb(old), files, onStorageRemove(keys, storage) {
+    if (deferRemoval) return new Promise(resolve => { finishRemoval = resolve; });
+    if (!firstBatch) return;
+    firstBatch = false;
+    const deleted = keys.slice(0, 49);
+    storage.files = storage.files.filter(file => !deleted.includes(ME + '/' + file.name));
+    return { data: deleted.map(name => ({ name })), error: null };
+  } });
+  try {
+    await env.login();
+    env.$('btn-store').click(); await sleep(30);
+    env.$('st-all').click(); env.$('as-items').querySelector('[data-i="1"]').click(); await sleep(50);
+    ok(env.storage.removed.length === 52 && env.storage.files.length === 1, '没有按确认清单处理全部批次');
+    ok(env.toasts.some(s => /已删除 51 个.*1 个未确认/.test(s)), '部分成功显示成全成功');
+    ok(env.$('st-all').textContent.includes('（1）'), '删除后没有刷新仍存在的附件');
+
+    env.storage.files = files.slice();
+    env.$('btn-store').click(); env.$('btn-store').click(); await sleep(30);
+    deferRemoval = true;
+    env.$('st-all').click(); env.$('as-items').querySelector('[data-i="1"]').click(); await sleep(30);
+    ok(typeof finishRemoval === 'function' && env.storage.removed.length === 102, '第一批尚未提交');
+    await env.T.onAuth('SIGNED_OUT', null);
+    finishRemoval({ data: [], error: null }); await sleep(30);
+    ok(env.storage.removed.length === 102 && env.$('store-box').style.display === 'none', '退出登录后仍在删附件或显示旧列表');
+  } finally { env.close(); }
+});
+
+test('附件管理：关闭后重开，迟到的旧列表不能覆盖正在看的清单', async () => {
+  const t = Date.now();
+  let calls = 0, finishOld;
+  const env = makeEnv({ db: baseDb(t), onStorageList() {
+    if (++calls === 1) return new Promise(resolve => { finishOld = resolve; });
+    return { data: [{ id: uid(2), name: uid(2) + '.jpg', created_at: iso(t) }], error: null };
+  } });
+  try {
+    await env.login();
+    env.$('btn-store').click(); await sleep(30);
+    ok(typeof finishOld === 'function', '没有发出第一次请求');
+    env.$('btn-store').click(); env.$('btn-store').click(); await sleep(30);
+    finishOld({ data: [], error: null }); await sleep(30);
+    ok(env.$('st-all').textContent.includes('（1）') && !env.$('st-all').disabled, '旧结果清空了当前清单');
+  } finally { env.close(); }
+});
+
+test('本机缓存：清除当前账号的旧格式和 IndexedDB 数据，保留其他账号与待发送队列', async () => {
+  const t = Date.now(), env = makeEnv({ db: baseDb(t) });
+  try {
+    await env.login();
+    const { S, MSG } = env.T;
+    const conv = 'bob::me', oldConv = 'alice::me';
+    const key = 'ch2m:' + S.uid + ':' + oldConv;
+    const legacy = JSON.stringify([msg(99, ME, oldConv, '待清缓存', t)]);
+    const otherKey = 'ch2m:' + uid(42) + ':' + conv;
+    const outKey = 'ch2outq:' + S.uid;
+    env.w.localStorage.setItem(key, legacy);
+    env.w.localStorage.setItem(otherKey, legacy);
+    env.w.localStorage.setItem(outKey, legacy);
+    env.T.msgCacheSave(conv, [msg(98, ME, conv, '待清 IndexedDB', t)]);
+    await sleep(20);
+    await env.$('btn-cache').onclick();
+    env.$('as-items').querySelector('button.menu-item:not(.plain)').click();
+    await sleep(40);
+    ok(env.w.localStorage.getItem(key) === null, '旧格式消息缓存未清掉');
+    ok(env.w.localStorage.getItem(otherKey) === legacy && env.w.localStorage.getItem(outKey) === legacy, '其他账号缓存或待发送队列被误清');
+    ok(!MSG.mem.size && (await env.T.msgCacheGet(conv)).length === 0, '仍能从 IndexedDB 找到清理的记录');
+    ok(env.storage.removed.length === 0, '清本机缓存调用了服务器删除');
+  } finally { env.close(); }
+});
+
 test('关聊天存缓存：不存“发送中/失败”的消息（重开不会有幽灵消息）', async () => {
   const t = Date.now(), db = baseDb(t, { messages: Array.from({ length: 50 }, (_, i) => msg(i + 1, 'bob', 'bob::me', '第' + i + '条', t - 90000 + i * 1000)) });
   const env = makeEnv({ db, onQuery: q => (q.table === 'messages' && q.op === 'insert') ? { data: null, error: { message: 'Failed to fetch' } } : null });

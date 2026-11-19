@@ -325,23 +325,47 @@ async function idbDel(k) {
     await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').delete(k); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
   } catch (e) { IDB.bad = true; }
 }
-async function idbClear() {
+async function idbClear(uid) {
+  if (!window.indexedDB) return true;
   try {
     const db = await idbOpen();
-    await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').clear(); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
-  } catch (e) { IDB.bad = true; }
+    await new Promise(function (resolve, reject) {
+      const tx = db.transaction('msgs', 'readwrite'), store = tx.objectStore('msgs');
+      if (uid) store.delete(IDBKeyRange.bound(uid + ':', uid + ';', false, true));
+      else store.clear();
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch (e) { IDB.bad = true; return false; }
 }
-const MSG = { mem: new Map(), uid: null };
+const MSG = { mem: new Map(), uid: null, revision: 0 };
 let accountGeneration = 0, chatGeneration = 0;
 const msgKey = c => (S.uid || '') + ':' + c;
-function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; }
+function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; MSG.revision++; }
+async function clearLocalMessageCache(uid) {
+  const generation = accountGeneration;
+  clearTimeout(saveMT);
+  msgCacheClear();
+  let legacyCleared = false;
+  try {
+    const prefix = 'ch2m:' + uid + ':';
+    Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+    localStorage.removeItem('ch2midx:' + uid);
+    localStorage.removeItem('ch2mgi:' + uid);
+    legacyCleared = true;
+  } catch (e) { logErr('cache-clear', e); }
+  const cleared = await idbClear(uid);
+  if (generation !== accountGeneration) return;
+  toast(legacyCleared && cleared ? '本机消息缓存已清理' : '有本机缓存未能清理，请稍后重试');
+}
 async function msgCacheGet(conv) {
   if (!S.uid || !conv) return [];
   if (MSG.uid !== S.uid) { MSG.mem.clear(); MSG.uid = S.uid; }
-  const uid = S.uid, generation = accountGeneration, k = msgKey(conv);
+  const uid = S.uid, generation = accountGeneration, revision = MSG.revision, k = msgKey(conv);
   if (MSG.mem.has(k)) return MSG.mem.get(k);
   let list = IDB.bad ? null : await idbGet(k);
-  if (generation !== accountGeneration) return [];
+  if (generation !== accountGeneration || revision !== MSG.revision) return [];
   if (MSG.mem.has(k)) return MSG.mem.get(k);
   if (!Array.isArray(list)) {
     list = LS.get(mk(uid, conv), []) || [];          // 旧版 localStorage 缓存：读一次就搬过去
@@ -353,10 +377,12 @@ async function msgCacheGet(conv) {
 }
 function msgCacheSave(conv, list) {
   if (!S.uid || !conv) return;
-  const k = msgKey(conv);
+  const uid = S.uid, revision = MSG.revision, k = msgKey(conv);
   MSG.mem.set(k, list);
-  if (IDB.bad) { try { LS.set(mk(S.uid, conv), list); } catch (e) {} return; }
-  idbSet(k, list).catch(function () { try { LS.set(mk(S.uid, conv), list); } catch (e) {} });
+  if (IDB.bad) { LS.set(mk(uid, conv), list); return; }
+  idbSet(k, list).catch(function () {
+    if (uid === S.uid && revision === MSG.revision) LS.set(mk(uid, conv), list);
+  });
   try {                                              // 最多留 80 个会话的缓存，太久的删掉
     let idx = LS.get('ch2mgi:' + S.uid, []) || [];
     idx = idx.filter(function (x) { return x !== conv; }); idx.push(conv);
@@ -3471,7 +3497,7 @@ function teardown() {
   pendingFriendRequests.clear(); pendingMomentLikes.clear(); cancelMediaPreviews(); olderCursor = null;
   Object.values(readT).forEach(clearTimeout); readT = {};
   Object.keys(peerActiveAt).forEach(acc => delete peerActiveAt[acc]);
-  closeForm(); closeActs(); closeMenu(); closeMomentCompose(); closeVis();
+  closeForm(); closeActs(); closeMenu(); closeMomentCompose(); closeVis(); resetStore();
   MO.list = []; MO.likes = {}; MO.comments = {}; MO.notices = []; MO.ats = [];
   MO.cursor = null; MO.loading = false; MO.sig = ''; MO.loadAt = 0;
   $('moment-list').textContent = ''; renderMomentNotices(); paintMomentBadge();
@@ -5356,60 +5382,141 @@ async function gotoMsg(id) {
   if (msgElOf(id)) jumpTo(id); else toast('这条消息太久远，没能定位到');
 }
 
-/* ================= 存储空间（清理自己发送的图片/语音）================= */
-let stFiles = null, stArm = null;
+/* ================= 管理已发送的聊天附件 ================= */
+const ST_RANGES = [['st-30', 30], ['st-7', 7], ['st-all', 0]];
+const ST_NAME = /^((?:\d{12,13}_[a-z0-9]{4,10}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[a-z0-9]{1,8})(?:\.(?:t|jpg))?$/i;
+let storeView = null;
 const fmtMB = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
-const fileTs = f => { const t = Date.parse(f.created_at || f.updated_at || ''); if (t > 0) return t; const m = /^(\d{12,})_/.exec(f.name || ''); return m ? +m[1] : 0; };
-function stCutoff(days) { return days ? now() - days * 86400000 : Infinity; }
-function stPick(days) { const c = stCutoff(days); return (stFiles || []).filter(f => fileTs(f) < c); }
-function stRenderInfo() {
-  const all = stFiles || [], size = all.reduce((a, f) => a + ((f.metadata && f.metadata.size) || 0), 0);
+const stBase = name => ST_NAME.exec(name)?.[1] || '';
+const stCurrent = view => storeView === view && view.generation === accountGeneration;
+function resetStore() {
+  storeView = null;
+  $('store-box').style.display = 'none';
+}
+function stProtected(owner) {
+  const keep = new Set();
+  const prefix = SUPABASE_URL + '/storage/v1/object/public/chat-media/';
+  function keepUrl(url) {
+    if (typeof url !== 'string' || !url.startsWith(prefix)) return;
+    try {
+      const key = decodeURIComponent(url.slice(prefix.length).split(/[?#]/)[0]);
+      if (key.startsWith(owner + '/')) keep.add(stBase(key.slice(owner.length + 1)));
+    } catch (e) { /* 无效链接不指向存储文件 */ }
+  }
+  (S.stk || []).forEach(sticker => keepUrl(sticker.url));
+  S.out.forEach(m => {
+    if (m.from_acc !== owner) return;
+    if (m._ext) keep.add(m.id + '.' + m._ext);
+    keepUrl(m.type === 'file' ? parseFile(m.body)?.u : m.body);
+  });
+  return keep;
+}
+function stPick(files, days) {
+  if (!days) return files;
+  const cutoff = now() - days * 86400000;
+  const keep = new Set();
+  files.forEach(f => {
+    const legacy = /^(\d{12,13})_/.exec(f.name);
+    const t = Date.parse(f.created_at || '') || Date.parse(f.updated_at || '') || Number(legacy?.[1]);
+    if (!(t > 0 && t < cutoff)) keep.add(stBase(f.name));
+  });
+  return files.filter(f => !keep.has(stBase(f.name)));
+}
+function stRender(view) {
+  const files = view.files;
+  const size = files.reduce((total, file) => total + (Number(file.metadata?.size) || 0), 0);
   const tot = $('store-total');
-  if (S.stUsed != null) { const r = Math.min(1, S.stUsed / ST_QUOTA); tot.style.display = ''; tot.innerHTML = '<div class="st-tl">已用 ' + fmtDec(S.stUsed) + '</div><div class="st-bar' + (r >= 0.9 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>'; }
-  else tot.style.display = 'none';
-  $('store-info').textContent = all.length ? '你发过的图片、语音、视频一共 ' + all.length + ' 个，约 ' + fmtMB(size) + '。文字几乎不占空间；图片发送时会自动压缩。这里的清理只删你自己发出去的文件，不会影响别人。' : '你还没发过图片、语音或视频。文字几乎不占空间，图片会自动压缩，不用特意清理。';
-  [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { const n = stPick(d).length; const b = $(id); b.disabled = !n; b.dataset.n = n; b.textContent = (d ? '清理 ' + d + ' 天前的' : '全部清理') + (n ? '（' + n + '）' : ''); });
+  if (S.stUsed != null) {
+    const r = Math.min(1, S.stUsed / ST_QUOTA);
+    tot.style.display = '';
+    tot.innerHTML = '<div class="st-tl">项目存储已用 ' + fmtDec(S.stUsed) + '</div><div class="st-bar' + (r >= 0.9 ? ' warn' : '') + '"><i style="width:' + Math.max(1, Math.round(r * 100)) + '%"></i></div>';
+  }
+  const count = files.length;
+  $('store-info').textContent = count
+    ? '可管理 ' + count + ' 个聊天附件文件（含缩略图和封面），约 ' + fmtMB(size) + '。删除会影响双方打开这些附件。'
+    : '暂无可清理的聊天附件。';
+  ST_RANGES.forEach(([id, days]) => {
+    const n = stPick(files, days).length, button = $(id);
+    button.disabled = !n;
+    button.textContent = (days ? '删除 ' + days + ' 天前' : '删除全部可清理附件') + (n ? '（' + n + '）' : '');
+  });
 }
 async function loadStore() {
-  $('store-box').style.display = 'block'; $('store-info').textContent = '统计中…'; stArm = null;
-  checkStorage(true).then(() => { if (stFiles) stRenderInfo(); });
+  if (!sb || !ME()) return;
+  $('store-box').style.display = 'block';
+  if (storeView?.deleting) return;
+  const view = { owner: ME(), generation: accountGeneration, files: null, deleting: false };
+  storeView = view;
+  $('store-info').textContent = '正在读取已发送附件…';
+  $('store-total').style.display = 'none';
+  ST_RANGES.forEach(([id]) => { $(id).disabled = true; });
+  checkStorage(true).then(() => { if (stCurrent(view) && view.files && !view.deleting) stRender(view); });
   try {
-    if (S.v6 !== false) await loadStickers(true);
-    if (S.v6 !== false && !stkOk) throw new Error('“我的表情”列表没读到，为了不误删正在用的表情，先不清理，请稍后再试');
-    const keep = new Set((S.stk || []).map(x => { const m = /\/chat-media\/([^?#]+)/.exec(x.url); return m ? decodeURIComponent(m[1]) : ''; }));
-    const all = [];
-    for (let off = 0; off < 10000; off += 100) {
-      const { data, error } = await sb.storage.from('chat-media').list(ME(), { limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } });
-      if (error) throw error;
-      if (!data || !data.length) break;
-      data.forEach(f => {
-        if (!f || !f.name || f.id === null) return;
-        // 只处理“聊天里发出去的媒体”：文件名是 <13位时间戳>_<随机>.<扩展名>
-        // 头像 avatar_、背景 bg_、朋友圈封面 cover_、好友背景 fbg_、群图标 g_、朋友圈 moment_、群文件 gf_、表情 sticker_ 一律不碰
-        if (!/^\d{12,}_[a-z0-9]{4,10}(\.[a-z0-9]{1,8}){1,2}$/i.test(f.name)) return;
-        if (f.name.indexOf('avatar_') === 0 || keep.has(ME() + '/' + f.name)) return;
-        all.push(f);
-      });
+    if (S.v6 !== false && !await loadStickers(true)) throw new Error('读取表情列表失败');
+    const files = new Map(), storage = sb.storage.from('chat-media');
+    for (let offset = 0; stCurrent(view); offset += 100) {
+      const { data, error } = await storage.list(view.owner, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } });
+      if (!stCurrent(view)) return;
+      if (error || !Array.isArray(data)) throw error || new Error('附件列表无效');
+      data.forEach(f => { if (f?.name && f.id !== null && stBase(f.name)) files.set(f.name, f); });
       if (data.length < 100) break;
     }
-    stFiles = all; stRenderInfo();
-  } catch (e) { logErr('store', e); stFiles = null; $('store-info').textContent = '读取失败：' + (e && e.message || e) + '。如果提示没有权限，请先在 Supabase 运行 setup-v3.sql。'; ['st-30', 'st-7', 'st-all'].forEach(id => { $(id).disabled = true; }); }
+    if (!stCurrent(view)) return;
+    const keep = stProtected(view.owner);
+    view.files = Array.from(files.values()).filter(f => !keep.has(stBase(f.name)));
+    stRender(view);
+  } catch (e) {
+    if (!stCurrent(view)) return;
+    logErr('store', e);
+    $('store-info').textContent = '暂时读不到可清理的附件，请稍后收起再打开。';
+  }
 }
-async function stClean(days, btn) {
-  const list = stPick(days); if (!list.length) return;
-  if (stArm !== btn.id) { stArm = btn.id; btn.textContent = '再点一次确认删除 ' + list.length + ' 个（对方也将看不到这些图片/语音/视频/文件）'; setTimeout(() => { if (stArm === btn.id) { stArm = null; stRenderInfo(); } }, 5000); return; }
-  stArm = null; ['st-30', 'st-7', 'st-all'].forEach(id => { $(id).disabled = true; });
-  let done = 0, fail = 0;
+function stClean(days) {
+  const view = storeView;
+  if (!view?.files || view.deleting || !stCurrent(view)) return;
+  const list = stPick(view.files, days);
+  if (!list.length) return;
+  openActs('删除 ' + list.length + ' 个附件文件？\n从服务器删除后，双方的聊天记录将无法重新下载这些附件。已经下载的副本可能保留。此操作无法撤销。', [
+    { label: '取消', fn: null },
+    { label: '删除 ' + list.length + ' 个附件文件', danger: true, fn: () => stDelete(view, list) }
+  ]);
+}
+async function stDelete(view, list) {
+  if (!stCurrent(view) || view.deleting) return;
+  view.deleting = true;
+  ST_RANGES.forEach(([id]) => { $(id).disabled = true; });
+  $('store-info').textContent = '正在核对这批附件…';
+  let done = 0, skipped = 0, unconfirmed = 0;
   try {
-    for (let i = 0; i < list.length; i += 50) {
-      const part = list.slice(i, i + 50).map(f => ME() + '/' + f.name);
-      const { data, error } = await sb.storage.from('chat-media').remove(part);
-      if (error) { fail += part.length; logErr('store-rm', error); } else done += (data ? data.length : part.length);
-      $('store-info').textContent = '清理中… ' + Math.min(i + 50, list.length) + ' / ' + list.length;
+    if (S.v6 !== false && !await loadStickers(true)) {
+      if (stCurrent(view)) toast('暂时无法核对正在使用的表情，请稍后再试');
+      return;
     }
-  } catch (e) { logErr('store-rm', e); }
-  toast(fail ? '已清理 ' + done + ' 个，' + fail + ' 个失败（可能没有权限，请运行 setup-v3.sql）' : '已清理 ' + done + ' 个文件');
-  await loadStore();
+    const storage = sb.storage.from('chat-media');
+    for (let i = 0; i < list.length && stCurrent(view); i += 50) {
+      const batch = list.slice(i, i + 50), keep = stProtected(view.owner);
+      const keys = batch.filter(f => !keep.has(stBase(f.name))).map(f => view.owner + '/' + f.name);
+      skipped += batch.length - keys.length;
+      if (!keys.length) continue;
+      try {
+        const { data, error } = await storage.remove(keys);
+        if (!stCurrent(view)) return;
+        if (error) throw error;
+        const count = Array.isArray(data) ? Math.min(data.length, keys.length) : 0;
+        done += count; unconfirmed += keys.length - count;
+      } catch (e) { logErr('store-rm', e); unconfirmed += keys.length; }
+      if (stCurrent(view)) $('store-info').textContent = '已处理 ' + Math.min(i + 50, list.length) + ' / ' + list.length + ' 个附件文件…';
+    }
+    if (stCurrent(view)) {
+      toast('已删除 ' + done + ' 个附件文件' + (skipped ? '，跳过 ' + skipped + ' 个正在使用的文件' : '')
+        + (unconfirmed ? '，' + unconfirmed + ' 个未确认，已重新读取列表' : ''));
+    }
+  } finally {
+    if (stCurrent(view)) {
+      storeView = null;
+      if ($('store-box').style.display === 'block') loadStore();
+    }
+  }
 }
 
 /* ================= 表情包 / 视频 / 文件 / 保存到手机 / 转发 ================= */
@@ -5497,18 +5604,23 @@ let stkLoading = null, stkOk = false;
 const stkKey = () => 'ch2stk:' + (S.uid || ''), recKey = () => 'ch2stkr:' + (S.uid || '');
 function stkSave() { LS.set(stkKey(), S.stk || []); }
 async function loadStickers(force) {
-  if (!sb || !S.me || S.v6 === false) return;
-  if (!force && stkOk && S.stkAt && now() - S.stkAt < 60000) return;
-  if (stkLoading) return stkLoading;
-  stkLoading = (async () => {
+  if (!sb || !S.me || S.v6 === false) return false;
+  if (!force && stkOk && S.stkAt && now() - S.stkAt < 60000) return true;
+  const generation = accountGeneration;
+  if (stkLoading?.generation === generation) return stkLoading.promise;
+  const request = { generation, promise: null };
+  stkLoading = request;
+  request.promise = (async () => {
     try {
       const { data, error } = await sb.from('stickers').select('id,url,kw,created_at').eq('owner_acc', ME()).order('created_at', { ascending: false }).limit(STK_LIMIT);
-      if (error) { if (isMissingFn(error)) S.v6 = false; else logErr('stk', error); return; }
+      if (generation !== accountGeneration) return false;
+      if (error) { if (isMissingFn(error)) S.v6 = false; else logErr('stk', error); return false; }
       S.stk = data || []; S.stkAt = now(); stkOk = true; stkSave();
       if ($('emoji-panel').classList.contains('active')) renderEp();
-    } catch (e) { logErr('stk', e); }
-  })().finally(() => { stkLoading = null; });
-  return stkLoading;
+      return true;
+    } catch (e) { logErr('stk', e); return false; }
+  })().finally(() => { if (stkLoading === request) stkLoading = null; });
+  return request.promise;
 }
 function recentList() { return (LS.get(recKey(), []) || []).filter(validStk); }
 function pushRecent(b) { const r = recentList().filter(x => x !== b); r.unshift(b); LS.set(recKey(), r.slice(0, 16)); }
@@ -6495,15 +6607,17 @@ let stAt = 0;
 async function checkStorage(force) {
   if (!sb || !S.me || S.v7 !== true || (!force && now() - stAt < 10 * 60000)) return;
   stAt = now();
+  const generation = accountGeneration;
   try {
     const { data, error } = await sb.rpc('storage_used');
+    if (generation !== accountGeneration) return;
     if (error) { if (isMissingFn(error)) S.v7 = false; else logErr('storage_used', error); return; }
     S.stUsed = Math.max(0, +data || 0);
     const r = S.stUsed / ST_QUOTA, day = new Date().toISOString().slice(0, 10), key = 'ch2stwarn:' + (S.uid || '');
     if (r >= 0.8 && LS.get(key, '') !== day && $('store-box').style.display !== 'block') {
       LS.set(key, day);
       openActs('存储空间快满了：两个人一共用了 ' + Math.round(r * 100) + '%（约 ' + fmtDec(S.stUsed) + ' / 1 GB）\n满了以后图片、视频、文件都会发不出去', [
-        { label: '去清理旧文件', fn: () => { document.querySelector('.app-nav button[data-tab=me]').click(); setTimeout(() => { if ($('store-box').style.display !== 'block') loadStore(); }, 80); } },
+        { label: '管理已发送附件', fn: () => { if (generation !== accountGeneration) return; document.querySelector('.app-nav button[data-tab=me]').click(); loadStore(); } },
         { label: '知道了', fn: null }]);
     }
   } catch (e) { logErr('storage_used', e); }
@@ -7330,8 +7444,12 @@ function bindUI() {
   $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
   $('cs-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); clearTimeout(csT); runChatSearch($('cs-input').value); } });
   $('cs-list').addEventListener('click', e => { const it = e.target.closest('.cs-item'); if (it) gotoMsg(it.dataset.id); });
-  $('btn-store').onclick = () => { if ($('store-box').style.display === 'block') { $('store-box').style.display = 'none'; return; } loadStore(); };
-  [['st-30', 30], ['st-7', 7], ['st-all', 0]].forEach(([id, d]) => { $(id).onclick = () => stClean(d, $(id)); });
+  $('btn-store').onclick = () => {
+    if ($('store-box').style.display !== 'block') { loadStore(); return; }
+    if (storeView?.deleting) $('store-box').style.display = 'none';
+    else resetStore();
+  };
+  ST_RANGES.forEach(([id, days]) => { $(id).onclick = () => stClean(days); });
   $('msg-menu-backdrop').onclick = () => { if (now() - menuOpenAt > 350) closeMenu(); };
   $('msg-menu-recall').onclick = doRecall;
   $('msg-menu-reply').onclick = () => menuAction('reply'); $('msg-menu-copy').onclick = () => menuAction('copy'); $('msg-menu-del').onclick = () => menuAction('del');
@@ -7880,12 +7998,12 @@ $('btn-edit-profile').onclick = function () {
   ]);
 };
 $('btn-copy-id').onclick = function (e) { e.stopPropagation(); const id = ME(); if (id) copyText(id); };
-$('btn-cache').onclick = async function () {
-  let size = '';
-  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e && e.usage) size = fmtDec(e.usage); } } catch (e) {}
-  openActs('本地缓存' + (size ? '：约 ' + size : ''), [
-    { label: '清理本地消息缓存（服务器记录还在）', danger: true, fn: async function () { await idbClear(); MSG.mem.clear(); toast('本地缓存已清理'); } },
-    { label: '取消', fn: null }
+$('btn-cache').onclick = function () {
+  const uid = S.uid, generation = accountGeneration;
+  if (!uid) return;
+  openActs('清理本机消息缓存？\n这台设备下次打开聊天时会重新加载消息。服务器记录和待发送消息都会保留。', [
+    { label: '取消', fn: null },
+    { label: '清理本机消息缓存', danger: true, fn: () => { if (generation === accountGeneration) clearLocalMessageCache(uid); } }
   ]);
 };
 const gcl = $('grp-contacts');
