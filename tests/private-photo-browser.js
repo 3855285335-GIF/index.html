@@ -14,7 +14,8 @@ const waitImage = (page, id, local) => page.waitForFunction(({ id, local }) => {
   const img = document.querySelector(`[data-id="${id}"] .bubble.img img`);
   return !!img && img.naturalWidth > 0 && img.src.startsWith(local ? 'blob:' : location.origin + '/storage/');
 }, { id, local });
-const authenticatedStatus = (page, url) => page.evaluate(async url => (await fetch(url, { cache: 'no-store', headers: { Authorization: 'Bearer ' + __T.S.token } })).status, url);
+const authenticatedStatus = (page, url, method = 'GET') => page.evaluate(async ({url,method}) =>
+  (await fetch(url, { method, cache:'no-store', headers:{ Authorization:'Bearer '+__T.S.token } })).status, {url,method});
 
 async function signUp(browser, account, nickname) {
   const context = await browser.newContext({ viewport: { width:390, height:844 }, isMobile:true, hasTouch:true });
@@ -99,7 +100,9 @@ async function legacyPhotoCheck(browser, a, b, c, accounts, photo, expected, old
   const device = await anotherDevice(browser,b,oldOrigin);
   const p = device.page;
   try {
-    assert.match(await p.locator('script[src^="app.js"]').getAttribute('src'), /20261119d/);
+    const oldVersion = process.env.CHATTER_LEGACY_VERSION || '20261119d';
+    const loadedVersion = new URL(await p.locator('script[src^="app.js"]').getAttribute('src'),origin).searchParams.get('v');
+    assert.equal(loadedVersion,oldVersion);
     const attempts = [];
     p.on('request', req => { if (req.url().includes('/storage/v1/object/')) attempts.push(req.url()); });
     await openChat(p,bob,alice);
@@ -136,8 +139,84 @@ async function legacyPhotoCheck(browser, a, b, c, accounts, photo, expected, old
       return Array.from(new Uint8Array(await r.arrayBuffer()));
     }, urlOf(photo));
     assert.ok(Buffer.from(bytes).equals(expected));
-    console.log('线上旧版 20261119d 在真实隔离聊天里收到更新提示，断网时提示仍可见；同一设备升级后能读取同一条消息的原图，字节完全一致。');
+    console.log('旧版 '+oldVersion+' 在真实隔离聊天里收到更新提示，断网时提示仍可见；同一设备升级后能读取同一条消息的原图，字节完全一致。');
   } finally { await device.context.close(); }
+}
+async function accountCacheKeys(page, uid) {
+  return page.evaluate(async uid => {
+    const req = indexedDB.open('chatter',1);
+    const db = await new Promise((res,rej) => {req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});
+    try {
+      const keys = db.transaction('msgs').objectStore('msgs').getAllKeys(IDBKeyRange.bound(uid+':photo:',uid+':photo;',false,true));
+      return await new Promise((res,rej) => {keys.onsuccess=()=>res(keys.result);keys.onerror=()=>rej(keys.error);});
+    } finally { db.close(); }
+  },uid);
+}
+
+async function browserFromChat(a, b, alice, bob) {
+  const article = 'https://reading.example.org/chatter-check';
+  const requests = [];
+  const handler = async route => {
+    const body = route.request().postDataJSON();
+    requests.push(body.op);
+    const data = body.op === 'frame' ? {ok:true,frame:false,why:'xfo',url:article}
+      : body.op === 'read' ? {ok:true,u:article,title:'隔离阅读测试',site:'reading.example.org',html:'<p>这是一篇用来验收收藏的文章。</p>',len:14}
+      : {ok:true};
+    await route.fulfill({json:data});
+  };
+  const edge = url => url.origin === origin && url.pathname === '/functions/v1/chatter-search';
+  await b.route(edge,handler);
+  try {
+    await a.fill('#chat-input',article); await a.evaluate(() => __T.sendText());
+    const link = b.locator('#chat-messages a[href="'+article+'"]');
+    await link.click();
+    await b.locator('.ws-v.on .ws-body p').filter({hasText:'验收收藏'}).waitFor();
+    await b.click('.ws-v.on [data-act="rd-fav"]');
+    await b.waitForFunction(() => document.querySelector('.ws-v.on [data-act="rd-fav"]').classList.contains('on'));
+    await b.click('.ws-v.on [data-act="back"]');
+    await b.waitForFunction(conv => !ChatterSearch.isOpen() && __T.S.conv === conv && document.body.classList.contains('chat-open'),conversation(alice,bob));
+    assert.equal(b.context().pages().length,1);
+    await b.context().setOffline(true);
+    await b.evaluate(() => ChatterSearch.resetAccount()); // 关闭模块内存与原网页探测缓存，保留同一账号的收藏和本机数据库。
+    const previous = requests.length;
+    await b.evaluate(() => ChatterSearch.open());
+    await b.click('.ws-v.on [data-act="favs"]');
+    await b.locator('.ws-v.on [data-act="fav-go"]').filter({hasText:'隔离阅读测试'}).click();
+    await b.locator('.ws-v.on .ws-body p').filter({hasText:'验收收藏'}).waitFor();
+    assert.ok(!requests.slice(previous).some(op => op === 'frame' || op === 'read'));
+    console.log('真实聊天网址在 App 内读取和收藏，返回原好友聊天；Chromium 断网并清除搜索模块内存后，从收藏读到同一篇正文。文章服务使用隔离替身。');
+    for (let n=0;n<3;n++) {
+      if (!await b.evaluate(() => ChatterSearch.isOpen())) break;
+      await b.click('.ws-v.on [data-act="back"]');
+      await b.waitForFunction(() => !ChatterSearch.isOpen() || !document.querySelector('.ws-v.on[data-v="read"]'));
+    }
+  } finally {
+    await b.context().setOffline(false);
+    await b.unroute(edge,handler);
+  }
+  // 让已接管的 SW 经正常入口缓存应用外壳，再在飞行模式下开一个全新页面。
+  const ctx = b.context(), warm = await ctx.newPage();
+  try {
+    await warm.goto(origin);
+    await warm.waitForFunction(() => !!navigator.serviceWorker.controller && !!window.__T?.S.me);
+    await warm.click('#btn-web');
+    await warm.waitForFunction(() => window.ChatterSearch?.isOpen());
+    await warm.waitForFunction(async () => {
+      const shell = await caches.open('chatter-shell-v1');
+      return !!await shell.match(location.origin+'/') && (await shell.keys()).some(k => k.url.includes('/search.js?v='));
+    });
+  } finally { await warm.close(); }
+  await ctx.setOffline(true);
+  const cold = await ctx.newPage();
+  try {
+    await cold.goto(origin);
+    await cold.waitForFunction(() => !!window.__T?.S.me);
+    await cold.click('#btn-web');
+    await cold.click('.ws-v.on [data-act="favs"]');
+    await cold.locator('.ws-v.on [data-act="fav-go"]').filter({hasText:'隔离阅读测试'}).click();
+    await cold.locator('.ws-v.on .ws-body p').filter({hasText:'验收收藏'}).waitFor();
+    console.log('已登录账号在浏览器断网后开启全新页面，Service Worker 加载程序，从收藏读到 IndexedDB 里的正文。');
+  } finally { await ctx.setOffline(false); await cold.close(); }
 }
 async function noisePNG(page) {
   return Buffer.from(await page.evaluate(() => {
@@ -174,6 +253,7 @@ async function noisePNG(page) {
     console.log('历史公开图片在同一个真实聊天界面仍能显示。');
 
     await contactsOnlyCheck(browser,a,b,alice,bob);
+    await browserFromChat(a,b,alice,bob);
     const original = await noisePNG(a);
     assert.ok(original.length > 300 * 1024);
     await a.locator('#file-input').setInputFiles({ name:'private.png', mimeType:'image/png', buffer:original });
@@ -196,6 +276,27 @@ async function noisePNG(page) {
     assert.ok(Buffer.concat(chunks).equals(original), '保存的私密原图发生了变更');
     await b.locator('#lightbox-img').click();
     await b.locator('#lightbox').waitFor({state:'hidden'});
+    const reads = [];
+    const observe = res => { if (res.url() === url) reads.push([res.request().method(),res.status()]); };
+    b.on('response',observe);
+    const bubble = b.locator('[data-id="' + photo.id + '"] .bubble.img img');
+    await bubble.click(); await b.waitForFunction(() => document.querySelector('#lightbox-img').naturalWidth === 640);
+    assert.ok(reads.some(([m, status]) => m === 'HEAD' && status === 200) && !reads.some(([m]) => m === 'GET'),
+      '再次查看原图应只验证访问权：'+JSON.stringify(reads));
+    await b.locator('#lightbox-img').click();
+    b.off('response',observe);
+    await b.context().setOffline(true);
+    try {
+      await bubble.click();
+      await b.waitForFunction(() => document.querySelector('#lightbox-img').dataset.privatePhotoFailed === '1');
+      assert.equal(await b.locator('#lightbox-img').evaluate(img => img.naturalWidth),0);
+    } finally {
+      await b.context().setOffline(false);
+    }
+    await b.locator('#lightbox-img').click();
+    await b.waitForFunction(() => document.querySelector('#lightbox-img').naturalWidth === 640);
+    await b.locator('#lightbox-img').click();
+    console.log('反复查看同一私密原图时，真实 Storage 只收到鉴权 HEAD，未重传图片正文；已缓存时断网也不会绕过权限检查，联网可重试。');
     console.log('从真实上传界面发图，收发双方可以打开并保存原图，陌生人和匿名用户不能读取原件或缩略图。');
 
     await b.locator(`[data-id="${photo.id}"] .bubble.img`).click({button:'right'});
@@ -243,6 +344,7 @@ async function noisePNG(page) {
       if (r.error) throw r.error;
     }, { gid:groupId, account:other });
     assert.notEqual(await authenticatedStatus(c,urlOf(groupPhoto)),200);
+    assert.ok([400,401,403,404].includes(await authenticatedStatus(c,urlOf(groupPhoto),'HEAD')), '离群后校验缓存也必须被拒绝');
     console.log('私密图片转发到群后，群成员可查看。群外账号和退出群聊的账号都读不到。');
 
     await b.locator(`[data-id="${photo.id}"] .bubble.img img`).click();
@@ -252,7 +354,10 @@ async function noisePNG(page) {
     await b.waitForFunction(id => __T.S.msgs.some(m => m.id === id && m.type === 'recalled'), photo.id);
     assert.equal(await b.locator('#lightbox').evaluate(el => el.classList.contains('active')),false);
     assert.notEqual(await authenticatedStatus(b,url),200);
+    assert.ok([400,401,403,404].includes(await authenticatedStatus(b,url,'HEAD')), '撤回后的缓存校验必须被拒绝');
     assert.equal(await authenticatedStatus(c,urlOf(forwarded)),200);
+    const bobUid = await b.evaluate(() => __T.S.uid);
+    assert.ok(!(await accountCacheKeys(b,bobUid)).some(key => key.includes(photo.id)), '收到撤回后仍有原图或缩略图缓存');
     console.log('发送方撤回后，接收方正在打开的大图关闭，原链接不可重新读取，明确转发的新副本仍可读取。');
 
     await a.click('#chat-back');
@@ -267,5 +372,16 @@ async function noisePNG(page) {
     assert.notEqual(await authenticatedStatus(a,url),200);
     assert.equal(await authenticatedStatus(c,urlOf(forwarded)),200);
     console.log('同一附件管理入口列出并删除本账号的公开和私密附件，其他账号的转发副本保留。');
+    const otherUid = await c.evaluate(() => __T.S.uid);
+    assert.ok((await accountCacheKeys(c,otherUid)).some(k => k.includes(forwarded.id)), '退出前应已有本账号的照片缓存');
+    await c.evaluate(() => __T.closeChat());
+    await c.click('.app-nav button[data-tab="me"]'); await c.click('#btn-logout');
+    await c.locator('#as-items button').getByText('退出登录',{exact:true}).click();
+    await c.locator('#auth-view.active').waitFor();
+    await c.waitForFunction(() => window.__T && !__T.S.uid);
+    await c.waitForLoadState('load');
+    for(let i=0;i<40 && (await accountCacheKeys(c,otherUid)).length;i++) await new Promise(r => setTimeout(r,50));
+    assert.deepEqual(await accountCacheKeys(c,otherUid),[]);
+    console.log('收到撤回后原图与缩略图本机副本已清除；从界面退出登录后，该账号的私密照片缓存已清空。');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

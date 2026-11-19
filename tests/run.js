@@ -1045,6 +1045,35 @@ test('仅在通讯录显示：新消息、置顶、读写失败、刷新、换�
   } finally { env.close(); }
 });
 
+test('退出登录会清除本账号的离线文章和浏览记录，保留另一账号', async () => {
+  const env = makeEnv({ db: baseDb(Date.now()) });
+  try {
+    await env.login();
+    const me = env.T.S.uid, other = 'other-account';
+    const db = await new Promise((resolve, reject) => {
+      const q = env.w.indexedDB.open('chatter-ws', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('art', {keyPath:'k'}).createIndex('tm','tm');
+      q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error);
+    });
+    try {
+      const key = u => u + '||https://sample.test/article';
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('art','readwrite');
+        for (const uid of [me,other]) {
+          tx.objectStore('art').put({k:key(uid),uid,tm:1});
+          env.w.localStorage.setItem('ch2wsSeen:'+uid,'[]');
+        }
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      await env.T.onAuth('SIGNED_OUT', null);
+      const readKeys = () => new Promise(resolve => { const q=db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess=() => resolve(q.result); });
+      for (let attempt=0; attempt<25 && (await readKeys()).includes(key(me)); attempt++) await sleep(20);
+      ok((await readKeys()).join() === key(other), '离线文章清理的账号范围错误');
+      ok(env.w.localStorage.getItem('ch2wsSeen:'+me) === null && env.w.localStorage.getItem('ch2wsSeen:'+other) === '[]', '浏览记录清理的账号范围错误');
+    } finally { db.close(); }
+  } finally { env.close(); }
+});
+
 // ---------------- 代码检查 ----------------
 async function lint() {
   const { ESLint } = require('eslint');

@@ -63,6 +63,7 @@ window.__chWS = {
     if (b.op === 'frame') return window.__frame ? window.__frame(b) : { ok: true, frame: false, why: 'xfo', url: b.url };
     if (b.op === 'versions') return { ok: true, url: b.url, list: ['20240501000000', '20190302000000', '20150101000000'] };
     if (b.op === 'read') {
+      if (window.__readFail) return { ok: false, code: 'net', msg: '网络不好' };
       if (b.url.indexOf('gone.example.com') >= 0) return b.at ? DATA.OLD : { ok: false, code: 'gone', msg: '这个网页已经不存在了（404）' };
       if (b.url.indexOf('blilblil.com') >= 0) return { ok: false, code: 'noArticle', msg: '这个网页不是文章，页面上也没有能接着点的链接', to: 'https://gotowww.aipages.dev/6d/?blilblil.com' };
       if (b.url.indexOf('bilibilii.com') >= 0) return { ok: false, code: 'nohost', msg: '找不到 bilibilii.com 这个网站', to: b.url };
@@ -343,6 +344,220 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await typeGo('https://unsure.test/p'); await pg.waitForSelector('.ws-v.on iframe'); await pg.waitForSelector('[data-r="wtip"]:not([hidden])');
       ok(/没能确认[\s\S]*换简洁阅读/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示，下面提示“看不到内容？换简洁阅读”');
       ok(!errs.length, '原网页功能没有报错 ' + errs.join(' | '));
+    }
+    // ---------- 20261120a：收藏、浏览记录、输入联想、常去的网站、查找、朗读、阅读位置、手机里保存的文章 ----------
+    {
+      const L = theme === 'light';
+      const labels = () => pg.evaluate(() => (window.__acts || []).map(x => x.label));
+      const pick = l => pg.evaluate(l => { const a = (window.__acts || []).find(x => x.label === l); if (a && a.fn) a.fn(); return !!a; }, l);
+      const toasts = () => pg.evaluate(() => __log.filter(x => x.toast).map(x => x.toast));
+      const reads = () => pg.evaluate(() => __log.filter(x => x.op === 'read').length);
+      const fresh = async () => { await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(120); await pg.evaluate(() => document.activeElement && document.activeElement.blur()); };
+      const openArt = async () => { await pg.evaluate(() => ChatterSearch.openPage('https://example.org/quantum-intro', '量子计算入门：从量子比特到量子门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150); };
+      await pg.evaluate(() => { window.__frame = b => /frame\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url } : { ok: true, frame: false, why: 'xfo', url: b.url }; });
+      const e0 = errs.length;
+      await fresh();
+      if (L) {   // 原网页里收藏、点网址（这组检查前面已经打开了“先显示原网页”）
+        await pg.evaluate(() => ChatterSearch.openPage('https://frame.test/a', '示例网站 A'));
+        await pg.waitForSelector('.ws-v.on[data-v="web"] iframe');
+        await pg.click('.ws-v.on [data-act="web-more"]');
+        ok((await labels()).includes('收藏这个网页'), '原网页的“更多”里能收藏这个网页');
+        await pick('收藏这个网页');
+        ok((await toasts()).slice(-1)[0].startsWith('已收藏'), '收藏原网页：提示已收藏');
+        await pg.click('.ws-v.on [data-act="web-url"]');
+        const ul = await labels();
+        ok(ul.includes('复制网址') && ul.includes('修改网址') && ul.includes('取消收藏'), '点顶上的网址：能复制、修改网址，收藏状态也对 → ' + ul.join(' / '));
+        await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(300);
+        await fresh();
+      }
+      await shot('15-首页-收藏和记录');
+      if (L) {
+        const q = await pg.$eval('.ws-quick', e => e.textContent);
+        ok(/收藏\s*2/.test(q) && /浏览记录\s*\d+/.test(q), '首页顶上有“收藏”“浏览记录”两个入口，带数量 → ' + q.replace(/\s+/g, ' '));
+        ok(await pg.$$eval('[data-act="often-go"]', a => a.map(x => x.dataset.d).includes('frame.test')), '常去的网站：去过两次以上的网站自动出现在首页');
+      }
+      // 输入联想
+      await pg.fill('[data-form="home"] input', '量子'); await pg.waitForSelector('[data-r="sug-home"]:not([hidden]) .ws-row');
+      await shot('16-输入联想');
+      if (L) {
+        const sg = await pg.$$eval('[data-r="sug-home"] .ws-row', a => a.map(x => x.textContent));
+        ok(sg.some(x => x === '量子计算') && sg.some(x => /量子计算入门[\s\S]*收藏/.test(x)), '输入联想：搜过的词、收藏的网页都在（只在手机里找，不联网）→ ' + sg.slice(0, 4).join(' | '));
+        const s0 = await pg.evaluate(() => __log.filter(x => x.op === 'search').length);
+        await pg.click('[data-r="sug-home"] .ws-row >> text=量子计算'); await pg.waitForSelector('.ws-v.on[data-v="res"] .ws-r a.t');
+        ok(await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].q) === '量子计算' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === s0 + 1 && await pg.$eval('[data-r="sug-res"]', e => e.hidden), '点联想里的词：直接搜，联想收起来');
+        await pg.goBack(); await pg.waitForTimeout(150);
+        await pg.fill('[data-form="home"] input', 'github.com'); await pg.waitForSelector('[data-r="sug-home"]:not([hidden]) .ws-row');
+        ok(/^打开 github\.com/.test(await pg.$eval('[data-r="sug-home"] .ws-row', e => e.textContent)), '像网址时，联想第一条是“打开 github.com”');
+      }
+      await pg.fill('[data-form="home"] input', ''); await pg.evaluate(() => document.activeElement && document.activeElement.blur()); await pg.waitForTimeout(250);
+      // 收藏页
+      await pg.click('.ws-quick [data-act="favs"]'); await pg.waitForSelector('.ws-v.on[data-v="favs"]');
+      await shot('17-收藏');
+      if (L) {
+        ok(await pg.$$eval('[data-r="favs"] .ws-row', a => a.length) === 2, '收藏页列出全部收藏');
+        await pg.fill('[data-filter="favs"]', '示例'); await pg.waitForTimeout(80);
+        ok(await pg.$$eval('[data-r="favs"] .ws-row', a => a.length) === 1, '收藏页能搜');
+        await pg.fill('[data-filter="favs"]', 'zzzz'); await pg.waitForTimeout(80);
+        ok(/没有找到/.test(await pg.$eval('[data-r="favs"]', e => e.textContent)), '搜不到时说“没有找到”');
+        await pg.fill('[data-filter="favs"]', '示例'); await pg.waitForTimeout(80);
+        await pg.click('[data-r="favs"] [data-act="fav-del"]'); await pg.waitForTimeout(80);
+        ok(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2ws:u1')).fav.length) === 1, '点 × 取消收藏（存进规则里，换手机也同步）');
+        await pg.fill('[data-filter="favs"]', ''); await pg.waitForTimeout(80);
+      }
+      await pg.goBack(); await pg.waitForTimeout(150);
+      // 浏览记录页
+      await pg.click('.ws-quick [data-act="hist"]'); await pg.waitForSelector('.ws-v.on[data-v="hist"]');
+      await shot('18-浏览记录');
+      if (L) {
+        const ht = await pg.$eval('[data-r="hist"]', e => e.textContent);
+        ok(/今天/.test(ht) && /原网页/.test(ht) && /简洁阅读/.test(ht), '浏览记录：按天分组，原网页和简洁阅读打开的都记了');
+        const n0 = await pg.$$eval('[data-r="hist"] .ws-row', a => a.length);
+        await pg.click('[data-r="hist"] .ws-row [data-act="seen-del"]'); await pg.waitForTimeout(80);
+        ok(await pg.$$eval('[data-r="hist"] .ws-row', a => a.length) === n0 - 1, '浏览记录能一条条删');
+      }
+      await pg.goBack(); await pg.waitForTimeout(150);
+      // 简洁阅读里查找
+      await openArt();
+      await pg.click('.ws-tool [data-act="rd-find"]'); await pg.fill('[data-r="find"] input', '量子');
+      await pg.waitForFunction(() => /^\d+\/\d+$/.test(document.querySelector('[data-r="fcount"]').textContent));
+      await shot('19-查找');
+      if (L) {
+        const n = await pg.$$eval('mark.ws-hl', a => a.length);
+        ok(n >= 5 && await pg.$eval('[data-r="fcount"]', e => e.textContent) === '1/' + n, '查找：标出全部 ' + n + ' 处，显示第几个');
+        await pg.click('[data-act="find-next"]');
+        ok(await pg.$eval('[data-r="fcount"]', e => e.textContent) === '2/' + n && await pg.$eval('mark.ws-hl.cur', e => e === document.querySelectorAll('mark.ws-hl')[1]), '点 ↓ 跳到下一个');
+        await pg.click('[data-act="find-prev"]'); await pg.click('[data-act="find-prev"]');
+        ok(await pg.$eval('[data-r="fcount"]', e => e.textContent) === n + '/' + n, '点 ↑ 从第一个往回绕到最后一个');
+        await pg.fill('[data-r="find"] input', '没有这个词'); await pg.waitForFunction(() => document.querySelector('[data-r="fcount"]').textContent === '没找到');
+        ok(true, '找不到时写“没找到”');
+        await pg.click('[data-act="find-x"]');
+        ok(await pg.$$eval('mark.ws-hl', a => a.length) === 0 && await pg.$eval('[data-r="find"]', e => e.hidden) && /量子比特/.test(await pg.$eval('.ws-body', e => e.textContent)), '关掉查找：标记去掉，文章原样');
+        // 朗读（换成假的系统语音：只记下读了什么）
+        await pg.evaluate(() => {
+          window.__spoken = []; window.__cancel = 0; window.__auto = true;
+          Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: { speak: u => { __spoken.push({ t: u.text, l: u.lang }); if (__auto) setTimeout(() => u.onend && u.onend(), 5); }, cancel: () => { __cancel++; } } });
+          window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+          document.querySelector('[data-r="rdsc"]').scrollTop = 0;
+        });
+        await pg.click('.ws-tool [data-act="rd-say"]');
+        await pg.waitForFunction(() => __log.some(x => x.toast === '读完了'));
+        const sp = await pg.evaluate(() => __spoken);
+        ok(sp.length >= 6 && sp[0].t.startsWith('量子计算入门') && sp.every(x => x.l === 'zh-CN') && /量子纠错/.test(sp[sp.length - 1].t), '朗读：从标题开始一段段读到最后，用中文的声音 → 共 ' + sp.length + ' 段');
+        ok(await pg.$eval('.ws-tool [data-act="rd-say"]', e => e.textContent) === '朗读', '读完按钮变回“朗读”');
+        await pg.evaluate(() => { __auto = false; __spoken = []; });
+        await pg.click('.ws-tool [data-act="rd-say"]');
+        ok(await pg.$eval('.ws-tool [data-act="rd-say"]', e => e.textContent) === '停止' && await pg.$$eval('.ws-say', a => a.length) === 1, '读的时候按钮变成“停止”，正在读的那段有底色');
+        const c0 = await pg.evaluate(() => __cancel);
+        await pg.goBack(); await pg.waitForTimeout(150);
+        ok(await pg.evaluate(() => __cancel) > c0, '离开文章就停止朗读');
+        // 阅读位置：再打开回到上次看到的地方
+        await openArt();
+        ok(await reads() >= 1, '（准备）文章打开了');
+        await pg.evaluate(() => { const sc = document.querySelector('[data-r="rdsc"]'); sc.scrollTop = Math.round((sc.scrollHeight - sc.clientHeight) * 0.6); sc.dispatchEvent(new Event('scroll')); });
+        await pg.waitForTimeout(700);
+        const want = await pg.evaluate(() => { const sc = document.querySelector('[data-r="rdsc"]'); return sc.scrollHeight - sc.clientHeight; });
+        await pg.goBack(); await pg.waitForTimeout(150);
+        const r0 = await reads();
+        await openArt(); await pg.waitForTimeout(150);
+        const y = await pg.$eval('[data-r="rdsc"]', e => e.scrollTop);
+        ok(want < 300 || (y > want * 0.4 && (await toasts()).includes('接着上次看到的地方')), '再打开同一篇：回到上次看到的地方（' + y + ' / ' + want + '）');
+        ok(await reads() === r0, '6 小时内再打开同一篇：用手机里存的，不再请求服务器');
+        await pg.goBack(); await pg.waitForTimeout(150);
+        // 网不好：用手机里存的旧版本，说清楚是哪天的（收藏的文章总是先用手机里的，所以先取消收藏）
+        await openArt(); await pg.click('.ws-tool [data-act="rd-fav"]');
+        ok((await toasts()).slice(-1)[0] === '已取消收藏', '（准备）取消收藏这篇');
+        await pg.goBack(); await pg.waitForTimeout(150);
+        await pg.evaluate(() => new Promise(res => { const r = indexedDB.open('chatter-ws', 1); r.onsuccess = () => { const db = r.result, st = db.transaction('art', 'readwrite').objectStore('art'), c = st.openCursor();
+          c.onsuccess = () => { const x = c.result; if (!x) { db.close(); res(); return; } const v = x.value; v.tm = Date.now() - 7 * 3600000; x.update(v); x.continue(); }; }; }));
+        await pg.evaluate(() => { window.__readFail = true; });
+        await openArt();
+        const cn = await pg.$eval('.ws-cache', e => e.textContent).catch(() => '');
+        ok(/网络不好[\s\S]*存在手机里的版本/.test(cn) && await reads() === r0 + 1, '网不好：先给手机里存的旧版本，并说明 → ' + cn);
+        await pg.evaluate(() => { window.__readFail = false; });
+        await pg.click('.ws-cache [data-act="rd-refresh"]'); await pg.waitForSelector('.ws-v.on .ws-body p'); await pg.waitForTimeout(100);
+        ok(await reads() === r0 + 2 && !(await pg.$('.ws-cache')), '点“取最新的”：重新取，提示消失');
+        await pg.goBack(); await pg.waitForTimeout(150);
+        // 不记浏览记录
+        await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]');
+        await pg.waitForFunction(() => /\d+ 篇/.test(document.querySelector('[data-r="artn"]').textContent));
+        ok(true, '规则页：显示手机里存了几篇文章，可以清空');
+        await pg.click('.ws-sw[data-act="tgl-nohist"]');
+        const h0 = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsSeen:u1') || '[]').length), q0 = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsHist:u1') || '[]').length);
+        await pg.goBack(); await pg.waitForTimeout(150);
+        await pg.evaluate(() => ChatterSearch.openPage('https://frame.test/c', '示例 C')); await pg.waitForSelector('.ws-v.on[data-v="web"] iframe');
+        await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(300); await fresh();
+        await pg.fill('[data-form="home"] input', '一个新词'); await pg.press('[data-form="home"] input', 'Enter'); await pg.waitForSelector('.ws-v.on[data-v="res"] .ws-r');
+        ok(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsSeen:u1') || '[]').length) === h0 && await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsHist:u1') || '[]').length) === q0, '打开“不记浏览记录”：看网页、搜东西都不记');
+        await fresh(); await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
+        // 共享设备上保留两套离线文章，用实际规则页检查数量、清理范围和容量回收。
+        const userArticleKeys = () => pg.evaluate(async () => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          try { return await new Promise(resolve => { const q = db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess = () => resolve(q.result); }); }
+          finally { db.close(); }
+        });
+        const otherKey = 'u2||https://sample.test/older';
+        await pg.evaluate(async otherKey => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          await new Promise(resolve => {
+            const tx = db.transaction('art','readwrite'), store = tx.objectStore('art');
+            for (let i=0; i<120; i++) store.put({k:'u1||https://sample.test/'+i,uid:'u1',tm:i+1});
+            store.put({k:otherKey,uid:'u2',tm:0});
+            tx.oncomplete = resolve;
+          }); db.close();
+        },otherKey);
+        await pg.evaluate(() => { window.__readFail = false; ChatterSearch.openPage('https://example.org/scope-check','测试文章'); });
+        // 新网址为正文模式走阅读器，模拟后端返回文章。
+        await pg.waitForSelector('.ws-v.on .ws-body p');
+        if (await pg.locator('.ws-v.on [data-act="rd-refresh"]').count()) await pg.click('.ws-v.on [data-act="rd-refresh"]');
+        await pg.waitForFunction(async () => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          const keys = await new Promise(resolve => { const q = db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess = () => resolve(q.result); });
+          db.close(); return keys.some(k => k.endsWith('scope-check')) && keys.filter(k => k.startsWith('u1|')).length <= 120;
+        });
+        ok((await userArticleKeys()).includes(otherKey), '缓存达到上限时，另一账号的文章仍保留');
+        await fresh(); await pg.click('.ws-v.on [data-act="rules"]');
+        await pg.waitForFunction(() => document.querySelector('[data-r="artn"]').textContent === '120 篇');
+        ok(true,'规则页只统计当前账号的文章');
+        await pg.click('[data-act="art-wipe"]'); await pick('清空');
+        await pg.waitForFunction(() => document.querySelector('[data-r="artn"]').textContent === '0 篇');
+        const saved = await userArticleKeys();
+        ok(saved.includes(otherKey) && !saved.some(k => k.startsWith('u1|')), '从规则页清空后，仅删除当前账号的文章');
+        await fresh();
+        await pg.evaluate(() => {
+          const call = __chWS.call;
+          __chWS.call = async req => {
+            if (req.op !== 'search') return call(req);
+            if (req.q === '第一条查询') {
+              await new Promise(resolve => { window.releaseFirstQuery = resolve; });
+              setTimeout(() => { window.firstQueryReturned = true; }, 0);
+            }
+            if (req.q === '没有匹配') return {ok:true, items:[]};
+            if (req.q === '暂时故障') return {ok:false, code:'net', msg:'搜索服务暂时连不上'};
+            if (req.q === '月度额度') return {ok:false, code:'empty', msg:'本月的免费次数用完了'};
+            return {ok:true, src:'exa', items:[{t:req.q, u:'https://example.org/' + req.type}]};
+          };
+        });
+        const submit = async query => {
+          const input = pg.locator('.ws-v.on form[role="search"] input');
+          await input.fill(query); await input.press('Enter');
+        };
+        await submit('第一条查询'); await pg.waitForFunction(() => !!window.releaseFirstQuery);
+        await submit('第二条查询'); await pg.getByRole('link', {name:'第二条查询',exact:true}).waitFor();
+        await pg.evaluate(() => window.releaseFirstQuery()); await pg.waitForFunction(() => window.firstQueryReturned);
+        const result = pg.locator('.ws-v.on .ws-r a.t');
+        ok((await result.allTextContents()).join('') === '第二条查询', '连续提交两次搜索，先发的查询后返回时仍显示第二次的结果');
+        await pg.click('.ws-v.on [data-act="tab"][data-t="news"]');
+        await pg.waitForFunction(() => document.querySelector('.ws-v.on .ws-r a.t')?.pathname === '/news');
+        ok(await result.getAttribute('href') === 'https://example.org/news', '切到新闻会使用新闻来源并保留可打开的原始链接');
+        const errorCard = pg.locator('.ws-v.on [data-r="res"] .ws-err');
+        await submit('没有匹配'); await errorCard.getByText('没有找到结果').waitFor();
+        ok((await errorCard.innerText()).includes('换个说法'), '没有搜索结果时给出改词建议');
+        await submit('暂时故障'); await errorCard.getByText('搜索服务暂时连不上').waitFor();
+        ok(await errorCard.getByRole('button',{name:'重试'}).isVisible(), '临时故障给出重试入口');
+        await submit('月度额度'); await errorCard.getByText('本月的免费次数用完了').waitFor();
+        ok(await errorCard.getByRole('button',{name:'去“深挖”看看'}).isVisible(), '月度额度用完时提供仍可使用的深挖入口');
+        ok(errs.length === e0, '这批新功能没有报错 ' + errs.slice(e0).join(' | '));
+      } else { await pg.goBack(); await pg.waitForTimeout(150); }
     }
     await ctx.close();
   }

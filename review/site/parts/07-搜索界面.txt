@@ -34,7 +34,11 @@ const I = {
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   send: '<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
   play: '<path d="M8 5.5v13l11-6.5z"/>',
-  img: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M20 16l-5-5-8 8.5"/>'
+  img: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M20 16l-5-5-8 8.5"/>',
+  up: '<path d="M6 15l6-6 6 6"/>',
+  speak: '<path d="M4.5 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M16 9a4.5 4.5 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/>',
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.4 2.6 3.5 5.5 3.5 8.5s-1.1 5.9-3.5 8.5c-2.4-2.6-3.5-5.5-3.5-8.5s1.1-5.9 3.5-8.5z"/>'
 };
 const TYPES = [['web', '网页'], ['images', '图片'], ['videos', '视频'], ['news', '新闻'], ['deep', '深挖']];
 const TBS = [['', '时间不限'], ['day', '一天内'], ['week', '一周内'], ['month', '一个月内'], ['year', '一年内']];
@@ -123,13 +127,13 @@ function loadPrefs() {
   syncPrefs();
 }
 async function syncPrefs() {
-  const prefs = P;
+  const prefs = P; prefs._syncAt = Date.now();
   try {
     const r = await B.sb().from('search_prefs').select('prefs, updated_at').maybeSingle();
     if (P !== prefs || B.uid() !== prefs._uid) return;
     const d = r && r.data;
     if (d && d.prefs && (Date.parse(d.updated_at) || 0) > (P._at || 0)) {
-      P = Object.assign(prefsDef(), d.prefs, { _uid: P._uid, _at: Date.parse(d.updated_at) || 0 });
+      P = Object.assign(prefsDef(), d.prefs, { _uid: P._uid, _at: Date.parse(d.updated_at) || 0, _syncAt: Date.now() });
       LSs('ch2ws:' + P._uid, P); renderTop();
     }
   } catch (e) {}
@@ -140,7 +144,7 @@ function savePrefs() {
   const prefs = P;
   saveT = setTimeout(async () => {
     if (P !== prefs || B.uid() !== prefs._uid) return;
-    const body = Object.assign({}, prefs); delete body._uid; delete body._at;
+    const body = Object.assign({}, prefs); delete body._uid; delete body._at; delete body._syncAt;
     try {
       const r = await B.sb().from('search_prefs').upsert({ uid: prefs._uid, prefs: body, updated_at: new Date().toISOString() }, { onConflict: 'uid' });
       if (r && r.error) B.logErr('ws-prefs', r.error);
@@ -148,7 +152,7 @@ function savePrefs() {
   }, 800);
 }
 function hist() { return LSg(uidKey('ch2wsHist'), []); }
-function addHist(q) { LSs(uidKey('ch2wsHist'), [q].concat(hist().filter(x => x !== q)).slice(0, 30)); }
+function addHist(q) { if (P && P.noHist) return; LSs(uidKey('ch2wsHist'), [q].concat(hist().filter(x => x !== q)).slice(0, 30)); }
 
 /* ---------- 样式 ---------- */
 const CSS = `
@@ -276,8 +280,8 @@ const CSS = `
 .ws-lead{width:100%;border-radius:18px;margin:0 0 18px;display:block;background:var(--surface2)}
 .ws-from{font-size:12.5px;color:var(--muted);margin-top:24px}
 .ws-from a{color:var(--muted)}
-.ws-tool{display:grid;grid-template-columns:repeat(5,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
-.ws-tool button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
+.ws-tool{display:grid;grid-template-columns:repeat(7,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.ws-tool button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;white-space:nowrap;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
 .ws-tool button.on{color:var(--accent)}
 .ws-v.dk{background:#0b0a10;color:#f1eefb}
 .ws-v.dk .ws-ib{color:#f1eefb}
@@ -315,17 +319,48 @@ const CSS = `
 .ws-trb span{flex:1;min-width:140px}
 .ws-trb button{height:30px;padding:0 11px;border-radius:10px;background:var(--surface);color:var(--accent);font-size:12.5px}
 .ws-trb.err{background:var(--surface2)}
+.ws-trb[hidden]{display:none}
 .ws-ot{font-size:13px;color:var(--muted);margin:-4px 0 10px;line-height:1.5}
 .ws-desc{font-size:14px;color:var(--muted);line-height:1.65;margin:0 0 14px}
 .ws-lks .ws-row{min-height:56px;cursor:pointer}
 .ws-lks .ws-tx{white-space:normal;line-height:1.45}
 .ws-qen{font-size:13px;color:var(--muted);padding:2px 4px 0;line-height:1.6}
 .ws-qen button{background:transparent;padding:0 2px;color:var(--accent);font-size:13px}
+/* 收藏、浏览记录、输入联想、页内查找、朗读、手机里保存的文章 */
+.ws-quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.ws-quick button{display:flex;align-items:center;gap:8px;height:48px;padding:0 14px;border-radius:16px;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);font-size:15px;min-width:0}
+.ws-quick button svg{color:var(--accent);flex-shrink:0}
+.ws-quick b{margin-left:auto;font-weight:500;color:var(--muted);font-size:13px}
+.ws-sec .ws-secb{display:flex;gap:14px}
+.ws-sug{position:absolute;left:12px;right:12px;top:calc(64px + env(safe-area-inset-top));z-index:6;max-width:736px;margin:0 auto;background:var(--surface);border-radius:18px;box-shadow:0 14px 36px rgba(0,0,0,.2);overflow-y:auto;max-height:min(60vh,430px)}
+.ws-sug[hidden]{display:none}
+.ws-sug .ws-row{cursor:pointer}
+.ws-sug .ws-row>svg{color:var(--accent)}
+.ws-fl{padding:0 12px 6px;flex-shrink:0}
+.ws-fl input{width:100%;height:40px;border-radius:14px;border:0;background:var(--surface);box-shadow:var(--shadow);padding:0 14px;font-size:15px;color:var(--ink)}
+.ws-empty{text-align:center;color:var(--muted);font-size:14px;line-height:1.75;padding:56px 16px}
+.ws-day{font-size:12.5px;color:var(--muted);margin:20px 6px 8px}
+.ws-day:first-child{margin-top:8px}
+.ws-note2{margin:6px 0 12px;padding:10px 12px;border-radius:14px;background:var(--surface2);font-size:13px;color:var(--muted);line-height:1.55}
+.ws-ttl{color:var(--ink)!important;font-size:16px!important;font-weight:600}
+.ws-barb{height:34px;padding:0 10px;border-radius:12px;background:transparent;color:var(--accent);font-size:14px;flex-shrink:0}
+.ws-urlb{background:transparent;padding:6px 4px;border-radius:10px;min-width:0;height:auto;box-shadow:none}
+.ws-find{display:flex;align-items:center;gap:4px;padding:0 10px 8px;flex-shrink:0}
+.ws-find[hidden]{display:none}
+.ws-find input::-webkit-search-cancel-button,.ws-fl input::-webkit-search-cancel-button{display:none}
+.ws-find input{flex:1;min-width:0;height:38px;border-radius:12px;border:0;background:var(--surface);box-shadow:var(--shadow);padding:0 12px;font-size:15px;color:var(--ink)}
+.ws-find span{font-size:12.5px;color:var(--muted);min-width:46px;text-align:center;white-space:nowrap}
+.ws-find button{width:36px;height:36px;border-radius:12px;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+mark.ws-hl{background:color-mix(in srgb,#ffc928 55%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+mark.ws-hl.cur{background:#ff9f1a;color:#1b1b1b}
+.ws-say{background:color-mix(in srgb,var(--accent) 12%,transparent);border-radius:6px;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 12%,transparent)}
+.ws-cache{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:-6px 0 14px}
+.ws-cache button{background:transparent;padding:2px 0;color:var(--accent);font-size:12.5px;height:auto}
 `;
 
 /* ---------- 界面骨架 ---------- */
 let root = null, accountRevision = 0;
-const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map(), frm: new Map(), webT: 0, tipT: 0, quiet: false };   // frm：哪些网址能嵌进 App（问过服务器的，记 10 分钟）
+const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map(), frm: new Map(), webT: 0, tipT: 0, quiet: false, flt: {}, sug: [], fnd: { q: '', marks: [], i: -1 } };   // frm：哪些网址能嵌进 App（问过服务器的，记 10 分钟）
 if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
 function bar(id, ph, right) {
   return '<div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button>' +
@@ -341,19 +376,35 @@ function build() {
   }
   root = document.createElement('div'); root.id = 'ws'; root.className = 'ws'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '搜索');
   root.innerHTML =
-    '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
-    '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
-    '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div><div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
-      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-vers">' + ico(I.clock) + '历史版本</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
-    '<section class="ws-v" data-v="web"><div class="ws-bar ws-in ws-wbar"><button type="button" class="ws-ib" data-act="web-close" aria-label="关闭网页">' + ico(I.x) + '</button><button type="button" class="ws-ib" data-act="back" aria-label="后退">' + ico(I.back) + '</button><span class="ws-site" data-r="wsite"></span><button type="button" class="ws-ib" data-act="web-read" aria-label="简洁阅读">' + ico(I.read) + '</button><button type="button" class="ws-ib" data-act="web-more" aria-label="更多">' + ico(I.more) + '</button></div>' +
+    '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-sug" data-r="sug-home" hidden></div><div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
+    '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-sug" data-r="sug-res" hidden></div><div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
+    '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div>' +
+      '<div class="ws-find ws-in" data-r="find" hidden><input type="search" enterkeyhint="search" autocomplete="off" placeholder="在这篇文章里找" aria-label="在这篇文章里找"><span data-r="fcount"></span><button type="button" data-act="find-prev" aria-label="上一个">' + ico(I.up, 20) + '</button><button type="button" data-act="find-next" aria-label="下一个">' + ico(I.down, 20) + '</button><button type="button" data-act="find-x" aria-label="关掉查找">' + ico(I.x, 18) + '</button></div>' +
+      '<div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
+      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-find">' + ico(I.find) + '查找</button><button type="button" data-act="rd-say">' + ico(I.speak) + '朗读</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-vers">' + ico(I.clock) + '历史版本</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
+    '<section class="ws-v" data-v="web"><div class="ws-bar ws-in ws-wbar"><button type="button" class="ws-ib" data-act="web-close" aria-label="关闭网页">' + ico(I.x) + '</button><button type="button" class="ws-ib" data-act="back" aria-label="后退">' + ico(I.back) + '</button><button type="button" class="ws-site ws-urlb" data-r="wsite" data-act="web-url" aria-label="网址"></button><button type="button" class="ws-ib" data-act="web-read" aria-label="简洁阅读">' + ico(I.read) + '</button><button type="button" class="ws-ib" data-act="web-more" aria-label="更多">' + ico(I.more) + '</button></div>' +
       '<div class="ws-web" data-r="wbox"></div><div class="ws-wtip" data-r="wtip" hidden></div></section>' +
+    '<section class="ws-v" data-v="favs"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site ws-ttl">收藏</span><span style="width:50px"></span></div><div class="ws-fl ws-in"><input type="search" data-filter="favs" enterkeyhint="search" autocomplete="off" placeholder="在收藏里找" aria-label="在收藏里找"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="favs"></div></div></section>' +
+    '<section class="ws-v" data-v="hist"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site ws-ttl">浏览记录</span><button type="button" class="ws-barb" data-act="seen-wipe">清空</button></div><div class="ws-fl ws-in"><input type="search" data-filter="hist" enterkeyhint="search" autocomplete="off" placeholder="在浏览记录里找" aria-label="在浏览记录里找"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="hist"></div></div></section>' +
     '<section class="ws-v" data-v="rules"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" style="color:var(--ink);font-size:16px;font-weight:600">搜索规则</span><span style="width:50px"></span></div><div class="ws-sc"><div class="ws-pad ws-in ws-rules" data-r="rules"></div></div></section>' +
     '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">用浏览器看原图</button></div></section>' +
     '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在原网站打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
   (document.querySelector('.app-container') || document.body).appendChild(root);
   root.addEventListener('click', onClick);
-  root.addEventListener('submit', e => { e.preventDefault(); const f = e.target; const inp = f.querySelector('input'); try { inp.blur(); } catch (x) {} search(inp.value, W.type); });
-  root.addEventListener('input', e => { const f = e.target.closest && e.target.closest('.ws-field'); if (f) f.classList.toggle('has', !!e.target.value); });
+  root.addEventListener('submit', e => { e.preventDefault(); const f = e.target; const inp = f.querySelector('input'); try { inp.blur(); } catch (x) {} sugHide(); search(inp.value, W.type); });
+  root.addEventListener('input', e => {
+    const f = e.target.closest && e.target.closest('.ws-field'); if (f) { f.classList.toggle('has', !!e.target.value); sugShow(f.dataset.form, e.target.value); }
+    const fl = e.target.dataset && e.target.dataset.filter; if (fl) { W.flt[fl] = e.target.value; if (fl === 'favs') renderFavs(); else renderHistory(); }
+    if (e.target.closest && e.target.closest('[data-r="find"]')) { clearTimeout(W.fndT); const v = e.target.value; W.fndT = setTimeout(() => findRun(v), 220); }
+  });
+  root.addEventListener('mousedown', e => { if (e.target.closest && e.target.closest('.ws-sug')) e.preventDefault(); });   // 点联想时输入框不失去焦点
+  root.addEventListener('focusin', e => { const f = e.target.closest && e.target.closest('.ws-field'); if (f && e.target.value) sugShow(f.dataset.form, e.target.value); });
+  root.addEventListener('focusout', e => { if (e.target.closest && e.target.closest('.ws-field')) setTimeout(() => { const a = document.activeElement; if (!a || !a.closest || !a.closest('.ws-field')) sugHide(); }, 180); });
+  root.addEventListener('keydown', e => {
+    if (e.key === 'Escape') sugHide();
+    if (e.key === 'Enter' && e.target.closest && e.target.closest('[data-r="find"]')) { e.preventDefault(); clearTimeout(W.fndT); if (W.fnd.q !== e.target.value.trim()) findRun(e.target.value); else findStep(e.shiftKey ? -1 : 1); }
+  });
+  root.querySelector('[data-r="rdsc"]').addEventListener('scroll', () => { clearTimeout(W.posT); W.posT = setTimeout(savePos, 500); }, { passive: true });
   root.querySelector('[data-r="read"]').addEventListener('error', e => {   // 文章里的图片取不到：直接去掉，不留破图
     const im = e.target; if (!im || im.tagName !== 'IMG') return;
     const fig = im.closest('figure'); im.remove(); if (fig && !fig.querySelector('img') && !fig.textContent.trim()) fig.remove();
@@ -376,12 +427,16 @@ function show() {
   else if (t.v === 'img') renderImg(t);
   else if (t.v === 'vid') renderVid(t);
   else if (t.v === 'web') renderPage(t);
+  else if (t.v === 'favs') renderFavs();
+  else if (t.v === 'hist') renderHistory();
+  if (TTS.on && TTS.t !== t) ttsStop();   // 离开正在朗读的文章就停
+  sugHide();
   if (t.v !== 'vid') { R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }   // 离开播放页就停掉视频
   if (t.v !== 'web') unmountWeb();   // 离开网页那一层：网页框拿掉（停掉里面的声音、视频）
   const sc = scroller(t.v); if (sc && t.y != null) sc.scrollTop = t.y;   // 回到上一层时停在原来看到的位置
 }
 function go(v, d) {
-  const cur = top(); if (cur) { const sc = scroller(cur.v); if (sc) cur.y = sc.scrollTop; }
+  const cur = top(); if (cur) { const sc = scroller(cur.v); if (sc) cur.y = sc.scrollTop; if (cur.v === 'read') { clearTimeout(W.posT); savePos(); } }
   W.stack.push({ v: v, d: d || {} });
   try { history.pushState({ ws: W.stack.length }, '', location.href); } catch (e) {}
   show();
@@ -391,6 +446,7 @@ function back() {
   popTo(W.stack.length - 1);
 }
 function popTo(n) {
+  const cur = top(); if (cur && cur.v === 'read') { clearTimeout(W.posT); savePos(); }   // 离开文章时记下看到哪了
   W.stack.length = Math.max(0, Math.min(n, W.stack.length));
   if (!W.stack.length) { close(); return; }
   if (W.quiet) return;   // 正在从网页那一层退出来，接下来马上要换到别的页面：先不画，免得闪一下
@@ -398,11 +454,13 @@ function popTo(n) {
 }
 function close() {
   W.on = false; W.stack.length = 0;
-  if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; unmountWeb(); }
+  ttsStop();
+  if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; unmountWeb(); sugHide(); }
   document.body.classList.remove('ws-open');
 }
 function resetAccount() {
   accountRevision++;
+  ttsStop(); artClose();
   clearTimeout(saveT); P = null;
   close();
   W.seq++; W.cur = null; W.shownRead = null; W.view = []; W.trc.clear(); W.frm.clear();
@@ -417,6 +475,7 @@ function onPop(e) {
 }
 function open(q) {
   build(); loadPrefs(); loadCfg(); loadUsage();
+  if (P && Date.now() - (P._syncAt || 0) > 60000) syncPrefs();   // App 一直开着时，别的手机上改的收藏、规则也要拿过来（服务器上的更新才用）
   if (W.on) { if (q) search(q, W.type); return; }
   W.on = true; root.classList.add('on'); document.body.classList.add('ws-open');
   go('home');
@@ -429,23 +488,31 @@ function renderTop() { if (W.on && top()) show(); }
 /* ---------- 搜索首页 ---------- */
 function renderHome() {
   R('types').innerHTML = TYPES.map(t => '<button type="button" class="ws-chip' + (W.type === t[0] ? ' act' : '') + '" data-act="type" data-t="' + t[0] + '">' + t[1] + '</button>').join('');
-  let h = '<div class="ws-sec" style="margin-top:22px">置顶网站</div><div class="ws-grid">';
+  const nf = (P.fav || []).length, ns = seen().length;
+  let h = '<div class="ws-quick"><button type="button" data-act="favs">' + ico(I.mark, 19) + '收藏<b>' + (nf || '') + '</b></button><button type="button" data-act="hist">' + ico(I.clock, 19) + '浏览记录<b>' + (P.noHist ? '不记' : (ns || '')) + '</b></button></div>';
+  h += '<div class="ws-sec">置顶网站</div><div class="ws-grid">';
   (P.pin || []).slice(0, 14).forEach(d => {
     const hs = d.split('/')[0];
     h += '<button type="button" class="ws-tile" data-act="pin-go" data-d="' + esc(d) + '"><span class="ws-mono" style="color:' + monoColor(hs) + '">' + esc(monoChar(hs)) + '</span><span>' + esc(hs.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>';
   });
   h += '<button type="button" class="ws-tile" data-act="pin-add"><span class="ws-mono add">' + ico(I.plus, 20) + '</span><span style="color:var(--muted)">添加</span></button></div>';
   if (!(P.pin || []).length) h += '<div class="ws-hint">置顶的网站排在结果最前面；点一下只搜这个网站。</div>';
-  const fav = (P.fav || []).slice(0, 6);
+  const often = oftenSites();
+  if (often.length) {
+    h += '<div class="ws-sec">常去的网站</div><div class="ws-grid">';
+    often.forEach(x => { h += '<button type="button" class="ws-tile" data-act="often-go" data-d="' + esc(x.h) + '"><span class="ws-mono" style="color:' + monoColor(x.h) + '">' + esc(monoChar(x.h)) + '</span><span>' + esc(x.h.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>'; });
+    h += '</div>';
+  }
+  const fav = (P.fav || []).slice(0, 3);
   if (fav.length) {
-    h += '<div class="ws-sec">收藏的文章' + ((P.fav || []).length > 6 ? '<button type="button" data-act="fav-all">全部 ' + P.fav.length + ' 篇</button>' : '') + '</div><div class="ws-card">';
+    h += '<div class="ws-sec">收藏的文章' + '<button type="button" data-act="favs">全部 ' + P.fav.length + ' 个</button>' + '</div><div class="ws-card">';
     fav.forEach((f, i) => { h += '<div class="ws-row" data-act="fav-go" data-i="' + i + '">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || f.u) + '<span class="ws-sub">' + esc(f.s || host(f.u)) + '</span></span></div>'; });
     h += '</div>';
   }
   const sn = seen().slice(0, 5);
   if (sn.length) {
-    h += '<div class="ws-sec">最近看过<button type="button" data-act="seen-clear">清空</button></div><div class="ws-card">';
-    sn.forEach((x, i) => { h += '<div class="ws-row" data-act="seen-go" data-i="' + i + '" style="cursor:pointer">' + ico(I.chev, 15) + '<span class="ws-tx">' + esc(x.t || x.u) + '<span class="ws-sub">' + esc((x.s || host(x.u)) + (x.at ? ' · ' + tsDay(x.at) + ' 存档' : '')) + '</span></span></div>'; });
+    h += '<div class="ws-sec">最近看过<span class="ws-secb"><button type="button" data-act="hist">全部记录</button><button type="button" data-act="seen-clear">清空</button></span></div><div class="ws-card">';
+    sn.forEach((x, i) => { h += '<div class="ws-row" data-act="seen-go" data-i="' + i + '" style="cursor:pointer">' + ico(x.m === 'web' ? I.globe : I.read, 16) + '<span class="ws-tx">' + esc(x.t || host(x.u) || x.u) + '<span class="ws-sub">' + esc(entrySub(x)) + '</span></span></div>'; });
     h += '</div>';
   }
   const hs = hist().slice(0, 8);
@@ -682,6 +749,12 @@ async function probeWeb(t) {
   if (top() !== t) return;   // 已经离开这一页
   let src = '';
   try { const x = new URL(f.url || d.u); if (x.protocol === 'https:' && x.origin !== location.origin) src = x.href; } catch (e) { /* 网址不对 */ }
+  // 手机仍显示联网但搜索服务连接失败时，收藏的本机副本也能打开。
+  if (f.frame === null && f.code === 'net' && !d.fromRead && isFav(d.u, '')) {
+    const saved = await artGet(d.u, '');
+    if (account !== accountRevision || top() !== t) return;
+    if (saved?.art?.ok) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }
+  }
   if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：简洁阅读那边有按原因的提示和按钮（看存档、去真的网站）
   if (f.frame === false || !src) {
     const why = WHY[f.why] || (src ? '这个网站不允许在别的 App 里显示原网页' : '这个网址不能在 App 里打开');
@@ -689,6 +762,7 @@ async function probeWeb(t) {
     replaceTop(t, 'read', { u: d.u, t: d.t, note: why + '，已换成简洁阅读', noFrame: true }); return;
   }
   d.src = src; d.unsure = f.frame === null;
+  addVisit({ u: d.u, t: d.t, s: host(src), m: 'web' });
   show();
 }
 function replaceTop(t, v, d) { if (top() !== t) return; t.v = v; t.d = d; W.shownRead = null; show(); }   // 同一层换成别的页面，不多一条历史
@@ -750,6 +824,8 @@ function itemActs(it) {
   const pinned = (P.pin || []).some(d => hit(it.u, [d]));
   items.push({ label: pinned ? '取消置顶 ' + h : '置顶 ' + h + '（排在最前面）', fn: () => { if (pinned) P.pin = P.pin.filter(d => !hit(it.u, [d])); else P.pin = [h].concat(P.pin || []); savePrefs(); renderTop(); B.toast(pinned ? '已取消置顶' : '已置顶 ' + h); } });
   items.push({ label: '不看 ' + h + ' 的结果', fn: () => { P.block = [h].concat((P.block || []).filter(d => d !== h)); savePrefs(); renderTop(); B.toast('以后不显示 ' + h + '，可以在搜索规则里改回来'); } });
+  const fv = isFav(it.u, '');
+  items.push({ label: fv ? '取消收藏' : '收藏', fn: () => { const on = toggleFav({ u: it.u, t: it.t, s: h }); renderTop(); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } });
   items.push({ label: '用浏览器打开', fn: () => ext(it.u) });
   items.push({ label: '看互联网档案馆的存档', fn: () => go('read', { u: it.u, t: it.t, at: 'latest' }) });
   items.push({ label: '复制链接', fn: () => B.copy(it.u) });
@@ -786,11 +862,9 @@ const tsDay = ts => String(ts || '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1-$2-
 const tsCn = ts => { const m = /^(\d{4})(\d{2})(\d{2})/.exec(String(ts || '')); return m ? m[1] + ' 年 ' + (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : String(ts || ''); };
 const archUrl = d => d.art && d.art.arch ? 'https://web.archive.org/web/' + d.art.arch + '/' + (d.art.u || d.u) : (d.art && d.art.u) || d.u;
 function seen() { return LSg(uidKey('ch2wsSeen'), []); }
-function addSeen(d) {   // 最近看过：打开成功的文章记下来，结果列表变了也能找回
+function addSeen(d) {   // 最近看过：简洁阅读打开成功的文章记下来，结果列表变了也能找回
   const a = d.art; if (!a) return;
-  const at = a.arch || '', list = seen().filter(x => !(x.u === d.u && (x.at || '') === at));
-  list.unshift({ u: d.u, t: a.title, s: a.site, at: at, tm: Date.now() });
-  LSs(uidKey('ch2wsSeen'), list.slice(0, 100));
+  addVisit({ u: d.u, t: a.title, s: a.site, at: a.arch || '', m: 'read' });
 }
 function banners(d, final) {   // 阅读页顶部的提醒：仿冒网址、跳到了别的网站
   let h = '';
@@ -833,8 +907,9 @@ function renderRead(t) {
   R('rtool').style.display = d.art ? '' : 'none';
   const favd = (P.fav || []).some(f => f.u === d.u && (f.at || '') === ((d.art && d.art.arch) || ''));
   const fb = R('rtool').querySelector('[data-act="rd-fav"]'); fb.classList.toggle('on', favd); fb.lastChild.nodeValue = favd ? '已收藏' : '收藏';
+  paintTts();
   if (W.shownRead === t && !d.dirty) return;
-  W.shownRead = t; d.dirty = false;
+  W.shownRead = t; d.dirty = false; findReset();
   const box = R('read');
   if (d.art) {
     const a = d.art;
@@ -847,11 +922,15 @@ function renderRead(t) {
         '<div class="ws-card ws-lks">' + ls.map((l, i) => '<div class="ws-row" data-act="lk-go" data-i="' + i + '"><span class="ws-tx"><span class="lt">' + esc(l.t) + '</span><span class="ws-sub">' + esc(host(l.u)) + '</span></span>' + ico(I.chev, 15) + '</div>').join('') + '</div>' + from + '</div>';
     } else {
       const mins = Math.max(1, Math.round((a.len || 0) / 450));
+      const old = d.cachedAt && (d.stale || Date.now() - d.cachedAt > 30 * 60000);
+      const cacheNote = old ? '<div class="ws-cache"><span>' + (d.stale ? '网络不好，' : '') + '显示的是 ' + esc(whenCn(d.cachedAt)) + ' 存在手机里的版本</span><button type="button" data-act="rd-refresh">取最新的</button></div>' : '';
       box.innerHTML = '<article class="ws-art" style="font-size:' + W.fs + 'px">' + banners(d, a.u) + arch + '<div class="ws-trb" hidden></div>' +
-        '<h1>' + esc(a.title) + '</h1><div class="ws-ot" hidden></div><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' +
+        '<h1>' + esc(a.title) + '</h1><div class="ws-ot" hidden></div><div class="meta">' + esc([a.site, a.date, '约 ' + mins + ' 分钟读完'].filter(Boolean).join(' · ')) + '</div>' + cacheNote +
         (a.img ? '<img class="ws-lead" src="' + esc(a.img) + '" alt="" referrerpolicy="no-referrer">' : '') + '<div class="ws-body"></div>' + from + '</article>';
       box.querySelector('.ws-body').appendChild(sanitize(a.html));
+      restorePos(t);
     }
+    findReset();
     initTr(t);
     return;
   }
@@ -1016,11 +1095,21 @@ async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多
   if (W.cur === c && top() === page) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
 }
 async function fetchRead(t) {
-  const account = accountRevision, d = t.d; d.loading = true;
-  const r = await B.call({ op: 'read', url: d.u, at: d.at || '' }, d.at ? 45000 : 25000);
+  const account = accountRevision, d = t.d, at = d.at || '', force = !!d.force; d.loading = true; d.force = false;
+  const c = force ? null : await artGet(d.u, at);
+  if (account !== accountRevision) return;
+  // 手机里存着的直接用（不联网、不花服务器次数）：收藏的、固定日期的存档、6 小时内看过的
+  if (c && c.art && (isFav(d.u, c.art.arch || at) || (at && at !== 'latest') || Date.now() - c.tm < 6 * 3600000)) {
+    d.loading = false; d.dirty = true; d.art = c.art; d.cachedAt = c.tm; d.stale = false; addSeen(d);
+    if (top() === t) renderRead(t);
+    return;
+  }
+  const r = await B.call({ op: 'read', url: d.u, at: at }, d.at ? 45000 : 25000);
   if (account !== accountRevision) return;
   d.loading = false; d.dirty = true;
-  if (r && r.ok) { d.art = r; addSeen(d); } else d.err = r || { code: 'net', msg: '出错了' };
+  if (r && r.ok) { d.art = r; d.cachedAt = 0; d.stale = false; addSeen(d); artPut(d.u, at, r); }
+  else if (c && c.art && (!r || /^(net|timeout|down|busy|limit)$/.test(r.code || 'net'))) { d.art = c.art; d.cachedAt = c.tm; d.stale = true; addSeen(d); }   // 网不好：先给手机里存着的旧版本
+  else d.err = r || { code: 'net', msg: '出错了' };
   if (top() === t) renderRead(t);
 }
 async function showVersions(d) {
@@ -1084,6 +1173,10 @@ function renderRules() {
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">智谱（免费）<span class="ws-sub" style="white-space:normal">主要的翻译服务；按国内规定会拒绝翻译一些内容</span></span><span class="ws-val">' + (W.keys ? (W.keys.glm ? '已开通' : '还没填密钥') : '…') + '</span></div>' +
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Groq（备用，可不填）<span class="ws-sub" style="white-space:normal">智谱拒绝或太忙的段落交给它</span></span><span class="ws-val">' + (W.keys ? (W.keys.groq ? '已开通' : '没填') : '…') + '</span></div></div>' +
     '<div class="ws-hint">翻过的段落 30 天内再看不用重翻。</div>' +
+    '<div class="ws-sec">浏览记录和手机里的文章</div><div class="ws-card">' +
+      sw('tgl-nohist', !!P.noHist, '不记浏览记录', '打开以后不记看过的网页和搜过的词；已经记下的去“浏览记录”里删') +
+      '<div class="ws-row" data-act="hist" style="cursor:pointer"><span class="ws-tx">浏览记录<span class="ws-sub">只存在这台手机里，退出登录会清掉</span></span><span class="ws-val">' + seen().length + ' 条</span>' + ico(I.chev, 16) + '</div>' +
+      '<div class="ws-row" data-act="art-wipe" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">清空手机里保存的文章<span class="ws-sub" style="white-space:normal">用简洁阅读看过的文章会在手机里存一份：收藏的没网也能看，再打开不用等</span></span><span class="ws-val" data-r="artn">…</span></div></div>' +
     '<div class="ws-sec">置顶网站</div><div class="ws-card">' + list('pin', '还没有') + '</div>' +
     '<div class="ws-sec">不看的网站</div><div class="ws-card">' + list('block', '还没有') + '</div>' +
     '<div class="ws-sec">默认名单</div><div class="ws-card">' +
@@ -1092,6 +1185,8 @@ function renderRules() {
       '<details><summary>要登录的网站（' + CFG.direct.length + ' 个）</summary><p>这些网站不让在 App 里显示时，直接给出“用浏览器打开”（能用你在浏览器里的登录）。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
     '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。</div>';
   R('rules').innerHTML = h;
+  const countLabel = R('artn');
+  artCount().then(n => { if (countLabel.isConnected) countLabel.textContent = n == null ? '' : n + ' 篇'; });
 }
 function addSite(k) {
   B.form(k === 'pin' ? '置顶网站' : '不看的网站', [{ ph: '网址，例如 github.com', max: 120, type: 'url' }], async vals => {
@@ -1101,6 +1196,294 @@ function addSite(k) {
     savePrefs(); renderTop(); return null;
   }, '添加');
 }
+
+/* ---------- 浏览记录（只存在这台手机，按账号分开；打开“不记浏览记录”就什么都不记） ---------- */
+const HIST_MAX = 300;
+function addVisit(v) {   // v：{ u 网址, t 标题, s 网站, at 存档时间, m 'web' 原网页 / 'read' 简洁阅读 }
+  if (!v || !v.u || (P && P.noHist)) return;
+  const at = v.at || '', all = seen(), old = all.find(x => x.u === v.u && (x.at || '') === at), list = all.filter(x => x !== old);
+  list.unshift({ u: v.u, t: v.t || (old && old.t) || '', s: v.s || host(v.u), at: at, m: v.m || 'read', tm: Date.now(), c: ((old && old.c) || 1) + (old ? 1 : 0) });
+  LSs(uidKey('ch2wsSeen'), list.slice(0, HIST_MAX));
+}
+function openEntry(x) {   // 记录、收藏、联想里点一条：存档回存档，原网页回原网页，简洁阅读回简洁阅读
+  if (!x || !x.u) return;
+  if (x.at) go('read', { u: x.u, t: x.t, at: x.at });
+  else if (x.m === 'web') openUrl(x.u, x.t);
+  else go('read', { u: x.u, t: x.t });
+}
+const dayStart = tm => { const d = new Date(tm); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+const hm = tm => { const d = new Date(tm); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+function dayLabel(tm) {
+  const d0 = dayStart(Date.now()), x = dayStart(tm), d = new Date(tm);
+  if (x === d0) return '今天';
+  if (x === d0 - 86400000) return '昨天';
+  return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日' + (d.getFullYear() !== new Date().getFullYear() ? '（' + d.getFullYear() + ' 年）' : '');
+}
+function whenCn(tm) { const l = dayLabel(tm); return l === '今天' || l === '昨天' ? l + ' ' + hm(tm) : l; }
+function entrySub(x, full) { return [x.s || host(x.u), x.at ? tsDay(x.at) + ' 存档' : '', full && x.tm ? hm(x.tm) : '', full ? (x.m === 'web' ? '原网页' : '简洁阅读') : ''].filter(Boolean).join(' · '); }
+function oftenSites() {   // 常去的网站：浏览记录里去过 2 次以上的网站，置顶过的不重复放
+  const n = {}, first = {};
+  seen().forEach((x, i) => { const h = bare(host(x.u)); if (!h) return; n[h] = (n[h] || 0) + (x.c || 1); if (!(h in first)) first[h] = i; });
+  const pinned = h => (P.pin || []).some(d => { const p = d.split('/')[0]; return h === p || h.endsWith('.' + p); });
+  return Object.keys(n).filter(h => n[h] >= 2 && !pinned(h)).sort((a, b) => n[b] - n[a] || first[a] - first[b]).slice(0, 5).map(h => ({ h: h, n: n[h] }));
+}
+function renderHistory() {
+  if (!root) return;
+  const all = seen(), q = String(W.flt.hist || '').trim().toLowerCase();
+  const list = all.map((x, i) => [x, i]).filter(p => !q || ((p[0].t || '') + ' ' + p[0].u).toLowerCase().indexOf(q) >= 0);
+  let h = P.noHist ? '<div class="ws-note2">现在不记浏览记录。想重新开始记，去搜索规则里关掉“不记浏览记录”。</div>' : '';
+  if (!all.length) h += '<div class="ws-empty">还没有浏览记录。<br>打开过的网页和文章会记在这里，只存在这台手机。</div>';
+  else if (!list.length) h += '<div class="ws-empty">没有找到「' + esc(q) + '」</div>';
+  else {
+    let day = null;
+    list.forEach(p => {
+      const x = p[0], i = p[1], dl = x.tm ? dayLabel(x.tm) : '更早';
+      if (dl !== day) { h += (day === null ? '' : '</div>') + '<div class="ws-day">' + esc(dl) + '</div><div class="ws-card">'; day = dl; }
+      h += '<div class="ws-row" data-act="seen-go" data-i="' + i + '" style="cursor:pointer">' + ico(x.m === 'web' ? I.globe : I.read, 17) + '<span class="ws-tx">' + esc(x.t || host(x.u) || x.u) + '<span class="ws-sub">' + esc(entrySub(x, true)) + '</span></span>' +
+        '<button type="button" class="ws-x" data-act="seen-del" data-i="' + i + '" aria-label="删掉这条">' + ico(I.x, 15) + '</button></div>';
+    });
+    h += '</div><div class="ws-hint">只存在这台手机里，最多记 ' + HIST_MAX + ' 条，退出登录会清掉。</div>';
+  }
+  R('hist').innerHTML = h;
+}
+
+/* ---------- 收藏（存在账号里，换手机也在） ---------- */
+function isFav(u, at) { return ((P && P.fav) || []).some(f => f.u === u && (f.at || '') === (at || '')); }
+function toggleFav(x) {   // 收藏 / 取消收藏；返回 true 表示现在是收藏着的
+  const at = x.at || '', same = f => f.u === x.u && (f.at || '') === at, had = (P.fav || []).some(same);
+  P.fav = had ? P.fav.filter(f => !same(f)) : [{ u: x.u, t: x.t || host(x.u), s: x.s || host(x.u), at: at, tm: Date.now() }].concat(P.fav || []).slice(0, 200);
+  savePrefs(); return !had;
+}
+function renderFavs() {
+  if (!root) return;
+  const all = P.fav || [], q = String(W.flt.favs || '').trim().toLowerCase();
+  const list = all.map((f, i) => [f, i]).filter(p => !q || ((p[0].t || '') + ' ' + p[0].u + ' ' + (p[0].s || '')).toLowerCase().indexOf(q) >= 0);
+  let h;
+  if (!all.length) h = '<div class="ws-empty">还没有收藏。<br>看文章、看网页时点“收藏”，就会出现在这里；换手机登录也在。</div>';
+  else if (!list.length) h = '<div class="ws-empty">没有找到「' + esc(q) + '」</div>';
+  else h = '<div class="ws-card" style="margin-top:8px">' + list.map(p => { const f = p[0], i = p[1];
+    return '<div class="ws-row" data-act="fav-go" data-i="' + i + '" style="cursor:pointer">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || host(f.u) || f.u) + '<span class="ws-sub">' + esc([f.s || host(f.u), f.tm ? whenCn(f.tm) + ' 收藏' : ''].filter(Boolean).join(' · ')) + '</span></span>' +
+      '<button type="button" class="ws-x" data-act="fav-del" data-i="' + i + '" aria-label="取消收藏">' + ico(I.x, 15) + '</button></div>'; }).join('') + '</div>' +
+    '<div class="ws-hint">收藏存在账号里，换手机也在。在简洁阅读里收藏的文章，手机里还存了一份，没网也能看。</div>';
+  R('favs').innerHTML = h;
+}
+
+/* ---------- 输入时的联想：搜过的词、收藏和看过的网页、置顶网站（全在手机里找，不联网、不花次数） ---------- */
+function sugList(q) {
+  q = String(q || '').replace(/\s+/g, ' ').trim(); if (!q) return [];
+  const lq = q.toLowerCase(), out = [], keys = new Set();
+  if (URLISH.test(q) && q.indexOf(' ') < 0) out.push({ k: 'url', v: /^https?:/i.test(q) ? q : 'https://' + q, t: '打开 ' + q.replace(/^https?:\/\//i, ''), s: '直接打开这个网址' });
+  hist().filter(x => x !== q && x.toLowerCase().indexOf(lq) >= 0).slice(0, 4).forEach(x => out.push({ k: 'q', v: x, t: x }));
+  const pages = (P.fav || []).map(f => Object.assign({ fav: 1, m: f.at ? 'read' : 'web' }, f)).concat(seen());
+  let np = 0;
+  for (const p of pages) {
+    if (np >= 4) break;
+    const key = p.u + '|' + (p.at || '');
+    if (keys.has(key) || ((p.t || '') + ' ' + p.u).toLowerCase().indexOf(lq) < 0) continue;
+    keys.add(key); np++;
+    out.push({ k: p.fav ? 'fav' : 'page', p: p, t: p.t || host(p.u) || p.u, s: (p.fav ? '收藏 · ' : '看过 · ') + (p.s || host(p.u)) });
+  }
+  if (!/^site:/i.test(q)) (P.pin || []).filter(d => d.toLowerCase().indexOf(lq) >= 0).slice(0, 2).forEach(d => out.push({ k: 'site', v: d, t: '只搜 ' + d, s: '置顶网站' }));
+  return out.slice(0, 9);
+}
+function sugShow(form, q) {
+  if (!root) return;
+  const box = R('sug-' + form); if (!box) return;
+  const list = sugList(q); W.sug = list;
+  if (!list.length) { box.hidden = true; box.innerHTML = ''; return; }
+  const icon = { url: I.out, q: I.clock, fav: I.mark, site: I.find };
+  box.innerHTML = list.map((x, i) => '<div class="ws-row" data-act="sug" data-i="' + i + '">' + ico(x.k === 'page' ? (x.p.m === 'web' ? I.globe : I.read) : icon[x.k], 17) +
+    '<span class="ws-tx">' + esc(x.t) + (x.s ? '<span class="ws-sub">' + esc(x.s) + '</span>' : '') + '</span></div>').join('');
+  box.hidden = false;
+}
+function sugHide() { if (!root) return; ['home', 'res'].forEach(f => { const b = R('sug-' + f); if (b && !b.hidden) { b.hidden = true; b.innerHTML = ''; } }); }
+
+/* ---------- 简洁阅读里查找 ---------- */
+function findOpen() {
+  const bar = R('find'); if (!bar) return;
+  bar.hidden = false;
+  const inp = bar.querySelector('input');
+  setTimeout(() => { try { inp.focus(); inp.select(); } catch (e) {} }, 30);
+  if (inp.value.trim()) findRun(inp.value);
+}
+function findClear() {
+  (W.fnd.marks || []).forEach(m => { const p = m.parentNode; if (!p) return; p.replaceChild(document.createTextNode(m.textContent), m); p.normalize(); });
+  W.fnd = { q: '', marks: [], i: -1 };
+}
+function findReset() {
+  if (!root) return;
+  clearTimeout(W.fndT); findClear();
+  const bar = R('find'); if (bar) { bar.hidden = true; const inp = bar.querySelector('input'); if (inp) inp.value = ''; }
+  const c = R('fcount'); if (c) c.textContent = '';
+}
+function findRun(q) {
+  findClear(); q = String(q || '').trim(); W.fnd.q = q;
+  const art = R('read').querySelector('.ws-art'), cnt = R('fcount');
+  if (!q || !art) { cnt.textContent = ''; return; }
+  const lq = q.toLowerCase(), nodes = [];
+  const wk = document.createTreeWalker(art, NodeFilter.SHOW_TEXT, { acceptNode: n => (n.nodeValue.toLowerCase().indexOf(lq) >= 0 && n.parentNode && !n.parentNode.closest('[hidden],button,.ws-trb,.ws-cache,.ws-arch')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT });
+  while (wk.nextNode()) nodes.push(wk.currentNode);
+  const marks = [];
+  for (const n of nodes) {
+    const s = n.nodeValue, ls = s.toLowerCase(), frag = document.createDocumentFragment();
+    let from = 0, k;
+    while ((k = ls.indexOf(lq, from)) >= 0 && marks.length < 999) {
+      if (k > from) frag.appendChild(document.createTextNode(s.slice(from, k)));
+      const m = document.createElement('mark'); m.className = 'ws-hl'; m.textContent = s.slice(k, k + lq.length);
+      frag.appendChild(m); marks.push(m); from = k + lq.length;
+    }
+    if (from < s.length) frag.appendChild(document.createTextNode(s.slice(from)));
+    n.parentNode.replaceChild(frag, n);
+  }
+  W.fnd.marks = marks; W.fnd.i = marks.length ? 0 : -1;
+  findShow();
+}
+function findStep(dir) {
+  const f = W.fnd, n = f.marks.length;
+  if (!n) { const inp = R('find').querySelector('input'); if (inp && inp.value.trim()) findRun(inp.value); return; }
+  f.i = (f.i + dir + n) % n; findShow();
+}
+function findShow() {
+  const f = W.fnd;
+  f.marks.forEach((m, i) => m.classList.toggle('cur', i === f.i));
+  R('fcount').textContent = f.q ? (f.marks.length ? (f.i + 1) + '/' + f.marks.length : '没找到') : '';
+  const m = f.marks[f.i]; if (m) { try { m.scrollIntoView({ block: 'center' }); } catch (e) {} }
+}
+
+/* ---------- 朗读：用手机自带的语音，不联网、不花钱 ---------- */
+const TTS = { on: false, q: [], i: 0, t: null };
+const ttsOk = () => typeof window.speechSynthesis !== 'undefined' && typeof window.SpeechSynthesisUtterance !== 'undefined';
+function paintTts() {
+  const tool = root && R('rtool'), b = tool && tool.querySelector('[data-act="rd-say"]'); if (!b) return;
+  b.classList.toggle('on', TTS.on); b.innerHTML = ico(TTS.on ? I.stop : I.speak) + (TTS.on ? '停止' : '朗读');
+}
+function ttsStop() {
+  if (!TTS.on) return;
+  TTS.on = false; TTS.q = []; TTS.t = null;
+  try { window.speechSynthesis.cancel(); } catch (e) {}
+  if (root) root.querySelectorAll('.ws-say').forEach(x => x.classList.remove('ws-say'));
+  paintTts();
+}
+function ttsStart(t) {
+  if (!ttsOk()) { B.toast('这台手机的浏览器不支持朗读'); return; }
+  const art = R('read').querySelector('.ws-art'); if (!art || !t.d.art) { B.toast('文章还没打开'); return; }
+  const els = Array.from(art.querySelectorAll('h1, .ws-body p, .ws-body li, .ws-body h2, .ws-body h3, .ws-body h4, .ws-body blockquote, .ws-body pre, .ws-body figcaption, .ws-body td, .ws-body dd'))
+    .filter(el => el.textContent.trim() && !el.closest('[hidden]') && !el.querySelector('p, li, blockquote'));
+  if (!els.length) { B.toast('这一页没有能朗读的文字'); return; }
+  const top0 = R('rdsc').getBoundingClientRect().top + 8;
+  let i = els.findIndex(el => el.getBoundingClientRect().bottom > top0); if (i < 0) i = 0;   // 从屏幕上正在看的那一段开始读
+  try { window.speechSynthesis.cancel(); } catch (e) {}
+  TTS.on = true; TTS.q = els; TTS.i = i; TTS.t = t; paintTts();
+  B.toast('开始朗读（用手机自带的声音，不联网）');
+  speakNext();
+}
+function speakNext() {
+  if (!TTS.on) return;
+  if (top() !== TTS.t) { ttsStop(); return; }
+  const el = TTS.q[TTS.i];
+  if (!el || !el.isConnected) { const end = !el; ttsStop(); if (end) B.toast('读完了'); return; }
+  root.querySelectorAll('.ws-say').forEach(x => x.classList.remove('ws-say')); el.classList.add('ws-say');
+  const r = el.getBoundingClientRect(), sr = R('rdsc').getBoundingClientRect();
+  if (r.top < sr.top || r.bottom > sr.bottom) { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {} }
+  const text = el.textContent.replace(/\s+/g, ' ').trim().slice(0, 2500);
+  const u = new window.SpeechSynthesisUtterance(text);
+  u.lang = !foreign(text) ? 'zh-CN' : /[぀-ヿ]/.test(text) ? 'ja-JP' : /[가-힯]/.test(text) ? 'ko-KR' : 'en-US';
+  const my = TTS.i;
+  u.onend = () => { if (TTS.on && TTS.i === my) { TTS.i++; speakNext(); } };
+  u.onerror = ev => { if (!TTS.on || TTS.i !== my || (ev && /interrupted|canceled/.test(ev.error || ''))) return; TTS.i++; speakNext(); };
+  try { window.speechSynthesis.speak(u); } catch (e) { ttsStop(); B.toast('朗读没能开始'); }
+}
+
+/* ---------- 阅读位置：再打开同一篇，回到上次看到的地方（只存在这台手机） ---------- */
+const posKey = d => d.u + '|' + (d.at || '');
+function savePos() {
+  const t = top(); if (!t || t.v !== 'read' || !t.d.art || t.d.art.kind === 'links' || !t.d.posReady || (P && P.noHist)) return;
+  const sc = R('rdsc'), max = sc.scrollHeight - sc.clientHeight; if (max < 300) return;
+  const r = sc.scrollTop / max, m = LSg(uidKey('ch2wsPos'), {}), k = posKey(t.d);
+  delete m[k]; if (r > 0.04 && r < 0.96) m[k] = Math.round(r * 1000) / 1000;
+  const ks = Object.keys(m); ks.slice(0, Math.max(0, ks.length - 150)).forEach(x => delete m[x]);
+  LSs(uidKey('ch2wsPos'), m);
+}
+function restorePos(t) {
+  const d = t.d;
+  if (d.posTried) { d.posReady = true; return; }
+  d.posTried = true;
+  const r = LSg(uidKey('ch2wsPos'), {})[posKey(d)];
+  if (!r || t.y != null) { d.posReady = true; return; }
+  setTimeout(() => {
+    if (top() === t) { const sc = R('rdsc'), max = sc.scrollHeight - sc.clientHeight; if (max > 300) { sc.scrollTop = Math.round(r * max); B.toast('接着上次看到的地方'); } }
+    d.posReady = true;
+  }, 60);
+}
+
+/* ---------- 手机里保存的文章（IndexedDB）：收藏的没网也能看，6 小时内看过的再打开不用等、不花服务器次数 ---------- */
+const ADB = { p: null, db: null }, ART_MAX = 120;
+function adb() {
+  if (ADB.p) return ADB.p;
+  const revision = accountRevision;
+  const opening = new Promise((res, rej) => {
+    if (!window.indexedDB) { rej(new Error('no indexeddb')); return; }
+    let r; try { r = indexedDB.open('chatter-ws', 1); } catch (e) { rej(e); return; }
+    r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('art')) db.createObjectStore('art', { keyPath: 'k' }).createIndex('tm', 'tm'); };
+    r.onsuccess = () => { const db = r.result;
+      if (revision !== accountRevision || ADB.p !== opening) { db.close(); rej(new Error('账号已切换')); return; }
+      ADB.db = db; db.onversionchange = () => { try { db.close(); } catch (e) {} if (ADB.db === db) { ADB.db = null; ADB.p = null; } }; res(db); };   // 退出登录要删掉整个库时，先让开
+    r.onerror = () => rej(r.error || new Error('indexeddb'));
+    r.onblocked = () => rej(new Error('indexeddb blocked'));
+  });
+  ADB.p = opening;
+  opening.catch(() => { if (ADB.p === opening) ADB.p = null; });
+  return opening;
+}
+const artK = (uid, u, at) => uid + '|' + (at || '') + '|' + u;
+const articleRange = uid => IDBKeyRange.bound(uid + '|', uid + '}', false, true);
+const idbReq = q => new Promise((res, rej) => { q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+async function artGet(u, at) {
+  const uid = B.uid();
+  if (!uid) return null;
+  try { const db = await adb(); return (await idbReq(db.transaction('art').objectStore('art').get(artK(uid,u,at)))) || null; } catch (e) { return null; }
+}
+async function artPut(u, at, art) {
+  const uid = B.uid(), revision = accountRevision;
+  if (!uid || !art || !art.ok || String(art.html || '').length > 1500000) return;
+  if (P && P.noHist && !isFav(u, art.arch || at || '')) return;   // 不记浏览记录时，只存收藏的
+  try {
+    const db = await adb();
+    if (uid !== B.uid() || revision !== accountRevision) return;
+    const keep = new Set(((P && P.fav) || []).map(f => artK(uid, f.u, f.at || '')));
+    await new Promise((res, rej) => {
+      const tx = db.transaction('art', 'readwrite'), st = tx.objectStore('art');
+      st.put({ k: artK(uid,u,at), uid, u: u, at: at || '', art: art, tm: Date.now() });
+      const cq = st.count(articleRange(uid));
+      cq.onsuccess = () => {   // 超过 120 篇：从最早存的删起，收藏的留着
+        let extra = cq.result - ART_MAX; if (extra <= 0) return;
+        const cur = st.index('tm').openKeyCursor();
+        cur.onsuccess = () => { const c = cur.result; if (!c || extra <= 0) return; if (c.primaryKey.startsWith(uid + '|') && !keep.has(c.primaryKey)) { st.delete(c.primaryKey); extra--; } c.continue(); };
+      };
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  } catch (e) { try { B.logErr('ws-art', e); } catch (x) {} }
+}
+async function artCount() {
+  const uid = B.uid(); if (!uid) return 0;
+  try { const db = await adb(); return await idbReq(db.transaction('art').objectStore('art').count(articleRange(uid))); } catch (e) { return null; }
+}
+async function clearMyArticles() {
+  const uid = B.uid(), revision = accountRevision;
+  if (!uid) return;
+  B.acts('清空当前账号在这台设备保存的文章？', [{ label: '清空', danger: true, fn: async () => {
+    try {
+      const db = await adb();
+      if (revision !== accountRevision) return;
+      await new Promise((res, rej) => {
+        const tx = db.transaction('art', 'readwrite'); tx.objectStore('art').delete(articleRange(uid));
+        tx.oncomplete = res; tx.onabort = tx.onerror = () => rej(tx.error);
+      });
+      if (revision === accountRevision) { renderTop(); B.toast('本账号在这台设备保存的文章已清空'); }
+    } catch (e) { if (revision === accountRevision) B.toast('本机文章清理失败，请重试'); }
+  } }, { label: '取消', fn: null }]);
+}
+function artClose() { const db = ADB.db; ADB.db = null; ADB.p = null; if (db) { try { db.close(); } catch (e) {} } }
 
 /* ---------- 点击 ---------- */
 function onClick(e) {
@@ -1126,11 +1509,37 @@ function onClick(e) {
     case 'hist-del': e.stopPropagation(); LSs(uidKey('ch2wsHist'), hist().filter(x => x !== el.dataset.q)); renderHome(); break;
     case 'hist-clear': LSs(uidKey('ch2wsHist'), []); renderHome(); break;
     case 'seen-clear': LSs(uidKey('ch2wsSeen'), []); renderHome(); break;
-    case 'seen-go': { const s = seen()[+el.dataset.i]; if (s) go('read', { u: s.u, t: s.t, at: s.at || '' }); break; }
+    case 'seen-go': { const s = seen()[+el.dataset.i]; if (s) openEntry(s); break; }
+    case 'seen-del': { e.stopPropagation(); const s = seen()[+el.dataset.i]; if (s) LSs(uidKey('ch2wsSeen'), seen().filter(x => x !== s && !(x.u === s.u && (x.at || '') === (s.at || '')))); renderHistory(); break; }
+    case 'seen-wipe': if (seen().length) B.acts('清空全部浏览记录？', [{ label: '清空', danger: true, fn: () => { LSs(uidKey('ch2wsSeen'), []); LSs(uidKey('ch2wsPos'), {}); renderTop(); B.toast('浏览记录清空了'); } }, { label: '取消', fn: null }]); break;
+    case 'favs': W.flt.favs = ''; go('favs'); { const i = V('favs').querySelector('input'); if (i) i.value = ''; } break;
+    case 'hist': W.flt.hist = ''; go('hist'); { const i = V('hist').querySelector('input'); if (i) i.value = ''; } break;
+    case 'fav-del': { e.stopPropagation(); const f = (P.fav || [])[+el.dataset.i]; if (f) { P.fav = P.fav.filter(x => x !== f); savePrefs(); renderFavs(); B.toast('已取消收藏'); } break; }
+    case 'often-go': openUrl('https://' + el.dataset.d + '/', el.dataset.d); break;
+    case 'sug': { const x = W.sug[+el.dataset.i], inp = el.closest('.ws-v').querySelector('.ws-field input'); sugHide(); if (!x) break; try { inp.blur(); } catch (z) {}
+      if (x.k === 'url') openUrl(x.v); else if (x.k === 'q') { inp.value = x.v; search(x.v, W.type); } else if (x.k === 'site') { inp.value = 'site:' + x.v + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); } else openEntry(x.p);
+      break; }
+    case 'tgl-nohist': P.noHist = !P.noHist; savePrefs(); renderTop(); B.toast(P.noHist ? '以后不记浏览记录和搜过的词' : '以后会记浏览记录'); break;
+    case 'art-wipe': clearMyArticles(); break;
+    case 'rd-find': findOpen(); break;
+    case 'find-next': findStep(1); break;
+    case 'find-prev': findStep(-1); break;
+    case 'find-x': findReset(); break;
+    case 'rd-say': if (TTS.on) ttsStop(); else if (t && t.v === 'read') ttsStart(t); break;
+    case 'rd-refresh': if (t && t.v === 'read') { t.d.art = null; t.d.err = null; t.d.force = true; t.d.dirty = true; renderRead(t); } break;
+    case 'web-url': if (t && t.v === 'web') {
+      const d = t.d, u = d.src || d.u;
+      B.acts(u.length > 90 ? u.slice(0, 88) + '…' : u, [
+        { label: '复制网址', fn: () => B.copy(u) },
+        { label: '修改网址', fn: () => B.form('修改网址', [{ ph: '网址', val: u, max: 2000, type: 'url' }], async vals => { const v = String(vals[0] || '').trim(); if (!v) return '网址不能是空的'; leaveWeb(() => search(v, 'web')); return null; }, '打开') },
+        { label: isFav(d.u, '') ? '取消收藏' : '收藏这个网页', fn: () => { const on = toggleFav({ u: d.u, t: d.t || host(u), s: host(u) }); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } },
+        { label: '取消', fn: null }
+      ]);
+    } break;
     case 'pin-add': addSite('pin'); break;
     case 'pin-go': { const inp = V('home').querySelector('input'); inp.value = 'site:' + el.dataset.d + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); break; }
-    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at) go('read', { u: f.u, t: f.t, at: f.at }); else openUrl(f.u, f.t); } break; }
-    case 'fav-all': B.acts('收藏的文章', (P.fav || []).slice(0, 60).map(f => ({ label: (f.t || f.u).slice(0, 40), fn: () => { if (f.at) go('read', { u: f.u, t: f.t, at: f.at }); else openUrl(f.u, f.t); } })).concat([{ label: '取消', fn: null }])); break;
+    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at || navigator.onLine === false) go('read', { u: f.u, t: f.t, at: f.at || '' }); else openUrl(f.u, f.t); } break; }
+    case 'fav-all': W.flt.favs = ''; go('favs'); break;
     case 'r-go': if (it && it.u) { if (it.ext) ext(it.u); else openUrl(it.u, it.t); } break;
     case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;
     case 'hn-c': e.stopPropagation(); if (it && it.c) openUrl(it.c, it.t); break;
@@ -1161,6 +1570,7 @@ function onClick(e) {
       const d = t.d, u = d.src || d.u;
       B.acts(host(u), [
         { label: '简洁阅读（能翻译、调字号）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
+        { label: isFav(d.u, '') ? '取消收藏' : '收藏这个网页', fn: () => { const on = toggleFav({ u: d.u, t: d.t || host(u), s: host(u) }); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } },
         { label: '重新加载', fn: () => { if (d.src) { R('wbox').dataset.src = ''; d.loads = 0; show(); } } },
         { label: '复制链接', fn: () => B.copy(u) },
         { label: '发给好友', fn: () => B.forward((d.t ? d.t + '\n' : '') + u) },
@@ -1180,9 +1590,9 @@ function onClick(e) {
     }
     case 'rd-fav': {
       if (!t || !t.d.art) break;
-      const u = t.d.u, at = t.d.art.arch || '', same = f => f.u === u && (f.at || '') === at, had = (P.fav || []).some(same);
-      P.fav = had ? P.fav.filter(f => !same(f)) : [{ u: u, t: t.d.art.title, s: t.d.art.site + (at ? ' · ' + tsDay(at) + ' 存档' : ''), at: at, tm: Date.now() }].concat(P.fav || []).slice(0, 200);
-      savePrefs(); t.d.dirty = false; renderRead(t); B.toast(had ? '已取消收藏' : '已收藏，搜索首页能看到'); break;
+      const at = t.d.art.arch || '', on = toggleFav({ u: t.d.u, t: t.d.art.title, s: t.d.art.site + (at ? ' · ' + tsDay(at) + ' 存档' : ''), at: at });
+      if (on) artPut(t.d.u, at || t.d.at || '', t.d.art);   // 收藏的文章在手机里存一份：没网也能看
+      t.d.dirty = false; renderRead(t); B.toast(on ? '已收藏，没网也能看；在搜索首页的“收藏”里' : '已取消收藏'); break;
     }
     case 'rd-copy': if (t) B.copy(archUrl(t.d)); break;
     case 'rd-send': if (t) B.forward(((t.d.art && t.d.art.title) ? t.d.art.title + '\n' : '') + archUrl(t.d)); break;
@@ -1198,5 +1608,5 @@ function onClick(e) {
   }
 }
 
-window.ChatterSearch = { open: open, openPage: openPage, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
+window.ChatterSearch = { open: open, openPage: openPage, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit, _sugList: sugList, _oftenSites: oftenSites, _artGet: artGet };
 })();

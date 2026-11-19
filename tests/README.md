@@ -132,3 +132,5 @@ CHATTER_PRIVATE_PREVIEW_URL=http://127.0.0.1:58776 node private-photo-browser.js
 数据库和文件有可恢复备份，并确认旧客户端升级和验收后，才开启生产的私密照片写入。已有私有文件时，回滚保留读取权限并暂停新写入，新发私聊照片不会改传到公开桶。空桶回滚移除附加权限和消息字段，保留空私有桶。现有公开桶没有改动。语音、视频、普通文件和朋友圈仍走原路径。
 
 **好友设置和不同版本互通。** 运行 `node run.js --only=仅在通讯录` 和 `node sql-contacts-only-test.mjs`。真实浏览器检查使用 `node private-photo-browser.js`，要求隔离数据库已安装好友显示迁移。可将 20261119d 的静态资源指向同一隔离后端，用 `CHATTER_LEGACY_PREVIEW_URL=http://127.0.0.1:端口` 指定该旧版本。旧版只提供界面文件，测试会沿用本地隔离认证。两个地址都必须是环回地址。该项检查覆盖旧界面收图、断网提示、同设备升级和原图字节比对。
+
+**浏览器和聊天交叉验收。** 在已配置的隔离预览运行 `CHATTER_LEGACY_VERSION=20261120b CHATTER_LEGACY_PREVIEW_URL=http://127.0.0.1:58778 node private-photo-browser.js`。对应旧版服务器需由同一隔离环境提供。附带检查真实聊天入口、冷启动离线收藏、私密照片重新打开时只做在线权限校验、撤回与退出后的本机副本清理。Chrome 断网用例需要 Service Worker；文章服务由本地夹具提供。系统朗读仍需手机真机。

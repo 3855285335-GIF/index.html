@@ -345,9 +345,9 @@ async function idbClear(uid) {
   } catch (e) { IDB.bad = true; return false; }
 }
 const MSG = { mem: new Map(), uid: null, revision: 0 };
-let accountGeneration = 0, chatGeneration = 0;
+let accountGeneration = 0, chatGeneration = 0, photoCacheRevision = 0;
 const msgKey = c => (S.uid || '') + ':' + c;
-function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; MSG.revision++; }
+function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; MSG.revision++; photoCacheRevision++; }
 async function clearLocalMessageCache(uid) {
   const generation = accountGeneration;
   clearTimeout(saveMT);
@@ -1023,17 +1023,74 @@ function privatePhotoPath(url) {
   const key = value.startsWith(PRIVATE_PHOTO_PREFIX) ? value.slice(PRIVATE_PHOTO_PREFIX.length) : '';
   return PRIVATE_PHOTO_NAME.test(key) ? key : '';
 }
+// 与本机消息共用按账号清理的 IndexedDB；原图和小图各自占用容量。
+const PHOTO_CACHE_BYTES = 24 * 1024 * 1024;
+async function writePhotoCache(uid, path, entry, generation, revision) {
+  try {
+    const db = await idbOpen();
+    if (generation !== accountGeneration || revision !== photoCacheRevision || uid !== S.uid) return;
+    const prefix = uid + ':photo:', indexKey = prefix + 'index';
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('msgs', 'readwrite'), store = tx.objectStore('msgs');
+      const read = store.get(indexKey);
+      read.onsuccess = () => {
+        const list = (read.result || []).filter(item => item.path !== path && (entry || item.path !== path + '.t'));
+        if (entry) {
+          store.put(entry, prefix + path);
+          list.push({path, bytes:entry.blob.size});
+        } else {
+          store.delete(prefix + path);
+          store.delete(prefix + path + '.t');
+        }
+        let total = list.reduce((sum, item) => sum + item.bytes, 0);
+        while (total > PHOTO_CACHE_BYTES || list.length > 80) {
+          const oldest = list.shift(); total -= oldest.bytes;
+          store.delete(prefix + oldest.path);
+        }
+        store.put(list, indexKey);
+      };
+      tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* 存储不可用或额度不足，继续显示刚下载的图片。 */ }
+}
 async function photoResponse(url, signal) {
-  const key = privatePhotoPath(url);
-  if (!key) return fetch(disp(url), { signal });
-  const generation = accountGeneration;
-  if (!S.token) throw new Error('请先登录');
-  const response = await fetch(disp(PRIVATE_PHOTO_PREFIX + key), {
-    signal, cache: 'no-store', credentials: 'omit', redirect: 'error',
-    headers: { Authorization: 'Bearer ' + S.token, apikey: SUPABASE_KEY }
-  });
-  if (generation !== accountGeneration) throw new Error('账号已切换');
-  return response;
+  const path = privatePhotoPath(url);
+  if (!path) return fetch(disp(url), { signal });
+  const generation = accountGeneration, revision = photoCacheRevision, uid = S.uid;
+  function checkSession() {
+    if (!uid || uid !== S.uid || generation !== accountGeneration || !S.token) throw new Error('登录状态已变化');
+    if (signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
+  }
+  async function request(method) {
+    checkSession();
+    const response = await fetch(disp(PRIVATE_PHOTO_PREFIX + path), {
+      method, signal, cache: 'no-store', credentials: 'omit', redirect: 'error',
+      headers: { Authorization: 'Bearer ' + S.token, apikey: SUPABASE_KEY }
+    });
+    checkSession();
+    return response;
+  }
+  const cached = await idbGet(uid + ':photo:' + path);
+  if (cached?.etag && cached.blob instanceof Blob) {
+    // 服务器按当前会话核验权限；撤回、退群、断网时都不能凭本机副本重新打开。
+    const head = await request('HEAD');
+    if (head.ok && head.headers.get('etag') === cached.etag)
+      return new Response(cached.blob, {headers:{'Content-Type':cached.blob.type}});
+    if ([401,403,404].includes(head.status)) {
+      await writePhotoCache(uid,path,null,generation,revision);
+      return head;
+    }
+    // 部分网关不支持 HEAD 或不公开 ETag，直接按原有鉴权链路取图。
+  }
+  const response = await request('GET');
+  const etag = response.headers.get('etag');
+  const bytes = Number(response.headers.get('content-length'));
+  if (!response.ok || !etag || !Number.isSafeInteger(bytes) || bytes <= 0 || bytes > PHOTO_CACHE_BYTES) return response;
+  const blob = await response.blob();
+  checkSession();
+  if (blob.size === bytes) await writePhotoCache(uid,path,{etag,blob},generation,revision);
+  checkSession();
+  return new Response(blob, {headers:{'Content-Type':blob.type}});
 }
 const privatePhotoElements = new Map();
 let privatePhotoObserver = null;
@@ -1094,7 +1151,7 @@ async function loadPrivatePhoto(img) {
     img.src = record.url;
   } catch (e) {
     if (!current()) return;
-    img.alt = '私密图片暂时无法打开，点此重试';
+    img.alt = navigator.onLine === false ? '联网后可核对权限并打开私密照片' : '私密图片暂时无法打开，点此重试';
     img.dataset.privatePhotoFailed = '1';
   }
 }
@@ -1285,6 +1342,10 @@ function upsertMsg(m) {
     const o = S.msgs[i];
     if (o._rx && m.created_at && !m._rx) { addSkew(Date.parse(m.created_at) - o._rx); delete o._rx; }
     if (isStaleMessage(o, m)) return;
+    if (o.type === 'image' && m.type === 'recalled') {
+      const path = privatePhotoPath(o.body);
+      if (path) writePhotoCache(S.uid,path,null,accountGeneration,++photoCacheRevision);
+    }
     if (o.type === m.type && o.body === m.body && o.dur === m.dur && o.edited_at === m.edited_at && o.cover === m.cover && !o._st) { if (o.created_at !== m.created_at) { o.created_at = m.created_at; placeMsg(i); } return; }
     S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; S.out.delete(m.id); chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
   }
@@ -3649,6 +3710,7 @@ function startTimers() {
   }, 3000);
 }
 function teardown() {
+  const outgoingUid = S.uid;
   ++accountGeneration; ++chatGeneration; ++friendSearchSequence;
   iceConfigRequest = null;
   closeLightbox(); clearPrivatePhotos();
@@ -3688,7 +3750,7 @@ function teardown() {
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
-  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
+  if (outgoingUid) return idbClear(outgoingUid); // 连同当前账号的私密照片副本一起清理
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -3734,8 +3796,8 @@ async function start(user) {
   later(loadFriendBgs, 1200);
 }
 async function onAuth(ev, session) {
-  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
-  if (S.uid && S.uid !== session.user.id) teardown();
+  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { forgetBrowserData(S.uid); teardown(); showAuth(); $('login-pass').value = ''; } return; }
+  if (S.uid && S.uid !== session.user.id) { forgetBrowserData(S.uid); teardown(); }
   S.token = session.access_token;
   if (ev === 'TOKEN_REFRESHED' && S.started) { try { sb.realtime.setAuth(session.access_token); } catch (e) {} return; }
   if (S.started && S.uid === session.user.id) return;
@@ -6397,15 +6459,36 @@ function onConvChange(row) {
   } catch (e) {}
 }
 let logoutPending = false;
+// 搜索模块可能尚未加载。退出时也要按原账号清理旧版留下的离线文章。
+function forgetBrowserData(uid) {
+  if (!uid) return Promise.resolve();
+  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos']) LS.del(key + ':' + uid);
+  if (!window.indexedDB) return Promise.resolve();
+  return new Promise(resolve => {
+    const req = indexedDB.open('chatter-ws');
+    req.onupgradeneeded = () => req.transaction.abort(); // 从未用过浏览器，无需创建空库
+    req.onerror = () => resolve();
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction('art', 'readwrite');
+        tx.objectStore('art').delete(IDBKeyRange.bound(uid + '|', uid + '}', false, true));
+        tx.oncomplete = tx.onabort = tx.onerror = () => { db.close(); resolve(); };
+      } catch (e) { db.close(); resolve(); }
+    };
+  }).catch(e => logErr('清理浏览器数据', e));
+}
 async function logout() {
   if (logoutPending) return;
   logoutPending = true;
   const generation = accountGeneration;
   try { await pushLogout(); } catch (e) {}
   if (generation !== accountGeneration) { logoutPending = false; return; }
-  teardown();
+  const cleanup = forgetBrowserData(S.uid);
+  const messageCleanup = teardown();
   showAuth();
   try { Object.keys(localStorage).forEach(k => {
+    if (/^ch2ws(?:Hist|Seen|Pos)?:/.test(k)) return; // 本账号已单独清理
     if (k.startsWith('ch2') && !/^ch2(?:theme|font|lib4:|lastV|imgq|ice)/.test(k)) localStorage.removeItem(k);
   }); } catch (e) {}
   // GoTrue may leave a local token after a network failure during sign-out.
@@ -6420,6 +6503,7 @@ async function logout() {
       try { localStorage.removeItem('sb-' + AUTH_KEY_REF + '-auth-token'); } catch (x) {}
     }
   }
+  await Promise.all([cleanup, messageCleanup]);
   if (!S.uid) location.reload();
   else logoutPending = false;
 }
