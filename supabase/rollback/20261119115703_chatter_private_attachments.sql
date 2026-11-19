@@ -14,6 +14,8 @@ begin
   end if;
   if exists (select 1 from storage.objects where bucket_id = 'chatter-private')
     or linked_messages then
+    update public.app_config set value = '{"enabled":false,"paused":true}'::jsonb
+    where key = 'private_chat_attachments';
     raise notice 'Private uploads stopped. Read policies retained to keep existing attachments available.';
     return;
   end if;
@@ -23,6 +25,8 @@ begin
   drop policy if exists chatter_private_attachment_write_operations on storage.objects;
   drop policy if exists chatter_private_attachment_read_operations on storage.objects;
   drop policy if exists chatter_private_attachment_anonymous on storage.objects;
+  drop policy if exists chatter_private_attachment_delete on storage.objects;
+  drop policy if exists chatter_private_attachment_delete_operations on storage.objects;
   alter table public.messages drop column if exists private_attachment_path;
   drop function if exists public.chatter_private_attachments_enabled();
   drop function if exists public.chatter_attachment_id(text);

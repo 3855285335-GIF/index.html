@@ -817,6 +817,27 @@ test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊
   } finally { env.close(); }
 });
 
+test('私密照片暂停时保留待发照片，禁止改用公开桶', async () => {
+  const db = baseDb(Date.now(), { app_config:[{ key:'private_chat_attachments', value:{ enabled:false, paused:true } }] });
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await env.T.openConv('bob::me', 'bob');
+    const storage = env.T.sb.storage.from;
+    let uploads = 0;
+    env.T.sb.storage.from = function (bucket) {
+      const api = storage(bucket);
+      const upload = api.upload;
+      api.upload = (...args) => { uploads++; return upload(...args); };
+      return api;
+    };
+    const photo = new env.w.File(['protected'], 'photo.png', { type:'image/png' });
+    await env.T.sendImage(photo, true);
+    await sleep(40);
+    ok(uploads === 0 && db.messages.length === 0, '暂停后仍然上传或发送');
+    ok([...env.T.S.out.values()].some(m => m.type === 'image' && m._st === 'failed' && m._blob), '照片未保留为待重试消息');
+  } finally { env.close(); }
+});
+
 test('图片画质：默认发原图，聊天预览跟随画质设置，关闭发送前编辑后直接发送', async () => {
   const db = baseDb(Date.now());
   const env = makeEnv({ db });

@@ -25,6 +25,7 @@ try {
     create table storage.objects(bucket_id text not null, name text not null primary key);
     create table public.app_config(key text primary key, value jsonb);
     create table public.messages(id uuid primary key, from_acc text not null, to_acc text not null, conv_key text not null, type text not null);
+    create table public.chat_group_members(group_id uuid, account_id text);
     create function public.session_alive() returns boolean language sql stable as
       $$select coalesce(nullif(current_setting('test.account',true),''),'') <> ''$$;
     create function public.my_acc() returns text language sql stable as
@@ -32,13 +33,16 @@ try {
     create function storage.operation() returns text language sql stable as
       $$select current_setting('storage.operation',true)$$;
     grant usage on schema storage to anon, authenticated;
-    grant select, insert on storage.objects to authenticated;
+    grant select, insert, delete on storage.objects to authenticated;
     grant select on storage.objects to anon;
     grant select on public.app_config to authenticated;
+    grant select on public.chat_group_members to authenticated;
     grant select, insert on public.messages to authenticated;
     alter table storage.objects enable row level security;
     alter table public.messages enable row level security;
-    create policy msg_read on public.messages for select to authenticated using (public.my_acc() in (from_acc,to_acc));
+    create policy msg_read on public.messages for select to authenticated using (
+      public.my_acc() in (from_acc,to_acc) or exists (select 1 from public.chat_group_members g where 'g:'||g.group_id=conv_key and g.account_id=public.my_acc())
+    );
     create policy msg_insert on public.messages for insert to authenticated with check (public.my_acc() = from_acc);
     create policy legacy_read on storage.objects for select using (bucket_id = 'chat-media');
     insert into storage.buckets values ('chat-media','chat-media',true,52428800,null);
@@ -81,6 +85,8 @@ try {
   }
   await enter('alice', 'storage.object.sign');
   assert.deepEqual(await selectObjects(), ['alice/legacy.png']);
+  await enter('alice', 'storage.object.list');
+  assert.equal((await selectObjects()).includes(path), true);
   await enter('', 'storage.object.get_authenticated', 'anon');
   assert.deepEqual(await selectObjects(), ['alice/legacy.png']);
   await enter('', 'storage.object.get_authenticated');
@@ -94,9 +100,29 @@ try {
   await db.exec(rollback);
   await enter('bob', 'storage.object.get_authenticated');
   assert.deepEqual(await selectObjects(), [path,path+'.t','alice/legacy.png']);
+  assert.deepEqual((await db.query("select value from public.app_config where key='private_chat_attachments'")).rows[0].value, {enabled:false, paused:true});
   await enter('alice', 'storage.object.upload');
   await assert.rejects(insertObject(path.replace('.png','.webp')), { code:'42501' });
-  console.log('通过：默认关闭、收发身份、精确对象绑定、缩略图、匿名和陌生人、签名和列举、撤回、兼容和两种回滚。');
+
+  const gid = '33fa5b16-cf49-4f85-a5f9-f54e8f257c24';
+  const groupId = 'f6aba710-fd91-40b1-9689-c53fbb9ae717';
+  const groupFile = 'alice/' + groupId + '.png';
+  await db.exec('reset role');
+  await db.query('insert into public.chat_group_members values($1,\'bob\')', [gid]);
+  await db.query("insert into public.messages values($1,'alice',$2,$2,'image',$3)", [groupId, 'g:' + gid, groupFile]);
+  await insertObject(groupFile);
+  await enter('bob', 'storage.object.get_authenticated');
+  assert.ok((await selectObjects()).includes(groupFile));
+  await enter('other', 'storage.object.get_authenticated');
+  assert.equal((await selectObjects()).includes(groupFile), false);
+  await enter('bob', 'storage.object.delete_many');
+  assert.equal((await db.query('delete from storage.objects where name=$1 returning name', [groupFile])).rows.length,0);
+  await db.exec('reset role; delete from public.chat_group_members');
+  await enter('bob', 'storage.object.get_authenticated');
+  assert.equal((await selectObjects()).includes(groupFile), false);
+  await enter('alice', 'storage.object.delete_many');
+  assert.equal((await db.query('delete from storage.objects where name=$1 returning name', [groupFile])).rows.length,1);
+  console.log('通过：默认关闭、收发身份、精确对象绑定、缩略图、群成员变更、所有者管理、匿名和陌生人、签名、撤回、兼容和两种回滚。');
 } finally {
   await db.close();
 }
