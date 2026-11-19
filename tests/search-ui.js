@@ -103,6 +103,28 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const shot = async name => { await pg.waitForTimeout(250); const f = path.join(OUT, theme + '-' + name + '.png'); await pg.screenshot({ path: f }); (shots[name] = shots[name] || {})[theme] = f; };
     const on = () => pg.evaluate(() => (document.querySelector('.ws-v.on') || {}).dataset.v);
     await pg.evaluate(() => ChatterSearch.open()); await pg.evaluate(() => document.activeElement && document.activeElement.blur());
+    if (theme === 'light') {
+      await pg.evaluate(() => {
+        const call = __chWS.call;
+        window.restoreCall = () => { __chWS.call = call; };
+        __chWS.call = async req => {
+          if (req.op !== 'translate' || req.to !== 'en') return call(req);
+          await new Promise(done => { window.releaseTranslation = done; });
+          const result = await call(req);
+          setTimeout(() => { window.translationReturned = true; }, 0);
+          return result;
+        };
+      });
+      await pg.fill('[data-form="home"] input', '返回测试关键词'); await pg.press('[data-form="home"] input', 'Enter');
+      await pg.click('[data-act="q-en"]'); await pg.waitForFunction(() => !!window.releaseTranslation);
+      const oldRequests = await pg.evaluate(() => __log.filter(x => x.op === 'search').length);
+      await pg.goBack(); await pg.waitForFunction(() => document.querySelector('.ws-v.on')?.dataset.v === 'home');
+      await pg.evaluate(() => { window.releaseTranslation(); window.restoreCall(); });
+      await pg.waitForFunction(() => window.translationReturned);
+      ok(await on() === 'home' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === oldRequests,
+        '退出结果页后，迟到的英文翻译不会带走当前页面或再发起搜索');
+      await pg.evaluate(() => { window.__log.length = 0; });
+    }
     await shot('1-首页');
     if (theme === 'light') ok(await on() === 'home' && await pg.evaluate(() => history.state && history.state.ws === 1), '打开搜索：首页');
     await pg.fill('[data-form="home"] input', '量子计算'); await pg.press('[data-form="home"] input', 'Enter');

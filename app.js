@@ -95,7 +95,7 @@ const convKeyOf = (a, b) => [a, b].sort().join('::');
 const isGroupKey = k => typeof k === 'string' && k.indexOf('g:') === 0;   // 群会话：g:<群id>
 const gidOf = k => isGroupKey(k) ? k.slice(2) : '';
 const peerOf = (k, me) => { if (isGroupKey(k)) return k; const p = k.split('::'); return p[0] === me ? p[1] : p[0]; };   // 群不按冒号拆
-const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null, cover: r.cover || null });
+const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.type === 'image' ? readPhotoBody(r) : r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null, cover: r.cover || null });
 const SEP = '\u2063';
 function encQ(q, text) { return SEP + 'Q' + q.id + SEP + String(q.snip || '').replace(/[\u2063\r\n]+/g, ' ').slice(0, 40) + SEP + text; }
 function parseQ(body) {
@@ -110,6 +110,11 @@ let clr = {}, clrUid = null;
 function clrOf(conv) { if (clrUid !== S.uid) { clr = LS.get('ch2clr:' + (S.uid || ''), {}) || {}; clrUid = S.uid; } return clr[conv] || 0; }
 function setClr(conv, t) { clrOf(conv); clr[conv] = t; LS.set('ch2clr:' + (S.uid || ''), clr); }
 const isHidden = m => hidden.has(m.id) || (clrOf(m.conv) > 0 && Date.parse(m.created_at) <= clrOf(m.conv));
+// 通讯录专属会话继续同步消息和已读，只在渲染消息页时过滤。
+let contactsOnly = null, contactsSchema, contactsRevision = 0;
+const contactsPending = new Set();
+const contactsKey = () => 'ch2contactsOnly:' + S.uid;
+const hiddenFromInbox = c => !isGroupKey(c.convKey) && c.peer_acc !== ME() && (!contactsOnly || contactsOnly.has(c.peer_acc));
 const convGone = c => { const t = clrOf(c.convKey); return t > 0 && (Date.parse(c.last_ts || 0) || 0) <= t; };
 /* 服务器时间 − 本机时间（手机时间不准时用它校正）：本机临时给消息打的时间和服务器时间才能直接比较，消息顺序才对 */
 let skewS = [], skewMs = LS.get('ch2skew', 0) || 0;
@@ -437,7 +442,7 @@ const dirty = {}; let rafId = 0;
 function sched(k) { dirty[k] = true; if (!rafId) rafId = requestAnimationFrame(flush); }
 function flush() {
   rafId = 0;
-  if (dirty.list) { dirty.list = false; renderList(); updateTitle(); }
+  if (dirty.list) { dirty.list = false; renderList(); updateTitle(); if (contactsOnly?.size) dirty.contacts = true; }
   if (dirty.contacts) { dirty.contacts = false; renderContacts(); }
   if (dirty.reqs) { dirty.reqs = false; renderRequests(); }
   if (dirty.title) { dirty.title = false; renderChatTitle(); }
@@ -449,7 +454,7 @@ function flashTitle() {
 }
 function stopFlash() { if (flashI) { clearInterval(flashI); flashI = 0; } document.title = baseTitle; }
 function updateTitle() {
-  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
+  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !hiddenFromInbox(c) && !isMuted(c.convKey)) n += c.unread || 0; });
   baseTitle = (n ? '(' + (n > 99 ? '99+' : n) + ') ' : '') + 'Chatter';
   if (!flashI) document.title = baseTitle;
   if (!convsReady) return;   // 会话还没从服务器读回来：此时 n 一定是 0，动系统角标会把推送设好的数字清掉（冷启动角标消失的原因）
@@ -522,9 +527,9 @@ function fixPreview(key) {   // 本机也没有记录：去取这个会话最后
 }
 function renderList() {
   const el = $('conv-list');
-  const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
+  const vis = S.convs.filter(c => !convGone(c) && !hiddenFromInbox(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   const gh = '';
-  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
+  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me && contactsOnly ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   patchKids(el, shown.map(c => ({ k: 'c:' + c.convKey, h: (function () {
     const selfConv = c.convKey === SELF_KEY();
     const name = selfConv ? (nickOf(ME()) || '我') : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
@@ -539,6 +544,10 @@ function renderContacts() {
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
   else {
+    const hiddenUnread = new Map();
+    if (contactsOnly?.size) S.convs.forEach(c => {
+      if (contactsOnly.has(c.peer_acc) && c.unread && c.convKey !== S.conv && !convGone(c)) hiddenUnread.set(c.peer_acc, c.unread);
+    });
     const PY = [['A', '阿'], ['B', '八'], ['C', '嚓'], ['D', '搭'], ['E', '蛾'], ['F', '发'], ['G', '噶'], ['H', '哈'], ['J', '击'], ['K', '喀'], ['L', '垃'], ['M', '妈'], ['N', '拿'], ['O', '哦'], ['P', '啪'], ['Q', '期'], ['R', '然'], ['S', '撒'], ['T', '塌'], ['W', '挖'], ['X', '昔'], ['Y', '压'], ['Z', '匝']];
     const initialOf = function (name) {
       const s = String(name || '').trim(); if (!s) return '#';
@@ -554,7 +563,7 @@ function renderContacts() {
     setHTML(el, order.map(function (k) {
       return '<div class="abbr">' + k + '</div>' + groups[k].map(function (a) {
         return '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
-          '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
+          '<div class="name"><div class="name-main">' + esc(peerName(a)) + (hiddenUnread.has(a) ? ' <span class="badge" aria-label="未读消息">' + Math.min(99, hiddenUnread.get(a)) + (hiddenUnread.get(a) > 99 ? '+' : '') + '</span>' : '') + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
           '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>';
       }).join('');
     }).join(''));
@@ -747,6 +756,7 @@ function applyBoot(b) {
   S.requests = b.requests || [];
   const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
+  if (pfAcc) renderProfile();
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   if (!first) return;   // 下面这些是「登录后初始化」：每次 resync 重跑会多出好几倍请求
@@ -770,6 +780,23 @@ function applyBoot(b) {
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
+  const generation = accountGeneration, revision = contactsRevision;
+  if (contactsSchema !== false) {
+    const result = await sb.rpc('bootstrap_contacts');
+    if (generation !== accountGeneration) return null;
+    if (!result.error) {
+      const list = result.data?.contacts_only;
+      if (Array.isArray(list) && revision === contactsRevision) {
+        contactsOnly = new Set(list);
+        LS.set(contactsKey(), list);
+      }
+      contactsSchema = true;
+      return result.data;
+    }
+    if (result.error.code !== 'PGRST202' && !(result.error.code === '42883' && /bootstrap_contacts/.test(result.error.message || ''))) throw result.error;
+    contactsSchema = false;
+    contactsOnly = new Set(LS.get(contactsKey(), []));
+  }
   const { data, error } = await sb.rpc('bootstrap');
   if (error) {
     if (error.code === 'PGRST202' || /bootstrap/i.test(error.message || '')) throw new Error('数据库脚本还没更新：请先在 Supabase 执行最新的 setup.sql');
@@ -974,6 +1001,23 @@ function retryBadImgs() {   // 网络恢复 / 回到前台：没确认被删的�
 const PRIVATE_PHOTO_BUCKET = 'chatter-private';
 const PRIVATE_PHOTO_PREFIX = SUPABASE_URL + '/storage/v1/object/authenticated/' + PRIVATE_PHOTO_BUCKET + '/';
 const PRIVATE_PHOTO_NAME = /^[a-z0-9_]{3,20}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}(?:\.t)?$/;
+// 旧客户端直接绘制这张通用提示图；原件和缩略图都只通过登录请求读取。
+function photoNotice(hint) {
+  return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="76"><rect width="220" height="76" rx="12" fill="#edeaf6"/><g text-anchor="middle" font-family="sans-serif" fill="#383049"><text x="110" y="32" font-size="17">私密照片</text><text x="110" y="55" font-size="13">' + hint + '</text></g></svg>');
+}
+const PHOTO_UPDATE_CARD = photoNotice('更新 Chatter 后查看原图');
+const PHOTO_FORWARD_CARD = photoNotice('请好友更新后从原聊天重新转发');
+function readPhotoBody(row) {
+  const body = row.body || '';
+  if (!body.startsWith(PHOTO_UPDATE_CARD + '#')) return body;
+  const params = new URLSearchParams(body.slice(PHOTO_UPDATE_CARD.length + 1));
+  const path = params.get('p') || '';
+  if (!PRIVATE_PHOTO_NAME.test(path) || !path.startsWith(row.from_acc + '/' + row.id + '.')) return PHOTO_FORWARD_CARD;
+  const meta = new URLSearchParams();
+  for (const name of ['w', 'h']) if (/^\d{1,6}$/.test(params.get(name) || '')) meta.set(name, params.get(name));
+  if (params.get('thumb') === '1') meta.set('t', '1');
+  return PRIVATE_PHOTO_PREFIX + path + (meta.toString() ? '#' + meta : '');
+}
 function privatePhotoPath(url) {
   const value = typeof url === 'string' ? canon(url).split('#')[0] : '';
   const key = value.startsWith(PRIVATE_PHOTO_PREFIX) ? value.slice(PRIVATE_PHOTO_PREFIX.length) : '';
@@ -1283,13 +1327,13 @@ function onIncoming(m, noInc) {
 let msgBannerT = 0;
 function inAppBanner(m) {
   try {
-    const el = $('msg-banner'); if (!el || !m) return;
+    const el = $('msg-banner'); if (!el || !m || hiddenFromInbox({ convKey: m.conv, peer_acc: m.from_acc })) return;
     const who = m.from_acc === ME() ? '我' : (m.conv && isGroupKey(m.conv) ? (grpName(m.conv) || '群聊') + ' · ' + peerName(m.from_acc) : peerName(m.from_acc));
     const txt = previewOf(m) || '';
     const pf = S.profiles[m.from_acc] || {};
     const av = avatarHTML(who, pf.avatar_url, false, m.from_acc || '');
     el.innerHTML = '<span class="mb-av">' + av + '</span><b>' + esc(who) + '</b><span>' + esc(txt) + '</span>';
-    el.classList.add('on');
+    el.dataset.peer = m.from_acc; el.classList.add('on');
     clearTimeout(msgBannerT);
     msgBannerT = setTimeout(function () { el.classList.remove('on'); }, 3800);
     el.onclick = function () {
@@ -1438,7 +1482,13 @@ async function deliver(m, silent) {
     // 先写库、再广播：接收方收到广播会按 id 查库，广播太早会查不到
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, cover: m.cover || null };
     const privateKey = m.type === 'image' ? privatePhotoPath(m.body) : '';
-    if (privateKey) row.private_attachment_path = privateKey;
+    if (privateKey) {
+      row.private_attachment_path = privateKey;
+      const meta = new URLSearchParams(m.body.split('#')[1] || '');
+      if (meta.has('t')) { meta.delete('t'); meta.set('thumb', '1'); }
+      // 路径在片段中，旧客户端打开提示图时不会向服务器发出读取原件的请求。
+      row.body = PHOTO_UPDATE_CARD + '#p=' + privateKey + (meta.toString() ? '&' + meta : '');
+    }
     const t0 = now();
     let { data, error } = await sb.from('messages').insert(row).select('*').single();
     if (generation !== accountGeneration) return;
@@ -3631,6 +3681,7 @@ function teardown() {
     try { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); if (m._pu) URL.revokeObjectURL(m._pu); } catch (e) {}
   });
   document.body.classList.remove('chat-open');
+  contactsOnly = null; contactsSchema = undefined; contactsRevision++; contactsPending.clear();
   S.bootInited = false; editWatchAt = 0;
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
   S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.v9 = undefined; S.mperm = {}; MO.aud = {}; MO.mode = 'all'; MO.vis = null; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
@@ -3644,6 +3695,9 @@ function teardown() {
 async function start(user) {
   const generation = accountGeneration;
   S.started = true; S.uid = user.id;
+  const savedContacts = LS.get(contactsKey(), null);
+  // 联网冷启动先取得本账号的最新设置，避免闪出另一台设备刚隐藏的好友。
+  contactsOnly = navigator.onLine === false && Array.isArray(savedContacts) ? new Set(savedContacts) : null;
   if (!S.me) { const c = LS.get(ck(user.id)); if (c && c.me) hydrate(c); }
   S.stk = LS.get(stkKey(), null); stkOk = false; S.remarks = LS.get(rmkKey(), {}) || {}; S.mperm = LS.get(mpKey(), {}) || {};
   showApp(); renderAll();                       // 有缓存就先显示（秒开）
@@ -3660,6 +3714,7 @@ async function start(user) {
     applyBoot(b); showBanner('');
   } catch (e) {
     if (generation !== accountGeneration) return;
+    if (!contactsOnly && Array.isArray(savedContacts)) { contactsOnly = new Set(savedContacts); sched('list'); }
     logErr('boot', e);
     if (!S.me) { teardown(); showAuth('加载失败：' + (e.message || '请重试')); return; }
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
@@ -6690,6 +6745,32 @@ function openMomentPerm(acc) {
   ]);
 }
 
+async function toggleContactsOnly(peer) {
+  if (!S.uid || !S.friends.includes(peer) || contactsPending.has(peer)) return;
+  if (!contactsSchema || !contactsOnly) { toast('好友显示设置暂不可用，请更新后重试'); return; }
+  const generation = accountGeneration, owner = ME(), hide = !contactsOnly.has(peer);
+  contactsPending.add(peer); renderProfile();
+  try {
+    const table = sb.from('contacts_only_chats');
+    const { error } = hide
+      ? await table.upsert({ owner_acc: owner, friend_acc: peer }, { onConflict: 'owner_acc,friend_acc', ignoreDuplicates: true })
+      : await table.delete().eq('owner_acc', owner).eq('friend_acc', peer);
+    if (generation !== accountGeneration) return;
+    if (error) throw error;
+    ++contactsRevision;
+    if (hide) contactsOnly.add(peer); else contactsOnly.delete(peer);
+    LS.set(contactsKey(), [...contactsOnly]);
+    if (hide && $('msg-banner').dataset.peer === peer) $('msg-banner').classList.remove('on');
+    if (hide && nbCur?.key === 'm:' + peer) hideNBar();
+    sched('list'); sched('contacts');
+    toast(hide ? '已隐藏，可从通讯录继续聊天' : '已恢复在消息页显示');
+  } catch (e) {
+    if (generation === accountGeneration) { toast('设置未确认，请刷新后重试'); resyncSoon(); }
+  } finally {
+    if (generation === accountGeneration) { contactsPending.delete(peer); if (pfAcc === peer) renderProfile(); }
+  }
+}
+
 /* ---- 好友资料页 ---- */
 let pfAcc = null;
 function openProfile(acc) {
@@ -6716,9 +6797,14 @@ function renderProfile() {
   const sg = (S.profiles[a] && typeof S.profiles[a].signature === 'string') ? S.profiles[a].signature.trim() : '';
   const se = $('pf-sign'); if (se) { se.textContent = sg; se.style.display = sg ? '' : 'none'; }
   $('pf-remark').textContent = rm ? '修改备注' : '设置备注';
+  const visibility = $('pf-contacts-only');
+  const visibilityState = contactsSchema === false ? '待服务器更新' : !contactsSchema ? '等待读取' : contactsOnly?.has(a) ? '开' : '关';
+  visibility.textContent = '仅在通讯录显示：' + visibilityState;
+  visibility.setAttribute('aria-pressed', String(!!contactsOnly?.has(a)));
+  visibility.disabled = !contactsSchema || contactsPending.has(a);
   const mpb = $('pf-mperm');
   if (mpb) { const p = mpOf(a); mpb.textContent = '朋友圈权限' + (p.h && p.s ? '：不让对方看、不看对方' : p.h ? '：不让对方看' : p.s ? '：不看对方' : ''); }
-  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-mperm', 'pf-del'].forEach(id => { const el = $(id); if (el) el.style.display = friend ? '' : 'none'; });
+  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-contacts-only', 'pf-mperm', 'pf-del'].forEach(id => { const el = $(id); if (el) el.style.display = friend ? '' : 'none'; });
   const addBtn = $('pf-add');
   if (addBtn) {
     const self = a === ME();
@@ -7225,6 +7311,7 @@ function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天
     localNote(title, body, 'm:' + m.from_acc, './#c=' + m.from_acc); return;
   }
   if (!S.conv && $('tab-convs').classList.contains('active')) return;   // 正看着消息列表：列表本身已经更新
+  if (!gp && hiddenFromInbox({ convKey: m.conv, peer_acc: m.from_acc })) return;
   showNBar({ key: gp ? m.conv : 'm:' + m.from_acc, acc: gp ? m.conv : m.from_acc, title, body, go: () => gp ? openConv(m.conv, m.conv) : openChatWith(m.from_acc) });
 }
 function noteRequest(r) {
@@ -7701,6 +7788,7 @@ function bindUI() {
   $('pf-chat').onclick = () => { const a = pfAcc; closeProfile(); if (a && S.peer !== a) openConv(convKeyOf(ME(), a), a); };
   if ($('pf-add')) $('pf-add').onclick = function () { if (this.dataset.acc) addFriend(this); };
   $('pf-voice').onclick = () => pfCall(false); $('pf-video').onclick = () => pfCall(true);
+  $('pf-contacts-only').onclick = () => toggleContactsOnly(pfAcc);
   $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
   if ($('pf-mperm')) $('pf-mperm').onclick = () => { const a = pfAcc; if (a) openMomentPerm(a); };
   $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };

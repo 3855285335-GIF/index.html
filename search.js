@@ -1003,16 +1003,17 @@ function resForeign(c) {   // 结果大多是外文吗
 }
 const tx = (it, k) => (W.cur && W.cur.trOn && it[k + 'z']) || it[k];
 async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多得多，结果再自动翻成中文
+  const page = top();
   let en = W.trc.get('en|' + c.q);
   if (!en) {
     B.toast('正在把搜索词翻成英文…');
     const r = await B.call({ op: 'translate', to: 'en', items: [c.q] }, 30000);
-    if (W.cur !== c) return;
+    if (W.cur !== c || top() !== page) return;
     if (!r || !r.ok || !r.items || !r.items[0]) { B.toast((r && r.msg) || '没翻成英文，稍后再试'); return; }
     en = String(r.items[0]).replace(/^["'“”‘’]+|["'“”‘’。.]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
     W.trc.set('en|' + c.q, en);
   }
-  if (W.cur === c) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
+  if (W.cur === c && top() === page) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
 }
 async function fetchRead(t) {
   const account = accountRevision, d = t.d; d.loading = true;
