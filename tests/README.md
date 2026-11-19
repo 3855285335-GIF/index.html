@@ -95,6 +95,7 @@ Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/
 
 ```bash
 node sql-moment-privacy-test.mjs   # 41 项：谁能看哪条、名单只有作者能读、评论只看好友的、赞都看得到、撤销脚本、交给用户运行的那份带检查表
+node sql-revoke-old-rpcs-test.mjs # 9 项：收回两个旧函数（迁移、撤销、给用户的版本跑两遍、检查表、函数不存在也不报错）
 ```
 
 ## 只跑某几项
