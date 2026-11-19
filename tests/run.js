@@ -712,6 +712,21 @@ test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊
   } finally { env.close(); }
 });
 
+test('图片画质：默认发原图；“我”里有“图片：原图/压缩”“发送前编辑”两个开关（以前按钮不在页面上，默认一直在压缩）', async () => {
+  const env = makeEnv({ db: baseDb(Date.now()) });
+  try {
+    await env.login(); await sleep(200);
+    const q = env.$('btn-imgq'), ed = env.$('btn-imgedit');
+    ok(q && ed, '设置里没有“图片”或“发送前编辑”按钮');
+    ok(q.textContent === '🖼 图片：原图', '默认应该是原图：' + q.textContent);
+    click(env, q); await sleep(20);
+    ok(q.textContent === '🖼 图片：压缩' && env.w.localStorage.getItem('ch2imgq') === '"auto"', '点一下应该改成压缩：' + q.textContent + ' ' + env.w.localStorage.getItem('ch2imgq'));
+    click(env, q); await sleep(20);
+    ok(q.textContent === '🖼 图片：原图', '再点改回原图');
+    ok(ed.textContent === '✂️ 发送前编辑：开', '发送前编辑默认开：' + ed.textContent);
+  } finally { env.close(); }
+});
+
 test('朋友圈权限：四种可见范围、发出去再改、不看对方、不让对方看、转发前问服务器', async () => {
   const t = Date.now();
   const db = baseDb(t, {

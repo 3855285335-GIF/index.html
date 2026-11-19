@@ -1474,7 +1474,7 @@ function onReadReq(p) {
   const c = convOf(p.conv);
   if (c && !(c.unread > 0) && c.last_ts && S.token) bcast('u:' + p.from, 'rd', { from: ME(), conv: p.conv, ts: c.last_ts });
 }
-/* 图片先压缩再上传：手机原图几 MB，压到 1600px/JPEG 85% 能省一大半空间 */
+/* 图片压缩：只有在“我 → 图片：压缩”时才用（默认发原图，画质优先）；压到长边 1600、JPEG 80%，能省一大半存储空间 */
 function loadImgEl(file) {
   return new Promise(function (res, rej) {
     const u = URL.createObjectURL(file), im = new Image();
@@ -1506,7 +1506,7 @@ async function compressImage(file) {
     return new File([blob], String(file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
   } catch (e) { logErr('img-compress', e); return file; }
 }
-const imgOrig = () => { try { return LS.get('ch2imgq', 'auto') === 'orig'; } catch (e) { return false; } };
+const imgOrig = () => { try { return LS.get('ch2imgq', 'orig') !== 'auto'; } catch (e) { return true; } };   // 默认发原图（画质优先）；“我”里可以改成压缩
 /* ---- 发送前编辑图片：裁剪 / 画笔 / 文字 / 旋转（不依赖 ctx.filter，手机也能用） ---- */
 const IE = { file: null, img: null, tool: 'crop', color: '#ff3b30', size: 10, sel: null, origin: null, drag: null, last: null, hist: [], resolve: null };
 const IE_COLORS = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#0a84ff', '#af52de', '#ffffff', '#111111'];
@@ -3592,7 +3592,7 @@ function settingsPayload() {
     v: 1,
     settings: {
       theme: LS.get('ch2theme', 'auto'), font: LS.get('ch2font', 'system'),
-      bubble: LS.get('ch2bubble', 'violet'), night: LS.get('ch2night', null), imgq: LS.get('ch2imgq', 'auto')
+      bubble: LS.get('ch2bubble', 'violet'), night: LS.get('ch2night', null), imgq: LS.get('ch2imgq', 'orig')
     },
     drafts: LS.get('ch2dr:' + uid, {}),
     hidden: LS.get('ch2del:' + uid, [])
@@ -4970,7 +4970,7 @@ async function postMoment() {
     const urls = [];
     for (let i = 0; i < images.length; i++) {
       let blob = images[i];
-      try { blob = await compressImage(blob); } catch (e) { logErr('momentImg', e); }   // 跟聊天图片一样：长边 1600（以前朋友圈是 1280，更糊）
+      if (!imgOrig()) { try { blob = await compressImage(blob); } catch (e) { logErr('momentImg', e); } }   // 跟聊天图片一样：默认原图，“我”里选了压缩才压到长边 1600
       if (!current()) return;
       const path = actor + '/moment_' + now() + '_' + i + '.jpg';
       let _tok = false;
@@ -7440,7 +7440,7 @@ function bindUI() {
   const imgqBtn = $('btn-imgq');
   if (imgqBtn) imgqBtn.onclick = () => {
     LS.set('ch2imgq', imgOrig() ? 'auto' : 'orig'); paintImgQ();
-    toast(imgOrig() ? '以后发图片用原图：更清晰，但更占空间' : '以后发图片自动压缩：省空间，日常够清晰');
+    toast(imgOrig() ? '以后发图片用原图（聊天里先显示小图，点开看原图）' : '以后发图片压到长边 1600：省存储空间，画质会差一点');
   };
   const paintIe = () => { const b = $('btn-imgedit'); if (b) b.textContent = imgEditOn() ? '✂️ 发送前编辑：开' : '✂️ 发送前编辑：关'; };
   paintIe();
