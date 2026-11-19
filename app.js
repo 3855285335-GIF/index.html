@@ -6079,6 +6079,7 @@ async function logout() {
   try { Object.keys(localStorage).forEach(k => {
     if (k.startsWith('ch2') && !/^ch2(?:theme|font|lib4:|lastV|imgq|ice)/.test(k)) localStorage.removeItem(k);
   }); } catch (e) {}
+  try { if (window.indexedDB) indexedDB.deleteDatabase('chatter-ws'); } catch (e) {}   // 网页浏览在手机里存的文章（收藏离线看的）也一起删
   // GoTrue may leave a local token after a network failure during sign-out.
   const afterTeardown = accountGeneration;
   try {
