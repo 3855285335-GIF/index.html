@@ -936,7 +936,7 @@ function renderRules() {
     '<div class="ws-sec">这个月的次数</div><div class="ws-card">' +
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Exa<span class="ws-sub" style="white-space:normal">网页、新闻、视频默认用它；每月免费约 ' + (W.free.exa || 2500) + ' 次</span></span><span class="ws-val">' + esc(use('exa')) + '</span></div>' +
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">Tavily<span class="ws-sub" style="white-space:normal">图片先用它，Exa 用完时顶上；每月免费 ' + (W.free.tavily || 1000) + ' 次</span></span><span class="ws-val">' + esc(use('tavily')) + '</span></div></div>' +
-    '<div class="ws-hint">每月 1 号恢复。同一个词 24 小时内再搜不算次数；“深挖”和打开网页不花这些次数。' + (W.left != null ? '你今天还能搜 ' + W.left + ' 次。' : '') + '</div>' +
+    '<div class="ws-hint">两家都每月自动恢复：Tavily 是每月 1 号，Exa 按月刷新（官网没写具体哪一天）。同一个词 24 小时内再搜不算次数；“深挖”和打开网页不花这些次数。' + (W.left != null ? '你今天还能搜 ' + W.left + ' 次。' : '') + '</div>' +
     '<div class="ws-sec">翻译</div><div class="ws-card">' +
       sw('tgl-tr', P.autoTr !== false, '外文自动翻译成中文', '外文网页、外文搜索结果打开就翻；关掉以后要自己点“翻译成中文”') +
       '<div class="ws-row"><span class="ws-tx" style="white-space:normal">智谱（免费）<span class="ws-sub" style="white-space:normal">主要的翻译服务；按国内规定会拒绝翻译一些内容</span></span><span class="ws-val">' + (W.keys ? (W.keys.glm ? '已开通' : '还没填密钥') : '…') + '</span></div>' +

@@ -121,6 +121,8 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     const segs: string[] = []; const user = b.messages[1].content; const re = /⟦(\d+)⟧\n([\s\S]*?)(?=\n⟦\d+⟧\n|$)/g; let mm;
     while ((mm = re.exec(user))) segs.push(mm[2]);
     if (glm && glmMode === 'busyOnce') { glmMode = 'ok'; return J({ error: { code: '1302', message: '您的账户已达到速率限制' } }, 429); }
+    if (glm && b.model === 'busy-model') return J({ error: { code: '1305', message: '该模型当前访问量过大，请您稍后再试' } }, 429);
+    if (glm && b.model === 'gone-model') return J({ error: { code: '1211', message: '模型不存在，请检查模型代码。' } }, 400);
     if (glm && segs.some(s => s.includes('敏感'))) return J({ error: { code: '1301', message: '系统检测到输入或生成内容可能包含不安全或敏感内容' } }, 400);
     const pre = glm ? '智:' : 'G:';
     const body = (glm && glmMode === 'nomarkers' && segs.length > 1) ? segs.map(s => pre + s).join('\n') : segs.map((s, i) => '⟦' + (i + 1) + '⟧\n' + pre + s).join('\n');
@@ -230,7 +232,7 @@ ok(r.j.ok && r.j.src === 'tavily' && calls.exa === e2, '刚发现 Exa 用完：6
 ok(counts.get(UID + '|s|false') === 2, '换来换去只算一次搜索次数');
 tavMode = 'empty';
 r = await call({ op: 'search', q: '都用完了', type: 'web' });
-ok(!r.j.ok && r.j.code === 'empty' && /Exa、Tavily/.test(r.j.msg) && /下个月 1 号/.test(r.j.msg) && /深挖/.test(r.j.msg), '两家都用完：说清楚什么时候恢复、深挖还能用 → ' + r.j.msg);
+ok(!r.j.ok && r.j.code === 'empty' && /Exa、Tavily/.test(r.j.msg) && /下个月会自动恢复/.test(r.j.msg) && !/1 号/.test(r.j.msg) && /深挖/.test(r.j.msg), '两家都用完：说清楚什么时候恢复、深挖还能用 → ' + r.j.msg);
 r = await call({ op: 'search', q: '量子计算', type: 'web', tbs: 'week' });
 ok(r.j.ok && r.j.cached, '都用完了以后，搜过的词照样能看（走缓存）');
 r = await call({ op: 'search', q: '都用完的图', type: 'images' });
@@ -408,5 +410,13 @@ g0 = calls.glm;
 const many = Array.from({ length: 30 }, (_, i) => 'Paragraph number ' + i + ' ' + 'word '.repeat(30));
 r = await call({ op: 'translate', items: many });
 ok(r.j.ok && r.j.items.every((t: string, i: number) => t === '智:' + many[i].trim()) && calls.glm - g0 === 3, '长文章分成几组同时翻（每组不超过约 2400 字），拼回来顺序不乱 → ' + (calls.glm - g0) + ' 组');
+reset({ tr_models: { glm: ['gone-model', 'busy-model', 'glm-4-flash-250414'] } });
+const tb0 = trBodies.length;
+r = await call({ op: 'translate', items: ['model fallback line'] });
+ok(r.j.ok && r.j.items[0] === '智:model fallback line' && trBodies.slice(tb0).map((x: Any) => x.b.model).join(',').startsWith('gone-model,busy-model,glm-4-flash-250414'), '第一个模型下线、第二个访问量过大：自动换到下一个模型 → ' + trBodies.slice(tb0).map((x: Any) => x.b.model).join(','));
+reset({ tr_models: { glm: ['gone-model'] } });
+r = await call({ op: 'translate', items: ['only gone model line'] });
+ok(r.j.ok && r.j.items[0] === null && r.j.why.join() === 'upstream', '填的模型全都下线了：这段显示原文，不会卡住');
+reset();
 console.log(bad ? `\n有 ${bad} 项没通过` : '\n全部通过');
 Deno.exit(bad ? 1 : 0);

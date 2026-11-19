@@ -13,7 +13,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261118-7';
+const VER = '20261118-8';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -93,7 +93,7 @@ const monthStart = () => { const d = new Date(Date.now() + 8 * 3600000); return 
 
 /* ---------- 配置（数据库里改，1 分钟内生效） ---------- */
 const CFG_DEF = { enabled: true, per_user_day: 1000000000, read_per_user_day: 1000000000, deep_per_user_day: 1000000000, order: ['exa', 'tavily'], img_order: ['tavily', 'exa'], exa_free: 2500, tavily_free: 1000,
-  tr_order: ['glm', 'groq'], tr_models: { glm: 'glm-4-flash-250414', groq: 'openai/gpt-oss-120b' }, tr_par: 2, tr_per_user_day: 1000000000 };
+  tr_order: ['glm', 'groq'], tr_models: { glm: ['glm-4-flash-250414', 'glm-4.7-flash'], groq: 'openai/gpt-oss-120b' }, tr_par: 3, tr_per_user_day: 1000000000 };
 let CFG: Any = null, CFG_AT = 0;
 async function cfg() {
   if (CFG && Date.now() - CFG_AT < 60000) return CFG;
@@ -366,7 +366,7 @@ function failAll(list: string[], why: Record<string, string>) {
   const named = (code: string) => list.filter(s => why[s] === code).map(s => NAME[s]).join('、');
   if (codes.every(x => x === 'nokey')) return fail('nokey', '搜索还没开通：服务器里还没填' + (list.length > 1 ? ' Exa 或 Tavily ' : ' ' + NAME[list[0]] + ' ') + '的密钥');
   if (codes.includes('badkey')) return fail('nokey', named('badkey') + ' 的密钥不对：检查服务器里填的密钥');
-  if (codes.every(x => x === 'empty' || x === 'nokey')) return fail('empty', named('empty') + ' 这个月的免费次数用完了，下个月 1 号恢复；“深挖”还能用');
+  if (codes.every(x => x === 'empty' || x === 'nokey')) return fail('empty', named('empty') + ' 这个月的免费次数用完了，到下个月会自动恢复；“深挖”还能用');
   if (codes.includes('busy')) return fail('busy', '搜得太快了，等几秒再试');
   return fail('upstream', '搜索服务暂时没响应，稍后再试');
 }
@@ -616,8 +616,18 @@ function splitMarked(raw: string, n: number) {   // 按 ⟦编号⟧ 把译文�
   return res;
 }
 type TrCtx = { items: string[]; out: (string | null)[]; why: Record<number, string>; to: string; html: boolean; c: Any; calls: Record<string, number>; dead: Record<string, string> };
-async function trCall(p: string, texts: string[], x: TrCtx) {
-  const P = TRP[p], model = String((x.c.tr_models && x.c.tr_models[p]) || P.model);
+async function trCall(p: string, texts: string[], x: TrCtx) {   // 可以填几个模型：前一个“访问量过大”（1305）或者已经下线，就换下一个
+  const ms = ([] as Any[]).concat((x.c.tr_models && x.c.tr_models[p]) || TRP[p].model).map(String).filter(Boolean);
+  let last: Any = null;
+  for (const model of ms) {
+    try { return await trCall1(p, model, texts, x); }
+    catch (e) { last = e; if (!(e instanceof Oops && (e.code === 'busy' || e.code === 'nomodel'))) throw e; }
+  }
+  if (last instanceof Oops && last.code === 'nomodel') throw new Oops('upstream', TRP[p].n + ' 的翻译模型已经下线（要在数据库里换一个模型名）');
+  throw last;
+}
+async function trCall1(p: string, model: string, texts: string[], x: TrCtx) {
+  const P = TRP[p];
   const body: Any = { model, temperature: 0.3, max_tokens: p === 'groq' ? 6000 : 4000, messages: [{ role: 'system', content: trSys(x.to, x.html) }, { role: 'user', content: texts.map((s, i) => '⟦' + (i + 1) + '⟧\n' + s).join('\n') }] };
   if (p === 'groq' && /gpt-oss/.test(model)) body.reasoning_effort = 'low';
   if (p === 'glm' && /glm-(4\.[5-9]|[5-9])/.test(model)) body.thinking = { type: 'disabled' };   // 新一些的模型默认先“思考”，翻译用不着，关掉更快
@@ -629,6 +639,7 @@ async function trCall(p: string, texts: string[], x: TrCtx) {
     if (code === '1113' || code === '1308' || code === '1310' || r.status === 402 || /quota|balance|欠费|额度/i.test(msg)) throw new Oops('empty', P.n + ' 的额度用完了');
     if (r.status === 429 || code === '1302' || code === '1305') throw new Oops('busy', P.n + ' 现在太忙');
     if (code === '1261' || r.status === 413 || /too long|超长|context length/i.test(msg)) throw new Oops('toolong', '这段太长');
+    if (code === '1211' || /模型不存在|model[^.]{0,30}(not exist|not found|does not exist|decommissioned)/i.test(msg)) throw new Oops('nomodel', P.n + ' 没有这个模型：' + model);
     throw new Oops('upstream', P.n + ' 出错（' + r.status + '）');
   }
   const ch = r.j && r.j.choices && r.j.choices[0];
