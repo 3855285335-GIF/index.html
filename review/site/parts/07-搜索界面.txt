@@ -749,6 +749,12 @@ async function probeWeb(t) {
   if (top() !== t) return;   // 已经离开这一页
   let src = '';
   try { const x = new URL(f.url || d.u); if (x.protocol === 'https:' && x.origin !== location.origin) src = x.href; } catch (e) { /* 网址不对 */ }
+  // 手机仍显示联网但搜索服务连接失败时，收藏的本机副本也能打开。
+  if (f.frame === null && f.code === 'net' && !d.fromRead && isFav(d.u, '')) {
+    const saved = await artGet(d.u, '');
+    if (account !== accountRevision || top() !== t) return;
+    if (saved?.art?.ok) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }
+  }
   if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：简洁阅读那边有按原因的提示和按钮（看存档、去真的网站）
   if (f.frame === false || !src) {
     const why = WHY[f.why] || (src ? '这个网站不允许在别的 App 里显示原网页' : '这个网址不能在 App 里打开');
@@ -1076,16 +1082,17 @@ function resForeign(c) {   // 结果大多是外文吗
 }
 const tx = (it, k) => (W.cur && W.cur.trOn && it[k + 'z']) || it[k];
 async function qEn(c) {   // 中文搜索词翻成英文再搜：外文资料多得多，结果再自动翻成中文
+  const page = top();
   let en = W.trc.get('en|' + c.q);
   if (!en) {
     B.toast('正在把搜索词翻成英文…');
     const r = await B.call({ op: 'translate', to: 'en', items: [c.q] }, 30000);
-    if (W.cur !== c) return;
+    if (W.cur !== c || top() !== page) return;
     if (!r || !r.ok || !r.items || !r.items[0]) { B.toast((r && r.msg) || '没翻成英文，稍后再试'); return; }
     en = String(r.items[0]).replace(/^["'“”‘’]+|["'“”‘’。.]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
     W.trc.set('en|' + c.q, en);
   }
-  if (W.cur === c) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
+  if (W.cur === c && top() === page) search(en, c.type === 'images' ? 'web' : c.type, '', c.q);
 }
 async function fetchRead(t) {
   const account = accountRevision, d = t.d, at = d.at || '', force = !!d.force; d.loading = true; d.force = false;
@@ -1178,7 +1185,8 @@ function renderRules() {
       '<details><summary>要登录的网站（' + CFG.direct.length + ' 个）</summary><p>这些网站不让在 App 里显示时，直接给出“用浏览器打开”（能用你在浏览器里的登录）。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
     '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。</div>';
   R('rules').innerHTML = h;
-  artCount().then(n => { const el = root && R('artn'); if (el) el.textContent = n == null ? '' : n + ' 篇'; });
+  const countLabel = R('artn');
+  artCount().then(n => { if (countLabel.isConnected) countLabel.textContent = n == null ? '' : n + ' 篇'; });
 }
 function addSite(k) {
   B.form(k === 'pin' ? '置顶网站' : '不看的网站', [{ ph: '网址，例如 github.com', max: 120, type: 'url' }], async vals => {
@@ -1412,44 +1420,68 @@ function restorePos(t) {
 const ADB = { p: null, db: null }, ART_MAX = 120;
 function adb() {
   if (ADB.p) return ADB.p;
-  ADB.p = new Promise((res, rej) => {
+  const revision = accountRevision;
+  const opening = new Promise((res, rej) => {
     if (!window.indexedDB) { rej(new Error('no indexeddb')); return; }
     let r; try { r = indexedDB.open('chatter-ws', 1); } catch (e) { rej(e); return; }
     r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('art')) db.createObjectStore('art', { keyPath: 'k' }).createIndex('tm', 'tm'); };
-    r.onsuccess = () => { const db = r.result; ADB.db = db; db.onversionchange = () => { try { db.close(); } catch (e) {} if (ADB.db === db) { ADB.db = null; ADB.p = null; } }; res(db); };   // 退出登录要删掉整个库时，先让开
+    r.onsuccess = () => { const db = r.result;
+      if (revision !== accountRevision || ADB.p !== opening) { db.close(); rej(new Error('账号已切换')); return; }
+      ADB.db = db; db.onversionchange = () => { try { db.close(); } catch (e) {} if (ADB.db === db) { ADB.db = null; ADB.p = null; } }; res(db); };   // 退出登录要删掉整个库时，先让开
     r.onerror = () => rej(r.error || new Error('indexeddb'));
     r.onblocked = () => rej(new Error('indexeddb blocked'));
   });
-  ADB.p.catch(() => { ADB.p = null; });
-  return ADB.p;
+  ADB.p = opening;
+  opening.catch(() => { if (ADB.p === opening) ADB.p = null; });
+  return opening;
 }
-const artK = (u, at) => (B.uid() || '') + '|' + (at || '') + '|' + u;
+const artK = (uid, u, at) => uid + '|' + (at || '') + '|' + u;
+const articleRange = uid => IDBKeyRange.bound(uid + '|', uid + '}', false, true);
 const idbReq = q => new Promise((res, rej) => { q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
 async function artGet(u, at) {
-  try { const db = await adb(); return (await idbReq(db.transaction('art').objectStore('art').get(artK(u, at)))) || null; } catch (e) { return null; }
+  const uid = B.uid();
+  if (!uid) return null;
+  try { const db = await adb(); return (await idbReq(db.transaction('art').objectStore('art').get(artK(uid,u,at)))) || null; } catch (e) { return null; }
 }
 async function artPut(u, at, art) {
-  if (!art || !art.ok || String(art.html || '').length > 1500000) return;
+  const uid = B.uid(), revision = accountRevision;
+  if (!uid || !art || !art.ok || String(art.html || '').length > 1500000) return;
   if (P && P.noHist && !isFav(u, art.arch || at || '')) return;   // 不记浏览记录时，只存收藏的
   try {
     const db = await adb();
+    if (uid !== B.uid() || revision !== accountRevision) return;
+    const keep = new Set(((P && P.fav) || []).map(f => artK(uid, f.u, f.at || '')));
     await new Promise((res, rej) => {
       const tx = db.transaction('art', 'readwrite'), st = tx.objectStore('art');
-      st.put({ k: artK(u, at), uid: B.uid() || '', u: u, at: at || '', art: art, tm: Date.now() });
-      const cq = st.count();
+      st.put({ k: artK(uid,u,at), uid, u: u, at: at || '', art: art, tm: Date.now() });
+      const cq = st.count(articleRange(uid));
       cq.onsuccess = () => {   // 超过 120 篇：从最早存的删起，收藏的留着
         let extra = cq.result - ART_MAX; if (extra <= 0) return;
-        const keep = new Set(((P && P.fav) || []).map(f => artK(f.u, f.at || '')));
         const cur = st.index('tm').openKeyCursor();
-        cur.onsuccess = () => { const c = cur.result; if (!c || extra <= 0) return; if (!keep.has(c.primaryKey)) { st.delete(c.primaryKey); extra--; } c.continue(); };
+        cur.onsuccess = () => { const c = cur.result; if (!c || extra <= 0) return; if (c.primaryKey.startsWith(uid + '|') && !keep.has(c.primaryKey)) { st.delete(c.primaryKey); extra--; } c.continue(); };
       };
       tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
     });
   } catch (e) { try { B.logErr('ws-art', e); } catch (x) {} }
 }
-async function artCount() { try { const db = await adb(); return await idbReq(db.transaction('art').objectStore('art').count()); } catch (e) { return null; } }
-async function artWipe() {
-  try { const db = await adb(); await new Promise((res, rej) => { const tx = db.transaction('art', 'readwrite'); tx.objectStore('art').clear(); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); } catch (e) {}
+async function artCount() {
+  const uid = B.uid(); if (!uid) return 0;
+  try { const db = await adb(); return await idbReq(db.transaction('art').objectStore('art').count(articleRange(uid))); } catch (e) { return null; }
+}
+async function clearMyArticles() {
+  const uid = B.uid(), revision = accountRevision;
+  if (!uid) return;
+  B.acts('清空当前账号在这台设备保存的文章？', [{ label: '清空', danger: true, fn: async () => {
+    try {
+      const db = await adb();
+      if (revision !== accountRevision) return;
+      await new Promise((res, rej) => {
+        const tx = db.transaction('art', 'readwrite'); tx.objectStore('art').delete(articleRange(uid));
+        tx.oncomplete = res; tx.onabort = tx.onerror = () => rej(tx.error);
+      });
+      if (revision === accountRevision) { renderTop(); B.toast('本账号在这台设备保存的文章已清空'); }
+    } catch (e) { if (revision === accountRevision) B.toast('本机文章清理失败，请重试'); }
+  } }, { label: '取消', fn: null }]);
 }
 function artClose() { const db = ADB.db; ADB.db = null; ADB.p = null; if (db) { try { db.close(); } catch (e) {} } }
 
@@ -1488,7 +1520,7 @@ function onClick(e) {
       if (x.k === 'url') openUrl(x.v); else if (x.k === 'q') { inp.value = x.v; search(x.v, W.type); } else if (x.k === 'site') { inp.value = 'site:' + x.v + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); } else openEntry(x.p);
       break; }
     case 'tgl-nohist': P.noHist = !P.noHist; savePrefs(); renderTop(); B.toast(P.noHist ? '以后不记浏览记录和搜过的词' : '以后会记浏览记录'); break;
-    case 'art-wipe': B.acts('清空手机里保存的文章？', [{ label: '清空', danger: true, fn: async () => { await artWipe(); renderTop(); B.toast('手机里保存的文章清空了'); } }, { label: '取消', fn: null }]); break;
+    case 'art-wipe': clearMyArticles(); break;
     case 'rd-find': findOpen(); break;
     case 'find-next': findStep(1); break;
     case 'find-prev': findStep(-1); break;
@@ -1506,7 +1538,7 @@ function onClick(e) {
     } break;
     case 'pin-add': addSite('pin'); break;
     case 'pin-go': { const inp = V('home').querySelector('input'); inp.value = 'site:' + el.dataset.d + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); break; }
-    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at) go('read', { u: f.u, t: f.t, at: f.at }); else openUrl(f.u, f.t); } break; }
+    case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at || navigator.onLine === false) go('read', { u: f.u, t: f.t, at: f.at || '' }); else openUrl(f.u, f.t); } break; }
     case 'fav-all': W.flt.favs = ''; go('favs'); break;
     case 'r-go': if (it && it.u) { if (it.ext) ext(it.u); else openUrl(it.u, it.t); } break;
     case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;

@@ -95,7 +95,7 @@ const convKeyOf = (a, b) => [a, b].sort().join('::');
 const isGroupKey = k => typeof k === 'string' && k.indexOf('g:') === 0;   // 群会话：g:<群id>
 const gidOf = k => isGroupKey(k) ? k.slice(2) : '';
 const peerOf = (k, me) => { if (isGroupKey(k)) return k; const p = k.split('::'); return p[0] === me ? p[1] : p[0]; };   // 群不按冒号拆
-const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null, cover: r.cover || null });
+const rowToMsg = r => ({ id: String(r.id), conv: r.conv_key, from_acc: r.from_acc, to_acc: r.to_acc, type: r.type, body: r.type === 'image' ? readPhotoBody(r) : r.body, dur: r.dur, created_at: r.created_at, mentions: r.mentions || null, edited_at: r.edited_at || null, cover: r.cover || null });
 const SEP = '\u2063';
 function encQ(q, text) { return SEP + 'Q' + q.id + SEP + String(q.snip || '').replace(/[\u2063\r\n]+/g, ' ').slice(0, 40) + SEP + text; }
 function parseQ(body) {
@@ -110,6 +110,11 @@ let clr = {}, clrUid = null;
 function clrOf(conv) { if (clrUid !== S.uid) { clr = LS.get('ch2clr:' + (S.uid || ''), {}) || {}; clrUid = S.uid; } return clr[conv] || 0; }
 function setClr(conv, t) { clrOf(conv); clr[conv] = t; LS.set('ch2clr:' + (S.uid || ''), clr); }
 const isHidden = m => hidden.has(m.id) || (clrOf(m.conv) > 0 && Date.parse(m.created_at) <= clrOf(m.conv));
+// 通讯录专属会话继续同步消息和已读，只在渲染消息页时过滤。
+let contactsOnly = null, contactsSchema, contactsRevision = 0;
+const contactsPending = new Set();
+const contactsKey = () => 'ch2contactsOnly:' + S.uid;
+const hiddenFromInbox = c => !isGroupKey(c.convKey) && c.peer_acc !== ME() && (!contactsOnly || contactsOnly.has(c.peer_acc));
 const convGone = c => { const t = clrOf(c.convKey); return t > 0 && (Date.parse(c.last_ts || 0) || 0) <= t; };
 /* 服务器时间 − 本机时间（手机时间不准时用它校正）：本机临时给消息打的时间和服务器时间才能直接比较，消息顺序才对 */
 let skewS = [], skewMs = LS.get('ch2skew', 0) || 0;
@@ -340,9 +345,9 @@ async function idbClear(uid) {
   } catch (e) { IDB.bad = true; return false; }
 }
 const MSG = { mem: new Map(), uid: null, revision: 0 };
-let accountGeneration = 0, chatGeneration = 0;
+let accountGeneration = 0, chatGeneration = 0, photoCacheRevision = 0;
 const msgKey = c => (S.uid || '') + ':' + c;
-function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; MSG.revision++; }
+function msgCacheClear() { MSG.mem.clear(); MSG.uid = null; MSG.revision++; photoCacheRevision++; }
 async function clearLocalMessageCache(uid) {
   const generation = accountGeneration;
   clearTimeout(saveMT);
@@ -437,7 +442,7 @@ const dirty = {}; let rafId = 0;
 function sched(k) { dirty[k] = true; if (!rafId) rafId = requestAnimationFrame(flush); }
 function flush() {
   rafId = 0;
-  if (dirty.list) { dirty.list = false; renderList(); updateTitle(); }
+  if (dirty.list) { dirty.list = false; renderList(); updateTitle(); if (contactsOnly?.size) dirty.contacts = true; }
   if (dirty.contacts) { dirty.contacts = false; renderContacts(); }
   if (dirty.reqs) { dirty.reqs = false; renderRequests(); }
   if (dirty.title) { dirty.title = false; renderChatTitle(); }
@@ -449,7 +454,7 @@ function flashTitle() {
 }
 function stopFlash() { if (flashI) { clearInterval(flashI); flashI = 0; } document.title = baseTitle; }
 function updateTitle() {
-  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
+  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !hiddenFromInbox(c) && !isMuted(c.convKey)) n += c.unread || 0; });
   baseTitle = (n ? '(' + (n > 99 ? '99+' : n) + ') ' : '') + 'Chatter';
   if (!flashI) document.title = baseTitle;
   if (!convsReady) return;   // 会话还没从服务器读回来：此时 n 一定是 0，动系统角标会把推送设好的数字清掉（冷启动角标消失的原因）
@@ -522,9 +527,9 @@ function fixPreview(key) {   // 本机也没有记录：去取这个会话最后
 }
 function renderList() {
   const el = $('conv-list');
-  const vis = S.convs.filter(c => !convGone(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
+  const vis = S.convs.filter(c => !convGone(c) && !hiddenFromInbox(c)), shown = vis.filter(c => isPinned(c.convKey)).concat(vis.filter(c => !isPinned(c.convKey)));
   const gh = '';
-  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
+  if (!shown.length && !gh) { el.innerHTML = emptyHTML(S.me && contactsOnly ? '还没有会话<br>去通讯录找个好友，说点什么' : '加载中…'); return; }
   patchKids(el, shown.map(c => ({ k: 'c:' + c.convKey, h: (function () {
     const selfConv = c.convKey === SELF_KEY();
     const name = selfConv ? (nickOf(ME()) || '我') : peerName(c.peer_acc), un = c.convKey === S.conv ? 0 : (c.unread || 0), mu = isMuted(c.convKey), gp = isGroupKey(c.convKey), gg = gp ? grpOf(c.peer_acc) : null;
@@ -539,6 +544,10 @@ function renderContacts() {
   const cnt = $('friend-count'); if (cnt) cnt.textContent = S.friends.length ? S.friends.length + ' 人' : '';
   if (!S.friends.length) el.innerHTML = emptyHTML('还没有好友<br>在上面搜索账号，加一个吧');
   else {
+    const hiddenUnread = new Map();
+    if (contactsOnly?.size) S.convs.forEach(c => {
+      if (contactsOnly.has(c.peer_acc) && c.unread && c.convKey !== S.conv && !convGone(c)) hiddenUnread.set(c.peer_acc, c.unread);
+    });
     const PY = [['A', '阿'], ['B', '八'], ['C', '嚓'], ['D', '搭'], ['E', '蛾'], ['F', '发'], ['G', '噶'], ['H', '哈'], ['J', '击'], ['K', '喀'], ['L', '垃'], ['M', '妈'], ['N', '拿'], ['O', '哦'], ['P', '啪'], ['Q', '期'], ['R', '然'], ['S', '撒'], ['T', '塌'], ['W', '挖'], ['X', '昔'], ['Y', '压'], ['Z', '匝']];
     const initialOf = function (name) {
       const s = String(name || '').trim(); if (!s) return '#';
@@ -554,7 +563,7 @@ function renderContacts() {
     setHTML(el, order.map(function (k) {
       return '<div class="abbr">' + k + '</div>' + groups[k].map(function (a) {
         return '<div class="friend-item" data-acc="' + esc(a) + '">' + avatarHTML(nickOf(a), avatarOf(a), isOnline(a), a) +
-          '<div class="name"><div class="name-main">' + esc(peerName(a)) + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
+          '<div class="name"><div class="name-main">' + esc(peerName(a)) + (hiddenUnread.has(a) ? ' <span class="badge" aria-label="未读消息">' + Math.min(99, hiddenUnread.get(a)) + (hiddenUnread.get(a) > 99 ? '+' : '') + '</span>' : '') + '</div><div class="name-sub">@' + esc(a) + (remarkOf(a) ? '　昵称：' + esc(nickOf(a)) : '') + '</div></div>' +
           '<div class="row-actions"><button class="btn-primary act-chat">聊天</button><button class="btn-soft act-profile">资料</button></div></div>';
       }).join('');
     }).join(''));
@@ -747,6 +756,7 @@ function applyBoot(b) {
   S.requests = b.requests || [];
   const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
   if (prevReq) S.requests.forEach(r => { if (!prevReq.has(String(r.id))) noteRequest(r); });   // 实时通道连不上时，靠定时同步发现新的好友请求
+  if (pfAcc) renderProfile();
   saveCache(); renderMe(); sched('list'); sched('contacts'); sched('reqs'); sched('title');
   setTimeout(function () { S.convs.forEach(function (c) { if (isGroupKey(c.convKey) && (c.unread || 0) > 0) checkConvMention(c.convKey); }); }, 1500);
   if (!first) return;   // 下面这些是「登录后初始化」：每次 resync 重跑会多出好几倍请求
@@ -770,6 +780,23 @@ function applyBoot(b) {
   try { grpLoad(); grpInvitesLoad(); } catch (e) {}
 }
 async function bootstrap() {
+  const generation = accountGeneration, revision = contactsRevision;
+  if (contactsSchema !== false) {
+    const result = await sb.rpc('bootstrap_contacts');
+    if (generation !== accountGeneration) return null;
+    if (!result.error) {
+      const list = result.data?.contacts_only;
+      if (Array.isArray(list) && revision === contactsRevision) {
+        contactsOnly = new Set(list);
+        LS.set(contactsKey(), list);
+      }
+      contactsSchema = true;
+      return result.data;
+    }
+    if (result.error.code !== 'PGRST202' && !(result.error.code === '42883' && /bootstrap_contacts/.test(result.error.message || ''))) throw result.error;
+    contactsSchema = false;
+    contactsOnly = new Set(LS.get(contactsKey(), []));
+  }
   const { data, error } = await sb.rpc('bootstrap');
   if (error) {
     if (error.code === 'PGRST202' || /bootstrap/i.test(error.message || '')) throw new Error('数据库脚本还没更新：请先在 Supabase 执行最新的 setup.sql');
@@ -971,6 +998,164 @@ function retryBadImgs() {   // 网络恢复 / 回到前台：没确认被删的�
   let n = 0; Object.keys(IMGBAD).forEach(function (k) { if (!IMGBAD[k].gone) { delete IMGBAD[k]; n++; } });
   if (n && S.conv) { try { chatRender(S.stick); } catch (e) {} }
 }
+const PRIVATE_PHOTO_BUCKET = 'chatter-private';
+const PRIVATE_PHOTO_PREFIX = SUPABASE_URL + '/storage/v1/object/authenticated/' + PRIVATE_PHOTO_BUCKET + '/';
+const PRIVATE_PHOTO_NAME = /^[a-z0-9_]{3,20}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{1,8}(?:\.t)?$/;
+// 旧客户端直接绘制这张通用提示图；原件和缩略图都只通过登录请求读取。
+function photoNotice(hint) {
+  return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="76"><rect width="220" height="76" rx="12" fill="#edeaf6"/><g text-anchor="middle" font-family="sans-serif" fill="#383049"><text x="110" y="32" font-size="17">私密照片</text><text x="110" y="55" font-size="13">' + hint + '</text></g></svg>');
+}
+const PHOTO_UPDATE_CARD = photoNotice('更新 Chatter 后查看原图');
+const PHOTO_FORWARD_CARD = photoNotice('请好友更新后从原聊天重新转发');
+function readPhotoBody(row) {
+  const body = row.body || '';
+  if (!body.startsWith(PHOTO_UPDATE_CARD + '#')) return body;
+  const params = new URLSearchParams(body.slice(PHOTO_UPDATE_CARD.length + 1));
+  const path = params.get('p') || '';
+  if (!PRIVATE_PHOTO_NAME.test(path) || !path.startsWith(row.from_acc + '/' + row.id + '.')) return PHOTO_FORWARD_CARD;
+  const meta = new URLSearchParams();
+  for (const name of ['w', 'h']) if (/^\d{1,6}$/.test(params.get(name) || '')) meta.set(name, params.get(name));
+  if (params.get('thumb') === '1') meta.set('t', '1');
+  return PRIVATE_PHOTO_PREFIX + path + (meta.toString() ? '#' + meta : '');
+}
+function privatePhotoPath(url) {
+  const value = typeof url === 'string' ? canon(url).split('#')[0] : '';
+  const key = value.startsWith(PRIVATE_PHOTO_PREFIX) ? value.slice(PRIVATE_PHOTO_PREFIX.length) : '';
+  return PRIVATE_PHOTO_NAME.test(key) ? key : '';
+}
+// 与本机消息共用按账号清理的 IndexedDB；原图和小图各自占用容量。
+const PHOTO_CACHE_BYTES = 24 * 1024 * 1024;
+async function writePhotoCache(uid, path, entry, generation, revision) {
+  try {
+    const db = await idbOpen();
+    if (generation !== accountGeneration || revision !== photoCacheRevision || uid !== S.uid) return;
+    const prefix = uid + ':photo:', indexKey = prefix + 'index';
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('msgs', 'readwrite'), store = tx.objectStore('msgs');
+      const read = store.get(indexKey);
+      read.onsuccess = () => {
+        const list = (read.result || []).filter(item => item.path !== path && (entry || item.path !== path + '.t'));
+        if (entry) {
+          store.put(entry, prefix + path);
+          list.push({path, bytes:entry.blob.size});
+        } else {
+          store.delete(prefix + path);
+          store.delete(prefix + path + '.t');
+        }
+        let total = list.reduce((sum, item) => sum + item.bytes, 0);
+        while (total > PHOTO_CACHE_BYTES || list.length > 80) {
+          const oldest = list.shift(); total -= oldest.bytes;
+          store.delete(prefix + oldest.path);
+        }
+        store.put(list, indexKey);
+      };
+      tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* 存储不可用或额度不足，继续显示刚下载的图片。 */ }
+}
+async function photoResponse(url, signal) {
+  const path = privatePhotoPath(url);
+  if (!path) return fetch(disp(url), { signal });
+  const generation = accountGeneration, revision = photoCacheRevision, uid = S.uid;
+  function checkSession() {
+    if (!uid || uid !== S.uid || generation !== accountGeneration || !S.token) throw new Error('登录状态已变化');
+    if (signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
+  }
+  async function request(method) {
+    checkSession();
+    const response = await fetch(disp(PRIVATE_PHOTO_PREFIX + path), {
+      method, signal, cache: 'no-store', credentials: 'omit', redirect: 'error',
+      headers: { Authorization: 'Bearer ' + S.token, apikey: SUPABASE_KEY }
+    });
+    checkSession();
+    return response;
+  }
+  const cached = await idbGet(uid + ':photo:' + path);
+  if (cached?.etag && cached.blob instanceof Blob) {
+    // 服务器按当前会话核验权限；撤回、退群、断网时都不能凭本机副本重新打开。
+    const head = await request('HEAD');
+    if (head.ok && head.headers.get('etag') === cached.etag)
+      return new Response(cached.blob, {headers:{'Content-Type':cached.blob.type}});
+    if ([401,403,404].includes(head.status)) {
+      await writePhotoCache(uid,path,null,generation,revision);
+      return head;
+    }
+    // 部分网关不支持 HEAD 或不公开 ETag，直接按原有鉴权链路取图。
+  }
+  const response = await request('GET');
+  const etag = response.headers.get('etag');
+  const bytes = Number(response.headers.get('content-length'));
+  if (!response.ok || !etag || !Number.isSafeInteger(bytes) || bytes <= 0 || bytes > PHOTO_CACHE_BYTES) return response;
+  const blob = await response.blob();
+  checkSession();
+  if (blob.size === bytes) await writePhotoCache(uid,path,{etag,blob},generation,revision);
+  checkSession();
+  return new Response(blob, {headers:{'Content-Type':blob.type}});
+}
+const privatePhotoElements = new Map();
+let privatePhotoObserver = null;
+function releasePrivatePhoto(img) {
+  const record = privatePhotoElements.get(img);
+  if (!record) return;
+  privatePhotoElements.delete(img);
+  record.controller.abort();
+  if (record.url) URL.revokeObjectURL(record.url);
+  if (img.getAttribute('src') === record.url) img.removeAttribute('src');
+}
+function clearPrivatePhotos() {
+  if (privatePhotoObserver) privatePhotoObserver.disconnect();
+  privatePhotoElements.forEach((_record, img) => releasePrivatePhoto(img));
+}
+function syncPrivatePhotos(root) {
+  privatePhotoElements.forEach((record, img) => {
+    if (!img.isConnected || img.dataset.privatePhoto !== record.src) releasePrivatePhoto(img);
+  });
+  if (!root) return;
+  if (!privatePhotoObserver && typeof IntersectionObserver !== 'undefined') {
+    privatePhotoObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        privatePhotoObserver.unobserve(entry.target);
+        loadPrivatePhoto(entry.target);
+      });
+    }, { root: $('chat-messages'), rootMargin: '200px' });
+  }
+  root.querySelectorAll('img[data-private-photo]').forEach(img => {
+    const record = privatePhotoElements.get(img);
+    if (record) {
+      if (record.url && !img.getAttribute('src')) img.src = record.url;
+    } else if (privatePhotoObserver) privatePhotoObserver.observe(img);
+    else loadPrivatePhoto(img);
+  });
+}
+async function loadPrivatePhoto(img) {
+  const src = img.dataset.privatePhoto;
+  if (!S.conv || !img.isConnected || !privatePhotoPath(src) || privatePhotoElements.has(img)) return;
+  const msg = img.closest('.msg');
+  if (msg && !S.msgs.some(m => m.id === msg.dataset.id && m.conv === S.conv && m.type === 'image')) return;
+  const record = { src, url: '', controller: new AbortController() };
+  privatePhotoElements.set(img, record);
+  const generation = accountGeneration, chat = chatGeneration, conv = S.conv;
+  const current = () => generation === accountGeneration && chat === chatGeneration && S.conv === conv && img.isConnected
+    && img.dataset.privatePhoto === src && privatePhotoElements.get(img) === record;
+  try {
+    const { signal } = record.controller, full = img.dataset.full;
+    let response = await photoResponse(src, signal);
+    if (!response.ok && full && full !== src && current()) response = await photoResponse(full, signal);
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const blob = await response.blob();
+    if (!current()) return;
+    record.url = URL.createObjectURL(blob);
+    delete img.dataset.privatePhotoFailed;
+    img.alt = '';
+    img.src = record.url;
+  } catch (e) {
+    if (!current()) return;
+    img.alt = navigator.onLine === false ? '联网后可核对权限并打开私密照片' : '私密图片暂时无法打开，点此重试';
+    img.dataset.privatePhotoFailed = '1';
+  }
+}
+
 function msgHTML(m) {
   const mine = m.from_acc === ME(); let body;
   switch (m.type) {
@@ -981,7 +1166,9 @@ function msgHTML(m) {
       let _ar = '';
       if (_W && _H) { const s = Math.min(1, 220 / _W, 300 / _H); const w = Math.max(1, Math.round(_W * s)), h = Math.max(1, Math.round(_H * s)); _ar = ' width="' + w + '" height="' + h + '" style="width:' + w + 'px;height:' + h + 'px"'; }
       const _thumb = /(^#|&)t=1(&|$)/.test(_fr), _full = disp(_u), _bad = !/^blob:/.test(_u) && IMGBAD[_full];
-      if (_bad && (_bad.gone || now() - _bad.at < 60000)) body = '<div class="bubble img"' + _ar.replace(/ width="\d+" height="\d+"/, '') + '>' + imgFailHTML(_full, _bad.gone) + '</div>';
+      if (privatePhotoPath(_u)) {
+        body = '<div class="bubble img"><img data-private-photo="' + esc(_thumb ? _full + '.t' : _full) + '" data-full="' + esc(_full) + '" alt="正在读取私密图片"' + _ar + '></div>';
+      } else if (_bad && (_bad.gone || now() - _bad.at < 60000)) body = '<div class="bubble img"' + _ar.replace(/ width="\d+" height="\d+"/, '') + '>' + imgFailHTML(_full, _bad.gone) + '</div>';
       else body = '<div class="bubble img"><img src="' + esc(_thumb ? _full + '.t' : _full + _fr) + '" data-full="' + esc(_full) + '" alt="" loading="lazy" decoding="async"' + _ar + '>' + (m._st === 'sending' && m._blob ? '<span class="uppct">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : '') + '</div>'; } break;
     case 'sticker': body = '<div class="bubble sticker">' + stkInner(m.body) + '</div>'; break;
     case 'video': {   // 先显示封面（几十 KB），点了才加载视频：聊天里有很多视频也不卡、不费流量
@@ -1039,7 +1226,7 @@ function morphEl(a, b) {   // 把旧节点 a 改成新节点 b 的样子，能�
     a.setAttribute(n, v);
   }
   const aa = Array.from(a.attributes);
-  for (let i = 0; i < aa.length; i++) { const n = aa[i].name; if (!b.hasAttribute(n) && n !== 'data-rty' && n !== 'data-member' && n !== 'data-tf') a.removeAttribute(n); }
+  for (let i = 0; i < aa.length; i++) { const n = aa[i].name; if (!b.hasAttribute(n) && !(n === 'src' && b.dataset.privatePhoto && privatePhotoElements.get(a)?.src === b.dataset.privatePhoto) && n !== 'data-rty' && n !== 'data-member' && n !== 'data-tf') a.removeAttribute(n); }
   let ac = a.firstChild, bc = b.firstChild;
   while (bc) {
     const nb = bc.nextSibling;
@@ -1075,7 +1262,7 @@ function patchKids(box, items) {   // items: [{k: 唯一键, h: 这一项的 HTM
 function chatRender(stick) {
   const b = $('chat-messages');
   const vis = S.msgs.filter(m => !isHidden(m));
-  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; S.rendered = 0; return; }
+  if (!vis.length) { b.innerHTML = '<div class="empty">' + EMPTY_SVG + '还没有消息，打个招呼吧</div>'; syncPrivatePhotos(); S.rendered = 0; return; }
   const limit = Math.min(S.renderLimit || 200, vis.length);
   const shown = vis.slice(vis.length - limit);   // 只渲染最近 N 条，往上翻再扩，几百条也不卡
   let prevDay = '';
@@ -1086,6 +1273,7 @@ function chatRender(stick) {
     items.push({ k: 'm:' + m.id, h: msgHTML(m) });
   });
   patchKids(b, items);
+  syncPrivatePhotos(b);
   S.rendered = shown.length;
   fillGlCards(b);
   setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
@@ -1096,7 +1284,7 @@ function chatAppend(m, force) {
   const b = $('chat-messages'), e = b.querySelector('.empty'); if (e) e.remove();
   const h = msgHTML(m);
   b.insertAdjacentHTML('beforeend', h);
-  const nel = b.lastElementChild; if (nel) { nel._k = 'm:' + m.id; nel._h = h; nel.classList.add('new'); }   // 只有新来的这条弹一下
+  const nel = b.lastElementChild; if (nel) { nel._k = 'm:' + m.id; nel._h = h; nel.classList.add('new'); syncPrivatePhotos(nel); }   // 只有新来的这条弹一下
   fillGlCards(b);
   setTimeout(function () { try { fillGlCards(b); } catch (e) {} }, 700);
   if (force || S.stick) b.scrollTop = b.scrollHeight;
@@ -1108,14 +1296,16 @@ function chatReplace(m) {
   if (!el) { chatRender(S.stick); return; }
   const h = msgHTML(m); if (el._h === h) return;
   _tpl.innerHTML = h; const nb = _tpl.content.firstElementChild; if (!nb) return;
-  const ne = morphEl(el, nb); ne._k = 'm:' + m.id; ne._h = h;   // 就地改，不整条换掉（图片不重新加载）
+  const ne = morphEl(el, nb); ne._k = 'm:' + m.id; ne._h = h;
+  syncPrivatePhotos(ne);
+  if (m.type === 'recalled' && lbList[lbIdx]?.id === m.id) closeLightbox();   // 就地改，不整条换掉（图片不重新加载）
 }
 function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
   const m = S.msgs[i];
   Object.assign(m, p);
   // 图片从本地 blob 换成服务器地址：只换 src，不重建节点，避免“先变小再变大”的闪烁
-  if (p.body && m.type === 'image') {
+  if (p.body && m.type === 'image' && !privatePhotoPath(p.body)) {
     const el = msgElOf(id), img = el && el.querySelector('.bubble.img img');
     if (img && !/^blob:/.test(p.body)) { try { img.src = p.body; } catch (e) {} return m; }
   }
@@ -1152,6 +1342,10 @@ function upsertMsg(m) {
     const o = S.msgs[i];
     if (o._rx && m.created_at && !m._rx) { addSkew(Date.parse(m.created_at) - o._rx); delete o._rx; }
     if (isStaleMessage(o, m)) return;
+    if (o.type === 'image' && m.type === 'recalled') {
+      const path = privatePhotoPath(o.body);
+      if (path) writePhotoCache(S.uid,path,null,accountGeneration,++photoCacheRevision);
+    }
     if (o.type === m.type && o.body === m.body && o.dur === m.dur && o.edited_at === m.edited_at && o.cover === m.cover && !o._st) { if (o.created_at !== m.created_at) { o.created_at = m.created_at; placeMsg(i); } return; }
     S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; S.out.delete(m.id); chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
   }
@@ -1194,13 +1388,13 @@ function onIncoming(m, noInc) {
 let msgBannerT = 0;
 function inAppBanner(m) {
   try {
-    const el = $('msg-banner'); if (!el || !m) return;
+    const el = $('msg-banner'); if (!el || !m || hiddenFromInbox({ convKey: m.conv, peer_acc: m.from_acc })) return;
     const who = m.from_acc === ME() ? '我' : (m.conv && isGroupKey(m.conv) ? (grpName(m.conv) || '群聊') + ' · ' + peerName(m.from_acc) : peerName(m.from_acc));
     const txt = previewOf(m) || '';
     const pf = S.profiles[m.from_acc] || {};
     const av = avatarHTML(who, pf.avatar_url, false, m.from_acc || '');
     el.innerHTML = '<span class="mb-av">' + av + '</span><b>' + esc(who) + '</b><span>' + esc(txt) + '</span>';
-    el.classList.add('on');
+    el.dataset.peer = m.from_acc; el.classList.add('on');
     clearTimeout(msgBannerT);
     msgBannerT = setTimeout(function () { el.classList.remove('on'); }, 3800);
     el.onclick = function () {
@@ -1286,7 +1480,7 @@ function uploadContentType(type) {
   if (ct === 'text/plain' || ct === 'application/pdf') return ct;
   return 'application/octet-stream';
 }
-async function upload(blob, ext, ct, pre, fixed, onPct) {
+async function upload(blob, ext, ct, pre, fixed, onPct, bucket = 'chat-media') {
   ct = uploadContentType(ct);
   const path = fixed || ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
   const generation = accountGeneration;
@@ -1294,15 +1488,16 @@ async function upload(blob, ext, ct, pre, fixed, onPct) {
   if (onPct && typeof XMLHttpRequest !== 'undefined' && typeof FormData !== 'undefined') {
     try {
       const { data } = await sb.auth.getSession(); const tok = data && data.session && data.session.access_token;
-      if (tok && generation === accountGeneration) { await xhrUpload(path, blob, ct, tok, onPct); done = true; }
+      if (tok && generation === accountGeneration) { await xhrUpload(path, blob, ct, tok, onPct, bucket); done = true; }
     } catch (e) { if (tooBigErr(e)) throw e; logErr('xhr-upload', e); }   // 别的问题：退回官方库再传一次
   }
   if (generation !== accountGeneration) throw new Error('账号已切换');
   if (!done) {
-    const { error } = await sb.storage.from('chat-media').upload(path, blob, { contentType: ct, cacheControl: '31536000' });
+    const { error } = await sb.storage.from(bucket).upload(path, blob, { contentType: ct, cacheControl: bucket === PRIVATE_PHOTO_BUCKET ? '0' : '31536000' });
     if (error && !(fixed && /already exists|Duplicate/i.test(String(error.message || '')))) throw error;   // 刚才其实已经传上去了（只是回应丢了）
   }
-  return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  if (bucket === PRIVATE_PHOTO_BUCKET) return PRIVATE_PHOTO_PREFIX + path;
+  return canon(sb.storage.from(bucket).getPublicUrl(path).data.publicUrl);
 }
 async function deliver(m, silent) {
   const id = m.id, generation = accountGeneration;
@@ -1310,10 +1505,21 @@ async function deliver(m, silent) {
   try {
     if (m._blob) {
       const old = m.body, base = m.from_acc + '/' + id + '.' + m._ext;
+      if (m.type === 'image' && (m._privatePhoto || !isGroupKey(m.conv))) {
+        const { data, error } = await sb.from('app_config').select('value').eq('key', 'private_chat_attachments').maybeSingle();
+        if (generation !== accountGeneration) return;
+        if (error) throw error;
+        const settings = data?.value;
+        if (settings?.paused === true || (m._privatePhoto && settings?.enabled !== true)) {
+          throw Object.assign(new Error('私密图片停止上传'), { code: 'PRIVATE_PHOTO_PAUSED' });
+        }
+        m._privatePhoto = settings?.enabled === true;
+      }
+      const bucket = m._privatePhoto ? PRIVATE_PHOTO_BUCKET : 'chat-media';
       // 图片：同时传一张长边 720 的小图（文件名 = 原图 + “.t”），聊天里先显示小图，快很多；小图没传上也不影响发送
       const wantT = m.type === 'image' && !/gif|svg/i.test(m._ct || '') && m._blob.size > 120 * 1024;
-      const pT = wantT ? makeThumb(m._blob).then(function (tb) { return tb && generation === accountGeneration ? upload(tb, 'jpg', 'image/jpeg', '', base + '.t').then(function () { return true; }) : false; }).catch(function (e) { logErr('thumb', e); return false; }) : Promise.resolve(false);
-      const url = await upload(m._blob, m._ext, m._ct, '', base, m._blob.size > 300 * 1024 ? f => upPct(m, f) : null);
+      const pT = wantT ? makeThumb(m._blob).then(function (tb) { return tb && generation === accountGeneration ? upload(tb, 'jpg', 'image/jpeg', '', base + '.t', null, bucket).then(function () { return true; }) : false; }).catch(function (e) { logErr('thumb', e); return false; }) : Promise.resolve(false);
+      const url = await upload(m._blob, m._ext, m._ct, '', base, m._blob.size > 300 * 1024 ? f => upPct(m, f) : null, bucket);
       const hasT = await pT;
       if (generation !== accountGeneration) return;
       setTimeout(() => { if (generation === accountGeneration) checkStorage(); }, 1500);
@@ -1336,6 +1542,14 @@ async function deliver(m, silent) {
     const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc });
     // 先写库、再广播：接收方收到广播会按 id 查库，广播太早会查不到
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, cover: m.cover || null };
+    const privateKey = m.type === 'image' ? privatePhotoPath(m.body) : '';
+    if (privateKey) {
+      row.private_attachment_path = privateKey;
+      const meta = new URLSearchParams(m.body.split('#')[1] || '');
+      if (meta.has('t')) { meta.delete('t'); meta.set('thumb', '1'); }
+      // 路径在片段中，旧客户端打开提示图时不会向服务器发出读取原件的请求。
+      row.body = PHOTO_UPDATE_CARD + '#p=' + privateKey + (meta.toString() ? '&' + meta : '');
+    }
     const t0 = now();
     let { data, error } = await sb.from('messages').insert(row).select('*').single();
     if (generation !== accountGeneration) return;
@@ -1375,6 +1589,7 @@ async function deliver(m, silent) {
     if (noType && m.type !== 'recalled') S.v6 = false;
     if (m.type === 'recalled') { m._fatal = true; }
     m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' }); saveOutQueue();
+    if (e?.code === 'PRIVATE_PHOTO_PAUSED') { if (!silent) toast('私密图片暂时停止发送，稍后可重试'); return; }
     if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
   }
 }
@@ -1973,14 +2188,17 @@ async function copyImageMsg(m) {
     const url = raw.indexOf('#') >= 0 ? raw.slice(0, raw.indexOf('#')) : raw;
     if (!url) { toast('这张图还没传完'); return; }
     if (!(window.ClipboardItem) || !navigator.clipboard || !navigator.clipboard.write) { toast('这个浏览器不支持复制图片，长按图片保存到相册'); return; }
-    const src = disp(url);
+    const generation = accountGeneration;
     // Safari 要求「点击当下」就交出 ClipboardItem，所以这里先把 Promise 塞进去，图片在 Promise 里再下载/转码
     const png = (async function () {
-      const blob = await (await fetch(src)).blob();
+      const response = await photoResponse(url);
+      if (!response.ok) throw new Error('图片读取失败');
+      const blob = await response.blob();
+      if (generation !== accountGeneration) throw new Error('账号已切换');
       if (blob.type === 'image/png') return blob;
       return await new Promise(function (res, rej) {
         const img = new Image();
-        img.crossOrigin = 'anonymous';
+        const source = URL.createObjectURL(blob);
         img.onload = function () {
           try {
             const c = document.createElement('canvas');
@@ -1988,9 +2206,10 @@ async function copyImageMsg(m) {
             c.getContext('2d').drawImage(img, 0, 0);
             c.toBlob(function (b) { b ? res(b) : rej(new Error('toBlob 失败')); }, 'image/png');
           } catch (e) { rej(e); }
+          finally { URL.revokeObjectURL(source); }
         };
-        img.onerror = function () { rej(new Error('图片读不到')); };
-        img.src = src;
+        img.onerror = function () { URL.revokeObjectURL(source); rej(new Error('图片读不到')); };
+        img.src = source;
       });
     })();
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
@@ -2068,7 +2287,7 @@ async function warmConvs() {   // 启动后先把最近几个会话的消息拉�
 async function openConv(key, peer) {
   if (!S.me) return;
   const generation = ++chatGeneration;
-  cancelMediaPreviews();
+  cancelMediaPreviews(); closeLightbox(); clearPrivatePhotos();
   olderCursor = null; S.loadingOlder = false;
   try { if (window.ChatterSearch && window.ChatterSearch.isOpen()) window.ChatterSearch.closeNow(); } catch (e) {}   // 在搜索里点了消息横幅：先收起搜索，不然聊天被盖在下面
   recAbort();
@@ -2158,7 +2377,7 @@ async function openConv(key, peer) {
 }
 let lastChat = null;   // 刚关掉的聊天（“前进”手势用）
 function closeChat() {
-  ++chatGeneration; cancelMediaPreviews(); olderCursor = null; S.loadingOlder = false;
+  ++chatGeneration; cancelMediaPreviews(); closeLightbox(); clearPrivatePhotos(); olderCursor = null; S.loadingOlder = false;
   const generation = accountGeneration;
   if (S.conv) lastChat = { key: S.conv, peer: S.peer };
   recAbort(); stopAudio();
@@ -3491,8 +3710,10 @@ function startTimers() {
   }, 3000);
 }
 function teardown() {
+  const outgoingUid = S.uid;
   ++accountGeneration; ++chatGeneration; ++friendSearchSequence;
   iceConfigRequest = null;
+  closeLightbox(); clearPrivatePhotos();
   clearTimeout(searchT); clearTimeout(saveMT); clearTimeout(csT);
   pendingFriendRequests.clear(); pendingMomentLikes.clear(); cancelMediaPreviews(); olderCursor = null;
   Object.values(readT).forEach(clearTimeout); readT = {};
@@ -3522,19 +3743,23 @@ function teardown() {
     try { if (String(url).startsWith('blob:')) URL.revokeObjectURL(url); if (m._pu) URL.revokeObjectURL(m._pu); } catch (e) {}
   });
   document.body.classList.remove('chat-open');
+  contactsOnly = null; contactsSchema = undefined; contactsRevision++; contactsPending.clear();
   S.bootInited = false; editWatchAt = 0;
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
   S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.v9 = undefined; S.mperm = {}; MO.aud = {}; MO.mode = 'all'; MO.vis = null; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
-  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
+  if (outgoingUid) return idbClear(outgoingUid); // 连同当前账号的私密照片副本一起清理
 }
 
 /* ================= 登录 / 启动 ================= */
 async function start(user) {
   const generation = accountGeneration;
   S.started = true; S.uid = user.id;
+  const savedContacts = LS.get(contactsKey(), null);
+  // 联网冷启动先取得本账号的最新设置，避免闪出另一台设备刚隐藏的好友。
+  contactsOnly = navigator.onLine === false && Array.isArray(savedContacts) ? new Set(savedContacts) : null;
   if (!S.me) { const c = LS.get(ck(user.id)); if (c && c.me) hydrate(c); }
   S.stk = LS.get(stkKey(), null); stkOk = false; S.remarks = LS.get(rmkKey(), {}) || {}; S.mperm = LS.get(mpKey(), {}) || {};
   showApp(); renderAll();                       // 有缓存就先显示（秒开）
@@ -3551,6 +3776,7 @@ async function start(user) {
     applyBoot(b); showBanner('');
   } catch (e) {
     if (generation !== accountGeneration) return;
+    if (!contactsOnly && Array.isArray(savedContacts)) { contactsOnly = new Set(savedContacts); sched('list'); }
     logErr('boot', e);
     if (!S.me) { teardown(); showAuth('加载失败：' + (e.message || '请重试')); return; }
     showBanner(e.message && /setup\.sql/.test(e.message) ? e.message : '网络较慢，先显示缓存数据…');
@@ -3570,8 +3796,8 @@ async function start(user) {
   later(loadFriendBgs, 1200);
 }
 async function onAuth(ev, session) {
-  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
-  if (S.uid && S.uid !== session.user.id) teardown();
+  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { forgetBrowserData(S.uid); teardown(); showAuth(); $('login-pass').value = ''; } return; }
+  if (S.uid && S.uid !== session.user.id) { forgetBrowserData(S.uid); teardown(); }
   S.token = session.access_token;
   if (ev === 'TOKEN_REFRESHED' && S.started) { try { sb.realtime.setAuth(session.access_token); } catch (e) {} return; }
   if (S.started && S.uid === session.user.id) return;
@@ -5397,9 +5623,9 @@ function stProtected(owner) {
   const keep = new Set();
   const prefix = SUPABASE_URL + '/storage/v1/object/public/chat-media/';
   function keepUrl(url) {
-    if (typeof url !== 'string' || !url.startsWith(prefix)) return;
+    if (typeof url !== 'string') return;
     try {
-      const key = decodeURIComponent(url.slice(prefix.length).split(/[?#]/)[0]);
+      const key = privatePhotoPath(url) || (url.startsWith(prefix) ? decodeURIComponent(url.slice(prefix.length).split(/[?#]/)[0]) : '');
       if (key.startsWith(owner + '/')) keep.add(stBase(key.slice(owner.length + 1)));
     } catch (e) { /* 无效链接不指向存储文件 */ }
   }
@@ -5418,9 +5644,9 @@ function stPick(files, days) {
   files.forEach(f => {
     const legacy = /^(\d{12,13})_/.exec(f.name);
     const t = Date.parse(f.created_at || '') || Date.parse(f.updated_at || '') || Number(legacy?.[1]);
-    if (!(t > 0 && t < cutoff)) keep.add(stBase(f.name));
+    if (!(t > 0 && t < cutoff)) keep.add(f.bucket + '/' + stBase(f.name));
   });
-  return files.filter(f => !keep.has(stBase(f.name)));
+  return files.filter(f => !keep.has(f.bucket + '/' + stBase(f.name)));
 }
 function stRender(view) {
   const files = view.files;
@@ -5453,13 +5679,20 @@ async function loadStore() {
   checkStorage(true).then(() => { if (stCurrent(view) && view.files && !view.deleting) stRender(view); });
   try {
     if (S.v6 !== false && !await loadStickers(true)) throw new Error('读取表情列表失败');
-    const files = new Map(), storage = sb.storage.from('chat-media');
-    for (let offset = 0; stCurrent(view); offset += 100) {
-      const { data, error } = await storage.list(view.owner, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } });
-      if (!stCurrent(view)) return;
-      if (error || !Array.isArray(data)) throw error || new Error('附件列表无效');
-      data.forEach(f => { if (f?.name && f.id !== null && stBase(f.name)) files.set(f.name, f); });
-      if (data.length < 100) break;
+    const config = await sb.from('app_config').select('value').eq('key', 'private_chat_attachments').maybeSingle();
+    if (!stCurrent(view)) return;
+    if (config.error) throw config.error;
+    const buckets = config.data ? ['chat-media', PRIVATE_PHOTO_BUCKET] : ['chat-media'];
+    const files = new Map();
+    for (const bucket of buckets) {
+      const storage = sb.storage.from(bucket);
+      for (let offset = 0; stCurrent(view); offset += 100) {
+        const { data, error } = await storage.list(view.owner, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } });
+        if (!stCurrent(view)) return;
+        if (error || !Array.isArray(data)) throw error || new Error('附件列表无效');
+        data.forEach(f => { if (f?.name && f.id !== null && stBase(f.name)) files.set(bucket + '/' + f.name, { ...f, bucket }); });
+        if (data.length < 100) break;
+      }
     }
     if (!stCurrent(view)) return;
     const keep = stProtected(view.owner);
@@ -5492,19 +5725,24 @@ async function stDelete(view, list) {
       if (stCurrent(view)) toast('暂时无法核对正在使用的表情，请稍后再试');
       return;
     }
-    const storage = sb.storage.from('chat-media');
     for (let i = 0; i < list.length && stCurrent(view); i += 50) {
       const batch = list.slice(i, i + 50), keep = stProtected(view.owner);
-      const keys = batch.filter(f => !keep.has(stBase(f.name))).map(f => view.owner + '/' + f.name);
-      skipped += batch.length - keys.length;
-      if (!keys.length) continue;
-      try {
-        const { data, error } = await storage.remove(keys);
+      const keysByBucket = new Map();
+      for (const file of batch) {
+        if (keep.has(stBase(file.name))) { skipped++; continue; }
+        if (!keysByBucket.has(file.bucket)) keysByBucket.set(file.bucket, []);
+        keysByBucket.get(file.bucket).push(view.owner + '/' + file.name);
+      }
+      for (const [bucket, keys] of keysByBucket) {
         if (!stCurrent(view)) return;
-        if (error) throw error;
-        const count = Array.isArray(data) ? Math.min(data.length, keys.length) : 0;
-        done += count; unconfirmed += keys.length - count;
-      } catch (e) { logErr('store-rm', e); unconfirmed += keys.length; }
+        try {
+          const { data, error } = await sb.storage.from(bucket).remove(keys);
+          if (!stCurrent(view)) return;
+          if (error) throw error;
+          const count = Array.isArray(data) ? Math.min(data.length, keys.length) : 0;
+          done += count; unconfirmed += keys.length - count;
+        } catch (e) { logErr('store-rm', e); unconfirmed += keys.length; }
+      }
       if (stCurrent(view)) $('store-info').textContent = '已处理 ' + Math.min(i + 50, list.length) + ' / ' + list.length + ' 个附件文件…';
     }
     if (stCurrent(view)) {
@@ -5658,6 +5896,27 @@ async function addStickerFiles(files) {
 async function addToStickers(m) {
   if (S.v6 === false) { toast(NEED_V6); return; }
   const url = m.body;
+  if (m.type === 'image' && privatePhotoPath(url)) {
+    const generation = accountGeneration;
+    openActs('另存为可分享的表情？\n这会复制一份到表情库，私聊原图保留原来的访问权限。', [
+      { label: '取消', fn: null },
+      { label: '另存为表情', fn: async () => {
+        try {
+          if (generation !== accountGeneration) return;
+          const response = await photoResponse(url);
+          if (!response.ok) throw new Error('图片不可读取');
+          const blob = await response.blob();
+          if (generation !== accountGeneration) return;
+          if (!/^image\//.test(blob.type) || blob.size > STK_MAX) throw new Error('图片格式或大小不支持');
+          if (!stkOk && !await loadStickers(true)) throw new Error('暂时无法读取表情列表');
+          if (generation !== accountGeneration) return;
+          await addStickerBlob(blob, '');
+          if (generation === accountGeneration) { renderEp(); toast('已添加到我的表情'); }
+        } catch (e) { if (generation === accountGeneration) toast('未能另存为表情，请稍后再试'); }
+      } }
+    ]);
+    return;
+  }
   if (m.type === 'sticker' && !isStoreUrl(url)) { toast('这是表情库里的表情，在“表情库”里就能找到'); return; }
   if (!isStoreUrl(url)) { toast('这条消息还没发送完成'); return; }
   if (!stkOk) await loadStickers(true);
@@ -6010,6 +6269,7 @@ function shareFile(f, second) {
 let saving2 = false;
 async function saveToPhone(url, name) {
   if (!url || saving2) return;
+  const generation = accountGeneration;
   if (url.indexOf('blob:') === 0) { toast('还在发送中，等发完再保存'); return; }
   const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
   // 电脑：先弹「另存为」（必须在点击的手势里，不能等下载完再弹，否则浏览器会拦）
@@ -6018,13 +6278,14 @@ async function saveToPhone(url, name) {
     try { handle = await window.showSaveFilePicker({ suggestedName: name }); }
     catch (e) { if (e && e.name === 'AbortError') return; handle = null; }
   }
+  if (generation !== accountGeneration) return;
   saving2 = true; toast('正在准备…');
   let f = null;
   try {
-    const r = await fetch(disp(url)); if (!r.ok) throw new Error('HTTP ' + r.status);
+    const r = await photoResponse(url); if (!r.ok) throw new Error('HTTP ' + r.status);
     const b = await r.blob(); f = new File([b], name, { type: b.type || 'application/octet-stream' });
   } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
-  saving2 = false; if (!f) return;
+  saving2 = false; if (!f || generation !== accountGeneration) return;
   if (handle) {
     try {
       const w = await handle.createWritable(); await w.write(f); await w.close();
@@ -6052,12 +6313,28 @@ function openForward(m) {
 }
 function forwardToGroup(m, gid) {
   if (!gid) return;
+  if (m.type === 'image' && privatePhotoPath(m.body)) return forwardPrivatePhoto(m, 'g:' + gid, 'g:' + gid);
   if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
   const conv = 'g:' + gid;
   const fm = { id: uuid(), conv: conv, from_acc: ME(), to_acc: conv, type: m.type, body: m.type === 'text' ? parseQ(m.body).text : m.body, dur: m.dur || null, created_at: stampAfterClr(conv), _st: 'sending' };
   if (conv === S.conv) addLocal(fm);
   else { S.out.set(fm.id, fm); touchConv(conv, previewOf(fm), fm.created_at, false); deliver(fm); }
   toast('已转发到「' + ((grpOf(conv) || {}).name || '群聊') + '」');
+}
+async function forwardPrivatePhoto(m, conv, to) {
+  const generation = accountGeneration;
+  try {
+    const response = await photoResponse(m.body);
+    if (!response.ok) throw new Error('图片不可读取');
+    const blob = await response.blob();
+    if (generation !== accountGeneration) return;
+    const id = uuid();
+    const fm = { id, conv, from_acc: ME(), to_acc: to, type: 'image', body: URL.createObjectURL(blob),
+      created_at: stampAfterClr(conv), _blob: blob, _ext: extOfUrl(m.body) || 'png', _ct: blob.type,
+      _st: 'sending', _privatePhoto: true };
+    if (conv === S.conv) addLocal(fm);
+    else { S.out.set(id, fm); touchConv(conv, previewOf(fm), fm.created_at, false); deliver(fm); }
+  } catch (e) { if (generation === accountGeneration) toast('图片转发失败，请重新打开后再试'); }
 }
 function momentFwdImages(mm) { return Array.isArray(mm.images) ? mm.images.filter(Boolean).map(function (u) { return String(u).split('#')[0]; }) : []; }
 function forwardMomentTo(mm, acc) {
@@ -6112,7 +6389,9 @@ async function forwardMomentVideo(mm, conv, to) {
     else { S.out.set(fm.id, fm); touchConv(conv, '[视频]', fm.created_at, false); deliver(fm); }
   } catch (e) { logErr('fwd-video', e); toast('视频转发失败，检查网络'); }
 }
-function forwardTo(m, acc) {  if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
+function forwardTo(m, acc) {
+  if (m.type === 'image' && privatePhotoPath(m.body)) return forwardPrivatePhoto(m, convKeyOf(ME(), acc), acc);
+   if (/^(sticker|video|file)$/.test(m.type) && S.v6 === false) { toast(NEED_V6); return; }
   const conv = convKeyOf(ME(), acc);
   const fm = { id: uuid(), conv, from_acc: ME(), to_acc: acc, type: m.type, body: m.type === 'text' ? parseQ(m.body).text : m.body, dur: m.dur || null, created_at: stampAfterClr(conv), _st: 'sending' };
   if (conv === S.conv) addLocal(fm);
@@ -6180,18 +6459,38 @@ function onConvChange(row) {
   } catch (e) {}
 }
 let logoutPending = false;
+// 搜索模块可能尚未加载。退出时也要按原账号清理旧版留下的离线文章。
+function forgetBrowserData(uid) {
+  if (!uid) return Promise.resolve();
+  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos']) LS.del(key + ':' + uid);
+  if (!window.indexedDB) return Promise.resolve();
+  return new Promise(resolve => {
+    const req = indexedDB.open('chatter-ws');
+    req.onupgradeneeded = () => req.transaction.abort(); // 从未用过浏览器，无需创建空库
+    req.onerror = () => resolve();
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction('art', 'readwrite');
+        tx.objectStore('art').delete(IDBKeyRange.bound(uid + '|', uid + '}', false, true));
+        tx.oncomplete = tx.onabort = tx.onerror = () => { db.close(); resolve(); };
+      } catch (e) { db.close(); resolve(); }
+    };
+  }).catch(e => logErr('清理浏览器数据', e));
+}
 async function logout() {
   if (logoutPending) return;
   logoutPending = true;
   const generation = accountGeneration;
   try { await pushLogout(); } catch (e) {}
   if (generation !== accountGeneration) { logoutPending = false; return; }
-  teardown();
+  const cleanup = forgetBrowserData(S.uid);
+  const messageCleanup = teardown();
   showAuth();
   try { Object.keys(localStorage).forEach(k => {
+    if (/^ch2ws(?:Hist|Seen|Pos)?:/.test(k)) return; // 本账号已单独清理
     if (k.startsWith('ch2') && !/^ch2(?:theme|font|lib4:|lastV|imgq|ice)/.test(k)) localStorage.removeItem(k);
   }); } catch (e) {}
-  try { if (window.indexedDB) indexedDB.deleteDatabase('chatter-ws'); } catch (e) {}   // 网页浏览在手机里存的文章（收藏离线看的）也一起删
   // GoTrue may leave a local token after a network failure during sign-out.
   const afterTeardown = accountGeneration;
   try {
@@ -6204,6 +6503,7 @@ async function logout() {
       try { localStorage.removeItem('sb-' + AUTH_KEY_REF + '-auth-token'); } catch (x) {}
     }
   }
+  await Promise.all([cleanup, messageCleanup]);
   if (!S.uid) location.reload();
   else logoutPending = false;
 }
@@ -6529,6 +6829,32 @@ function openMomentPerm(acc) {
   ]);
 }
 
+async function toggleContactsOnly(peer) {
+  if (!S.uid || !S.friends.includes(peer) || contactsPending.has(peer)) return;
+  if (!contactsSchema || !contactsOnly) { toast('好友显示设置暂不可用，请更新后重试'); return; }
+  const generation = accountGeneration, owner = ME(), hide = !contactsOnly.has(peer);
+  contactsPending.add(peer); renderProfile();
+  try {
+    const table = sb.from('contacts_only_chats');
+    const { error } = hide
+      ? await table.upsert({ owner_acc: owner, friend_acc: peer }, { onConflict: 'owner_acc,friend_acc', ignoreDuplicates: true })
+      : await table.delete().eq('owner_acc', owner).eq('friend_acc', peer);
+    if (generation !== accountGeneration) return;
+    if (error) throw error;
+    ++contactsRevision;
+    if (hide) contactsOnly.add(peer); else contactsOnly.delete(peer);
+    LS.set(contactsKey(), [...contactsOnly]);
+    if (hide && $('msg-banner').dataset.peer === peer) $('msg-banner').classList.remove('on');
+    if (hide && nbCur?.key === 'm:' + peer) hideNBar();
+    sched('list'); sched('contacts');
+    toast(hide ? '已隐藏，可从通讯录继续聊天' : '已恢复在消息页显示');
+  } catch (e) {
+    if (generation === accountGeneration) { toast('设置未确认，请刷新后重试'); resyncSoon(); }
+  } finally {
+    if (generation === accountGeneration) { contactsPending.delete(peer); if (pfAcc === peer) renderProfile(); }
+  }
+}
+
 /* ---- 好友资料页 ---- */
 let pfAcc = null;
 function openProfile(acc) {
@@ -6555,9 +6881,14 @@ function renderProfile() {
   const sg = (S.profiles[a] && typeof S.profiles[a].signature === 'string') ? S.profiles[a].signature.trim() : '';
   const se = $('pf-sign'); if (se) { se.textContent = sg; se.style.display = sg ? '' : 'none'; }
   $('pf-remark').textContent = rm ? '修改备注' : '设置备注';
+  const visibility = $('pf-contacts-only');
+  const visibilityState = contactsSchema === false ? '待服务器更新' : !contactsSchema ? '等待读取' : contactsOnly?.has(a) ? '开' : '关';
+  visibility.textContent = '仅在通讯录显示：' + visibilityState;
+  visibility.setAttribute('aria-pressed', String(!!contactsOnly?.has(a)));
+  visibility.disabled = !contactsSchema || contactsPending.has(a);
   const mpb = $('pf-mperm');
   if (mpb) { const p = mpOf(a); mpb.textContent = '朋友圈权限' + (p.h && p.s ? '：不让对方看、不看对方' : p.h ? '：不让对方看' : p.s ? '：不看对方' : ''); }
-  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-mperm', 'pf-del'].forEach(id => { const el = $(id); if (el) el.style.display = friend ? '' : 'none'; });
+  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-contacts-only', 'pf-mperm', 'pf-del'].forEach(id => { const el = $(id); if (el) el.style.display = friend ? '' : 'none'; });
   const addBtn = $('pf-add');
   if (addBtn) {
     const self = a === ME();
@@ -6572,10 +6903,10 @@ function pfCall(video) {
 }
 
 /* ---- 上传进度：直接调用 Storage 接口（格式和官方库对文件的做法一样）才能拿到进度；出问题就退回官方库上传 ---- */
-function xhrUpload(path, blob, ct, tok, onPct) {
+function xhrUpload(path, blob, ct, tok, onPct, bucket) {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest();
-    x.open('POST', API_URL + '/storage/v1/object/chat-media/' + path.split('/').map(encodeURIComponent).join('/'));
+    x.open('POST', API_URL + '/storage/v1/object/' + bucket + '/' + path.split('/').map(encodeURIComponent).join('/'));
     x.setRequestHeader('Authorization', 'Bearer ' + tok); x.setRequestHeader('apikey', SUPABASE_KEY); x.setRequestHeader('x-upsert', 'false');
     if (x.upload) x.upload.onprogress = e => { if (e.lengthComputable && e.total > 0) onPct(e.loaded / e.total); };
     x.onload = () => {
@@ -6585,7 +6916,7 @@ function xhrUpload(path, blob, ct, tok, onPct) {
     };
     x.onerror = () => { const e = new Error('Failed to fetch'); e.status = 0; rej(e); };
     x.onabort = x.onerror;
-    const fd = new FormData(); fd.append('cacheControl', '31536000');
+    const fd = new FormData(); fd.append('cacheControl', bucket === PRIVATE_PHOTO_BUCKET ? '0' : '31536000');
     fd.append('', ct && blob.type !== ct ? new Blob([blob], { type: ct }) : blob);
     x.send(fd);
   });
@@ -6665,7 +6996,7 @@ function exportHTML(peer, list, truncated) {
   const body = m => {
     switch (m.type) {
       case 'text': { const q = parseQ(m.body); return (q.q ? '<blockquote>' + esc(String(q.q.snip || '').slice(0, 120)) + '</blockquote>' : '') + linkify(q.text).replace(/\n/g, '<br>'); }
-      case 'image': return '<a href="' + esc(disp(m.body)) + '" target="_blank" rel="noopener"><img src="' + esc(disp(m.body)) + '" alt="图片" loading="lazy"></a>';
+      case 'image': if (privatePhotoPath(m.body)) return '[私密图片，请在 Chatter 聊天中查看或单独保存]'; return '<a href="' + esc(disp(m.body)) + '" target="_blank" rel="noopener"><img src="' + esc(disp(m.body)) + '" alt="图片" loading="lazy"></a>';
       case 'video': return link(m.body, '[视频' + (m.dur ? ' ' + fmtDur(m.dur) : '') + '] 点开播放');
       case 'voice': return '<audio controls preload="none" src="' + esc(disp(m.body)) + '"></audio> ' + (m.dur ? m.dur + '″' : '');
       case 'file': { const fl = parseFile(m.body); return fl ? link(fl.u, '[文件] ' + fl.n + (fl.s ? '（' + fmtSize(fl.s) + '）' : '')) : '[文件]'; }
@@ -6689,7 +7020,18 @@ function exportHTML(peer, list, truncated) {
 let lbList = [], lbIdx = 0;
 function lbShow() {
   const it = lbList[lbIdx]; if (!it) return;
-  $('lightbox-img').src = it.url; $('lb-count').textContent = lbList.length > 1 ? (lbIdx + 1) + ' / ' + lbList.length : '';
+  const img = $('lightbox-img');
+  releasePrivatePhoto(img);
+  delete img.dataset.privatePhoto;
+  delete img.dataset.privatePhotoFailed;
+  img.alt = '';
+  if (privatePhotoPath(it.url)) {
+    img.removeAttribute('src');
+    img.dataset.privatePhoto = it.url.split('#')[0];
+    img.alt = '正在读取私密图片';
+    loadPrivatePhoto(img);
+  } else img.src = it.url;
+  $('lb-count').textContent = lbList.length > 1 ? (lbIdx + 1) + ' / ' + lbList.length : '';
   $('lb-prev').style.display = lbIdx > 0 ? '' : 'none'; $('lb-next').style.display = lbIdx < lbList.length - 1 ? '' : 'none';
 }
 function openLightbox(id) {
@@ -6699,7 +7041,14 @@ function openLightbox(id) {
   if (!lbList.length) return;
   lbShow(); $('lightbox').classList.add('active');
 }
-function closeLightbox() { $('lightbox').classList.remove('active'); $('lightbox-img').src = ''; }
+function closeLightbox() {
+  $('lightbox').classList.remove('active');
+  const img = $('lightbox-img');
+  releasePrivatePhoto(img);
+  img.removeAttribute('src');
+  delete img.dataset.privatePhoto;
+  lbList = [];
+}
 function lbMove(d) { const n = lbIdx + d; if (n < 0 || n >= lbList.length) return; lbIdx = n; lbShow(); }
 function bindLightbox() {
   const lb = $('lightbox'); let x0 = 0, y0 = 0, swiped = false;
@@ -6712,6 +7061,8 @@ function bindLightbox() {
     if (swiped) { swiped = false; return; }
     if (e.target.closest('#lb-prev')) { lbMove(-1); return; } if (e.target.closest('#lb-next')) { lbMove(1); return; }
     if (e.target.closest('#lb-save')) { const it = lbList[lbIdx], m = it && S.msgs.find(x => x.id === it.id); if (m) saveMsg(m); return; }
+    const img = $('lightbox-img');
+    if (e.target === img && img.dataset.privatePhotoFailed) { releasePrivatePhoto(img); loadPrivatePhoto(img); return; }
     closeLightbox();
   });
   document.addEventListener('keydown', e => { if (!lb.classList.contains('active')) return; if (e.key === 'ArrowLeft') lbMove(-1); else if (e.key === 'ArrowRight') lbMove(1); else if (e.key === 'Escape') closeLightbox(); });
@@ -7044,6 +7395,7 @@ function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天
     localNote(title, body, 'm:' + m.from_acc, './#c=' + m.from_acc); return;
   }
   if (!S.conv && $('tab-convs').classList.contains('active')) return;   // 正看着消息列表：列表本身已经更新
+  if (!gp && hiddenFromInbox({ convKey: m.conv, peer_acc: m.from_acc })) return;
   showNBar({ key: gp ? m.conv : 'm:' + m.from_acc, acc: gp ? m.conv : m.from_acc, title, body, go: () => gp ? openConv(m.conv, m.conv) : openChatWith(m.from_acc) });
 }
 function noteRequest(r) {
@@ -7364,7 +7716,7 @@ function bindUI() {
     if (el.tagName === 'IMG' && el.closest('.bubble.sticker')) { el.outerHTML = '<span class="stk-bad">表情已失效</span>'; return; }
     if (el.tagName === 'IMG' && el.classList.contains('vposter')) { const vb = el.closest('.bubble.video'), u = vb && vb.dataset.v; if (u) el.outerHTML = '<video src="' + esc(u) + '#t=0.1" preload="metadata" playsinline webkit-playsinline muted></video>'; return; }
     const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
-    const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
+    const u = im.getAttribute('src') || ''; if (/^blob:/.test(u) || im.dataset.privatePhoto) return;
     const full = im.dataset.full || '';
     if (full && /\.t(\?|$)/.test(u) && !im.dataset.tf) { im.dataset.tf = '1'; im.src = full; return; }   // 小图取不到（老消息/没传上）：直接换原图
     const n = +(im.dataset.rty || 0);
@@ -7390,7 +7742,12 @@ function bindUI() {
     const v = e.target.closest('.bubble.voice'); if (v) { if (now() - vSeekAt < 600) return; togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
     const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; delete IMGBAD[u]; const bm = bad.closest('.msg'); if (bm) bm._h = ''; const holder = bad.parentNode; holder.innerHTML = '<img src="' + esc(u + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now()) + '" alt="" decoding="async">'; return; }
-    const im = e.target.closest('.bubble.img img'); if (im) { openLightbox(im.closest('.msg').dataset.id); return; }
+    const im = e.target.closest('.bubble.img img');
+    if (im) {
+      if (im.dataset.privatePhotoFailed) { releasePrivatePhoto(im); loadPrivatePhoto(im); }
+      else openLightbox(im.closest('.msg').dataset.id);
+      return;
+    }
     const vb = e.target.closest('.bubble.video'); if (vb && !vb.classList.contains('playing')) { const u = vb.dataset.v || ''; if (!u || /^blob:/.test(u) || vb.querySelector('.vup') || vb.querySelector('.vfail')) return; vb.classList.add('playing'); vb.innerHTML = '<video src="' + esc(u) + '" controls autoplay playsinline webkit-playsinline></video>'; const pv = vb.querySelector('video'); try { const pp = pv.play(); if (pp && pp.catch) pp.catch(() => {}); } catch (x) {} return; }
     const fb = e.target.closest('.bubble.file'); if (fb) { const u = fb.dataset.u || ''; if (u && !/^blob:/.test(u)) { try { window.open(disp(u), '_blank', 'noopener'); } catch (x) {} } return; }
     const sk = e.target.closest('.bubble.sticker img'); if (sk) {
@@ -7515,6 +7872,7 @@ function bindUI() {
   $('pf-chat').onclick = () => { const a = pfAcc; closeProfile(); if (a && S.peer !== a) openConv(convKeyOf(ME(), a), a); };
   if ($('pf-add')) $('pf-add').onclick = function () { if (this.dataset.acc) addFriend(this); };
   $('pf-voice').onclick = () => pfCall(false); $('pf-video').onclick = () => pfCall(true);
+  $('pf-contacts-only').onclick = () => toggleContactsOnly(pfAcc);
   $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
   if ($('pf-mperm')) $('pf-mperm').onclick = () => { const a = pfAcc; if (a) openMomentPerm(a); };
   $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };

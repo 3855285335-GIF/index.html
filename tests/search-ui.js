@@ -104,6 +104,28 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const shot = async name => { await pg.waitForTimeout(250); const f = path.join(OUT, theme + '-' + name + '.png'); await pg.screenshot({ path: f }); (shots[name] = shots[name] || {})[theme] = f; };
     const on = () => pg.evaluate(() => (document.querySelector('.ws-v.on') || {}).dataset.v);
     await pg.evaluate(() => ChatterSearch.open()); await pg.evaluate(() => document.activeElement && document.activeElement.blur());
+    if (theme === 'light') {
+      await pg.evaluate(() => {
+        const call = __chWS.call;
+        window.restoreCall = () => { __chWS.call = call; };
+        __chWS.call = async req => {
+          if (req.op !== 'translate' || req.to !== 'en') return call(req);
+          await new Promise(done => { window.releaseTranslation = done; });
+          const result = await call(req);
+          setTimeout(() => { window.translationReturned = true; }, 0);
+          return result;
+        };
+      });
+      await pg.fill('[data-form="home"] input', '返回测试关键词'); await pg.press('[data-form="home"] input', 'Enter');
+      await pg.click('[data-act="q-en"]'); await pg.waitForFunction(() => !!window.releaseTranslation);
+      const oldRequests = await pg.evaluate(() => __log.filter(x => x.op === 'search').length);
+      await pg.goBack(); await pg.waitForFunction(() => document.querySelector('.ws-v.on')?.dataset.v === 'home');
+      await pg.evaluate(() => { window.releaseTranslation(); window.restoreCall(); });
+      await pg.waitForFunction(() => window.translationReturned);
+      ok(await on() === 'home' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === oldRequests,
+        '退出结果页后，迟到的英文翻译不会带走当前页面或再发起搜索');
+      await pg.evaluate(() => { window.__log.length = 0; });
+    }
     await shot('1-首页');
     if (theme === 'light') ok(await on() === 'home' && await pg.evaluate(() => history.state && history.state.ws === 1), '打开搜索：首页');
     await pg.fill('[data-form="home"] input', '量子计算'); await pg.press('[data-form="home"] input', 'Enter');
@@ -467,6 +489,73 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
         await pg.fill('[data-form="home"] input', '一个新词'); await pg.press('[data-form="home"] input', 'Enter'); await pg.waitForSelector('.ws-v.on[data-v="res"] .ws-r');
         ok(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsSeen:u1') || '[]').length) === h0 && await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsHist:u1') || '[]').length) === q0, '打开“不记浏览记录”：看网页、搜东西都不记');
         await fresh(); await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
+        // 共享设备上保留两套离线文章，用实际规则页检查数量、清理范围和容量回收。
+        const userArticleKeys = () => pg.evaluate(async () => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          try { return await new Promise(resolve => { const q = db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess = () => resolve(q.result); }); }
+          finally { db.close(); }
+        });
+        const otherKey = 'u2||https://sample.test/older';
+        await pg.evaluate(async otherKey => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          await new Promise(resolve => {
+            const tx = db.transaction('art','readwrite'), store = tx.objectStore('art');
+            for (let i=0; i<120; i++) store.put({k:'u1||https://sample.test/'+i,uid:'u1',tm:i+1});
+            store.put({k:otherKey,uid:'u2',tm:0});
+            tx.oncomplete = resolve;
+          }); db.close();
+        },otherKey);
+        await pg.evaluate(() => { window.__readFail = false; ChatterSearch.openPage('https://example.org/scope-check','测试文章'); });
+        // 新网址为正文模式走阅读器，模拟后端返回文章。
+        await pg.waitForSelector('.ws-v.on .ws-body p');
+        if (await pg.locator('.ws-v.on [data-act="rd-refresh"]').count()) await pg.click('.ws-v.on [data-act="rd-refresh"]');
+        await pg.waitForFunction(async () => {
+          const db = await new Promise(resolve => { const q = indexedDB.open('chatter-ws'); q.onsuccess = () => resolve(q.result); });
+          const keys = await new Promise(resolve => { const q = db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess = () => resolve(q.result); });
+          db.close(); return keys.some(k => k.endsWith('scope-check')) && keys.filter(k => k.startsWith('u1|')).length <= 120;
+        });
+        ok((await userArticleKeys()).includes(otherKey), '缓存达到上限时，另一账号的文章仍保留');
+        await fresh(); await pg.click('.ws-v.on [data-act="rules"]');
+        await pg.waitForFunction(() => document.querySelector('[data-r="artn"]').textContent === '120 篇');
+        ok(true,'规则页只统计当前账号的文章');
+        await pg.click('[data-act="art-wipe"]'); await pick('清空');
+        await pg.waitForFunction(() => document.querySelector('[data-r="artn"]').textContent === '0 篇');
+        const saved = await userArticleKeys();
+        ok(saved.includes(otherKey) && !saved.some(k => k.startsWith('u1|')), '从规则页清空后，仅删除当前账号的文章');
+        await fresh();
+        await pg.evaluate(() => {
+          const call = __chWS.call;
+          __chWS.call = async req => {
+            if (req.op !== 'search') return call(req);
+            if (req.q === '第一条查询') {
+              await new Promise(resolve => { window.releaseFirstQuery = resolve; });
+              setTimeout(() => { window.firstQueryReturned = true; }, 0);
+            }
+            if (req.q === '没有匹配') return {ok:true, items:[]};
+            if (req.q === '暂时故障') return {ok:false, code:'net', msg:'搜索服务暂时连不上'};
+            if (req.q === '月度额度') return {ok:false, code:'empty', msg:'本月的免费次数用完了'};
+            return {ok:true, src:'exa', items:[{t:req.q, u:'https://example.org/' + req.type}]};
+          };
+        });
+        const submit = async query => {
+          const input = pg.locator('.ws-v.on form[role="search"] input');
+          await input.fill(query); await input.press('Enter');
+        };
+        await submit('第一条查询'); await pg.waitForFunction(() => !!window.releaseFirstQuery);
+        await submit('第二条查询'); await pg.getByRole('link', {name:'第二条查询',exact:true}).waitFor();
+        await pg.evaluate(() => window.releaseFirstQuery()); await pg.waitForFunction(() => window.firstQueryReturned);
+        const result = pg.locator('.ws-v.on .ws-r a.t');
+        ok((await result.allTextContents()).join('') === '第二条查询', '连续提交两次搜索，先发的查询后返回时仍显示第二次的结果');
+        await pg.click('.ws-v.on [data-act="tab"][data-t="news"]');
+        await pg.waitForFunction(() => document.querySelector('.ws-v.on .ws-r a.t')?.pathname === '/news');
+        ok(await result.getAttribute('href') === 'https://example.org/news', '切到新闻会使用新闻来源并保留可打开的原始链接');
+        const errorCard = pg.locator('.ws-v.on [data-r="res"] .ws-err');
+        await submit('没有匹配'); await errorCard.getByText('没有找到结果').waitFor();
+        ok((await errorCard.innerText()).includes('换个说法'), '没有搜索结果时给出改词建议');
+        await submit('暂时故障'); await errorCard.getByText('搜索服务暂时连不上').waitFor();
+        ok(await errorCard.getByRole('button',{name:'重试'}).isVisible(), '临时故障给出重试入口');
+        await submit('月度额度'); await errorCard.getByText('本月的免费次数用完了').waitFor();
+        ok(await errorCard.getByRole('button',{name:'去“深挖”看看'}).isVisible(), '月度额度用完时提供仍可使用的深挖入口');
         ok(errs.length === e0, '这批新功能没有报错 ' + errs.slice(e0).join(' | '));
       } else { await pg.goBack(); await pg.waitForTimeout(150); }
     }
