@@ -1828,11 +1828,11 @@ let IPV = { file: null, orig: false, resolve: null, url: '' };
 function openImgPreview(file) {
   return new Promise(function (resolve) {
     if (IPV.resolve) closeImgPreview(false);
-    IPV.file = file; IPV.orig = false; IPV.resolve = resolve;
+    IPV.file = file; IPV.orig = imgOrig(); IPV.resolve = resolve;
     try { if (IPV.url) URL.revokeObjectURL(IPV.url); } catch (e) {}
     IPV.url = URL.createObjectURL(file);
     $('ipv-img').src = IPV.url;
-    $('ipv-orig').classList.remove('on');
+    $('ipv-orig').classList.toggle('on', IPV.orig);
     raiseSheet('ipv-sheet', 'ipv-backdrop');
     $('ipv-backdrop').classList.add('active'); $('ipv-sheet').classList.add('active');
   });
@@ -1854,7 +1854,7 @@ function cancelMediaPreviews() {
 async function sendImage(file, direct) {
   if (!file || !S.conv || !/^image\//.test(file.type)) return;
   if (!canSendHere()) return;
-  if (direct || /gif|svg/i.test(file.type)) { return sendImageNow(file, imgOrig()); }
+  if (direct || !imgEditOn() || /gif|svg/i.test(file.type)) return sendImageNow(file, imgOrig());
   const generation = chatGeneration;
   const r = await openImgPreview(file);
   if (r && generation === chatGeneration) await sendImageNow(r.file, r.orig);
@@ -7447,7 +7447,7 @@ function bindUI() {
   const ieBtn = $('btn-imgedit');
   if (ieBtn) ieBtn.onclick = () => {
     LS.set('ch2imgedit', !imgEditOn()); paintIe();
-    toast(imgEditOn() ? '发图片前会先让你编辑（旋转/裁剪/画笔/文字）' : '发图片直接发送，不再弹出编辑');
+    toast(imgEditOn() ? '发图片前会先预览，你可以旋转、裁剪、画画或加字' : '发图片直接发送，不再弹出编辑');
   };
   const sfxDemo = $('btn-sfx-demo');
   if (sfxDemo) sfxDemo.onclick = function () {

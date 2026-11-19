@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const http = require('http'), fs = require('fs'), path = require('path'), os = require('os');
 const ROOT = process.argv[2] || path.resolve(__dirname, '..');
 const SHOTS = process.argv[3] || fs.mkdtempSync(path.join(os.tmpdir(), 'chatter-shots-'));
+const external = url => url.origin !== 'http://localhost:8766';
 let mode = 'ok', navs = 0;
 const CUR = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), CURV = /app\.js\?v=([\w.-]+)/.exec(CUR)[1];
 const NEW = CUR.split(CURV).join('20991231a1');
@@ -31,7 +32,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
 (async () => {
   const br = await chromium.launch();
   const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
-  await ctx.route(/supabase\.co/, r => r.abort());   // 服务器连不上（国内常见），程序也应该能打开
+  await ctx.route(external, r => r.abort());   // 只用本地测试服务，避免外网镜像在断网用例中仍然加载依赖。
   const pg = await ctx.newPage();
   const errs = []; pg.on('pageerror', e => errs.push(e.message));
   const st = async () => pg.evaluate(() => ({
@@ -126,7 +127,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   // 13 已登录、停在“我”页时手动检查更新：先提示“发现新版本”，换完回到“我”页并提示已更新到哪个版本
   {
     const ctx2 = await br.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
-    await ctx2.route(/supabase\.co/, r => r.abort());
+    await ctx2.route(external, r => r.abort());
     await ctx2.addInitScript(() => {
       const uid = '11111111-1111-4111-8111-111111111111';
       if (!localStorage.getItem('sb-uaoiqbxptnbrvkzjwguc-auth-token')) {
@@ -152,7 +153,7 @@ const ok = (c, m) => { const l = (c ? '✅ ' : '❌ ') + m; res.push(l); console
   // 14 不是由程序自己换的新版（比如彻底关掉重开时拿到了新页面）：打开后也提示一次“已更新到新版本”，再打开不重复提示
   {
     const ctx3 = await br.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
-    await ctx3.route(/supabase\.co/, r => r.abort());
+    await ctx3.route(external, r => r.abort());
     const p3 = await ctx3.newPage();
     mode = 'ok'; await p3.goto('http://localhost:8766/?v=30'); await p3.waitForTimeout(1500);
     mode = 'newver'; await p3.evaluate(() => localStorage.removeItem('ch2updTry'));
