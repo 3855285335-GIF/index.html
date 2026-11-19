@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>音乐来源测试</title>
+<title>音乐和地图来源测试</title>
 <style>
 :root{--bg:#f6f3ee;--card:#fff;--ink:#1d1b22;--muted:#77727f;--line:#ebe7e0;--accent:#5b3bd8;--ok:#1f9d63;--bad:#d4421f}
 @media (prefers-color-scheme:dark){:root{--bg:#131119;--card:#1e1b27;--ink:#f1eefb;--muted:#9b96a8;--line:#2b2736;--accent:#9d86ff;--ok:#3ccf8e;--bad:#ff7a5c}}
@@ -26,12 +26,13 @@ button:disabled{opacity:.5}
 .sec-t{font-size:13px;color:var(--muted);margin:22px 4px 6px}
 audio{width:100%;margin-top:8px}
 .note{font-size:13px;color:var(--muted);line-height:1.6;margin:10px 4px}
+.tile{width:64px;height:64px;border-radius:10px;background:var(--line);object-fit:cover;flex-shrink:0}
 </style>
 </head>
 <body>
 <main>
-<h1>音乐来源测试</h1>
-<p class="lead">Chatter 的“音乐”要用免费、合法的来源，而且歌要从你的手机直接播放（不经过我们的服务器，不然免费流量几天就用完）。这一页测一测：在你现在的网络下，哪些来源连得上、能出声。<b>请先关掉 VPN 测一次</b>，再打开 VPN 测一次，把两次结果都发给 Claude。</p>
+<h1>音乐和地图来源测试</h1>
+<p class="lead">Chatter 接下来要做的“音乐”和“导航”，都要用免费、合法的来源，而且歌和地图要从你的手机直接加载（不经过我们的服务器，不然免费流量几天就用完）。这一页测一测：在你现在的网络下，哪些来源连得上、歌能不能出声、地图能不能显示。<b>请先关掉 VPN 测一次</b>，再打开 VPN 测一次，把两次结果都发给 Claude。</p>
 
 <button id="go">开始测试（大约 30 秒）</button>
 
@@ -42,6 +43,9 @@ audio{width:100%;margin-top:8px}
 <div class="card"><div class="row"><div class="t"><b id="aud-t">还没测</b><small id="aud-s">会自动取一首热门歌，试着加载声音</small></div><span class="st" id="aud-st"></span></div></div>
 <audio id="aud" controls preload="none" hidden></audio>
 <p class="note" id="aud-n" hidden>能加载不代表一定出声：请点一下上面的播放按钮，听听有没有声音、卡不卡。</p>
+
+<div class="sec-t">3. 地图和卫星图能不能显示（导航用，下面应该看到上海附近的地图）</div>
+<div class="card" id="maps"></div>
 
 <button class="sec" id="copy" disabled>复制测试结果</button>
 <p class="note">这一页只测网络，不会登录、不会上传任何东西。测试用的网址都是这些音乐网站公开的地址。</p>
@@ -61,10 +65,26 @@ const HOSTS = [
   ['ccMixter', '知识共享授权的混音音乐', 'https://ccmixter.org/'],
   ['Free Music Archive', '免费音乐档案', 'https://freemusicarchive.org/']
 ];
+// 地图图块：上海附近（缩放 10 级），能显示出来就说明这家的地图在你的网络下能用
+const MAPS = [
+  ['OpenStreetMap 地图', '开源地图，免费（要注明来源，不能大量使用）', 'https://tile.openstreetmap.org/10/857/418.png'],
+  ['Esri 卫星图', '全球卫星图，免费使用条款还要再核实', 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/10/418/857'],
+  ['Carto 浅色地图', '基于开源地图的简洁样式', 'https://a.basemaps.cartocdn.com/light_all/10/857/418.png']
+];
+const MAP_HOSTS = [['天地图（国家地理信息公共服务平台）', '有卫星图，免费，要注册拿一个密钥（只测网络通不通）', 'https://t0.tianditu.gov.cn/']];
 const $ = id => document.getElementById(id);
 const results = {};
 function row(i, name, desc) { return '<div class="row"><div class="t"><b>' + name + '</b><small>' + desc + '</small></div><span class="st" id="h' + i + '">—</span></div>'; }
 $('hosts').innerHTML = HOSTS.map((h, i) => row(i, h[0], h[1])).join('');
+$('maps').innerHTML = MAPS.map((m, i) => '<div class="row"><img class="tile" id="mi' + i + '" alt=""><div class="t"><b>' + m[0] + '</b><small>' + m[1] + '</small></div><span class="st" id="m' + i + '">—</span></div>').join('') +
+  MAP_HOSTS.map((h, i) => '<div class="row"><div class="t"><b>' + h[0] + '</b><small>' + h[1] + '</small></div><span class="st" id="mh' + i + '">—</span></div>').join('');
+function imgTest(img, src, ms) {   // 图片能不能显示出来
+  return new Promise(res => { const t0 = performance.now(); let done = false;
+    const fin = (ok, why) => { if (done) return; done = true; clearTimeout(tm); res({ ok, why, ms: Math.round(performance.now() - t0) }); };
+    const tm = setTimeout(() => { img.removeAttribute('src'); fin(false, '超时'); }, ms);
+    img.onload = () => fin(img.naturalWidth > 0, '图片是空的'); img.onerror = () => fin(false, '加载失败');
+    img.referrerPolicy = 'no-referrer'; img.src = src + (src.includes('?') ? '&' : '?') + '_t=' + Date.now(); });
+}
 function setSt(el, ok, text) { el.textContent = text; el.className = 'st ' + (ok === true ? 'ok' : ok === false ? 'bad' : ''); }
 async function probe(url, ms) {   // 能连上就算通（拿不到内容也没关系），超时或被重置算不通
   const t0 = performance.now(), ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
@@ -114,11 +134,22 @@ $('go').onclick = async () => {
     results[h[0]] = r.ok ? '通（' + r.ms + ' 毫秒）' : '不通（' + r.why + '）';
     setSt(el, r.ok, r.ok ? '通 ' + r.ms + 'ms' : '不通·' + r.why);
   }));
+  await Promise.all(MAPS.map(async (m, i) => {
+    const el = $('m' + i); setSt(el, null, '测试中…');
+    const r = await imgTest($('mi' + i), m[2], 12000);
+    results[m[0]] = r.ok ? '能显示（' + r.ms + ' 毫秒）' : '显示不了（' + r.why + '）';
+    setSt(el, r.ok, r.ok ? '能显示 ' + r.ms + 'ms' : '显示不了·' + r.why);
+  }).concat(MAP_HOSTS.map(async (h, i) => {
+    const el = $('mh' + i); setSt(el, null, '测试中…');
+    const r = await probe(h[2], 10000);
+    results[h[0]] = r.ok ? '通（' + r.ms + ' 毫秒）' : '不通（' + r.why + '）';
+    setSt(el, r.ok, r.ok ? '通 ' + r.ms + 'ms' : '不通·' + r.why);
+  })));
   await testAudius();
   $('go').disabled = false; $('go').textContent = '再测一次'; $('copy').disabled = false;
 };
 $('copy').onclick = async () => {
-  const txt = '音乐来源测试结果（' + new Date().toLocaleString('zh-CN') + '，' + (navigator.userAgent.includes('iPhone') ? 'iPhone' : '其他设备') + '）\n' +
+  const txt = '音乐和地图来源测试结果（' + new Date().toLocaleString('zh-CN') + '，' + (navigator.userAgent.includes('iPhone') ? 'iPhone' : '其他设备') + '）\n' +
     Object.entries(results).map(([k, v]) => k + '：' + v).join('\n');
   try { await navigator.clipboard.writeText(txt); $('copy').textContent = '已复制，发给 Claude 就行'; }
   catch (e) { prompt('复制下面的文字发给 Claude：', txt); }
