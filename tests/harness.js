@@ -93,8 +93,9 @@ function makeEnv(opts) {
         }
         return q.single ? { data: inserted[0], error: null } : { data: null, error: null };
       }
-      rows.forEach(r => (db[q.table] = db[q.table] || []).push(Object.assign({ id: 'id' + Math.random().toString(36).slice(2), created_at: iso(Date.now()) }, r)));
-      return { data: q.single ? rows[0] : null, error: null };
+      const stored = rows.map(r => Object.assign({ id: 'id' + Math.random().toString(36).slice(2), created_at: iso(Date.now()) }, r));   // 像线上一样：返回的行带上数据库生成的 id 和时间
+      stored.forEach(r => (db[q.table] = db[q.table] || []).push(r));
+      return { data: q.single ? stored[0] : null, error: null };
     }
     if (q.op === 'update') {
       const rows = rowsOf(q); rows.forEach(r => Object.assign(r, q.values));

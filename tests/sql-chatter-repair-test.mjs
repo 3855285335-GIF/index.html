@@ -5,7 +5,8 @@ import { PGlite } from '@electric-sql/pglite';
 
 const db = new PGlite();
 const directory = name => new URL('../supabase/' + name + '/', import.meta.url);
-const migrations = readdirSync(directory('migrations')).filter(name => name.endsWith('.sql')).sort();
+// 只跑 11-19 修复版那 6 份（之后新增的迁移各有自己的检查，比如 sql-moment-privacy-test.mjs）
+const migrations = readdirSync(directory('migrations')).filter(name => name.endsWith('.sql') && name < '20261119100000').sort();
 const sql = (folder, name) => readFileSync(new URL(name, directory(folder)), 'utf8');
 const catalog = {
   anon: ['chat_group_members', 'chat_groups', 'conversations', 'friend_requests', 'friendships',
@@ -184,6 +185,15 @@ try {
   await db.exec('set role authenticated');
   assert.equal((await db.query("select devices from profiles where account_id='bob'")).rows[0].devices.bob, 'private');
   assert.equal((await db.query('select count(*)::int as n from storage.objects')).rows[0].n, 3);
+  // 交给你在 Supabase 运行的合并版（带检查表）：撤销以后连跑两遍，检查表全是“是”
+  await db.exec('reset role');
+  const merged = readFileSync(new URL('../review/site/parts/04-新增SQL-20261119-安全修复.sql', import.meta.url), 'utf8');
+  for (let i = 0; i < 2; i++) {
+    const res = await db.exec(merged);
+    const table = res[res.length - 1].rows;
+    assert.ok(table.length === 8 && table.every(r => r['结果'] === '是'), '合并版检查表：' + JSON.stringify(table));
+  }
+  console.log('✅ 合并版安全修复 SQL 能重复执行，检查表 8 项全是“是”');
   console.log('✅ 权限、资料与 Realtime 列、上传路径、会话检查、好友状态、旧数据及全部回滚 SQL 通过');
 } finally {
   await db.close();

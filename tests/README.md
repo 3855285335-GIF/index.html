@@ -91,6 +91,18 @@ npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   #
 
 Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/deno`。
 
+## 朋友圈权限（11-19）
+
+```bash
+node sql-moment-privacy-test.mjs   # 41 项：谁能看哪条、名单只有作者能读、评论只看好友的、赞都看得到、撤销脚本、交给用户运行的那份带检查表
+```
+
+## 只跑某几项
+
+```bash
+node run.js --only=朋友圈     # 只跑名字里带“朋友圈”的检查
+```
+
 ## 修复版权限和推送回归
 
 ```bash
@@ -98,4 +110,4 @@ node sql-chatter-repair-test.mjs
 deno run -A --node-modules-dir=none fn-push-test.ts
 ```
 
-SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查迁移、越权拒绝及逆序回滚，不连接生产数据库。推送测试用假的 Auth、会话检查和推送 RPC。
+SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查迁移、越权拒绝及逆序回滚，不连接生产数据库；最后再把交给用户运行的合并版（`review/site/parts/04-新增SQL-20261119-安全修复.sql`）连跑两遍，检查表要全是“是”。这组只跑 11-19 修复版那 6 份迁移，之后新增的迁移各有自己的检查。推送测试用假的 Auth、会话检查和推送 RPC。

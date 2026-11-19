@@ -47,7 +47,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261119a">
+<link rel="preload" as="script" href="app.js?v=20261119b">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -228,7 +228,12 @@
   .mo-likers { font-size: 11.5px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
   .mo-likers b { color: var(--accent2); font-weight: 600; }
   .mo-liker { color: var(--accent2); cursor: pointer; }
-  .mo-vis { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .mo-vis { display: block; font: inherit; font-size: 11px; color: var(--muted); margin-top: 2px; padding: 2px 0; background: none; border: 0; cursor: pointer; text-align: left; }
+  .vis-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 4px 12px 6px; }
+  .vis-modes button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+  .vis-modes button small { font-size: 11px; font-weight: 400; color: var(--muted); }
+  .vis-modes button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .vis-hint { padding: 2px 16px 6px; font-size: 12px; color: var(--muted); }
   .mo-video video { width: 100%; max-height: 320px; border-radius: 12px; background: #000; display: block; margin-top: 8px; }
   .mo-video-preview { position: relative; margin-top: 8px; }
   .mo-video-preview video { width: 100%; max-height: 220px; border-radius: 12px; background: #000; display: block; }
@@ -1262,6 +1267,7 @@
   <div class="pf-top"><div id="pf-av"></div><div class="pf-names"><div id="pf-name"></div><div id="pf-sub"></div><div id="pf-sign"></div></div></div>
   <div class="pf-acts"><button id="pf-chat" type="button">发消息</button><button id="pf-voice" type="button">语音通话</button><button id="pf-video" type="button">视频通话</button><button id="pf-add" type="button" class="btn-primary">加好友</button></div>
   <button id="pf-remark" type="button" class="menu-item plain">设置备注</button>
+  <button id="pf-mperm" type="button" class="menu-item plain">朋友圈权限</button>
   <button id="pf-del" type="button" class="menu-item">删除好友</button>
   <button id="pf-close" type="button" class="menu-item plain">关闭</button>
 </div>
@@ -1282,7 +1288,7 @@
     <textarea id="moment-text" maxlength="1000" placeholder="这一刻的想法…"></textarea>
     <div id="moment-imgs" class="mo-imgs-edit"></div>
     <div id="moment-video-preview" class="mo-video-preview" style="display:none"></div>
-    <div class="mo-tools"><button id="moment-add-img" type="button">＋ 图片</button><button id="moment-add-video" type="button">＋ 视频</button><button id="moment-cover-pick" type="button">🖼 视频封面</button><button id="moment-vis" type="button">谁可以看：全部好友</button><button id="moment-priv" type="button">🔒 仅自己可见：关</button><span id="moment-count">0/9</span></div>
+    <div class="mo-tools"><button id="moment-add-img" type="button">＋ 图片</button><button id="moment-add-video" type="button">＋ 视频</button><button id="moment-cover-pick" type="button">🖼 视频封面</button><button id="moment-vis" type="button">谁可以看：全部好友</button><span id="moment-count">0/9</span></div>
     <input id="moment-file" type="file" accept="image/*" multiple hidden>
     <input id="moment-video-file" type="file" accept="video/*" hidden>
 <input id="moment-cover-file" type="file" accept="image/*" hidden>
@@ -1291,9 +1297,16 @@
 </div>
 <div id="vis-backdrop" class="sheet-bd"></div>
 <div id="vis-sheet" class="sheet">
-  <div class="menu-title">谁可以看</div>
+  <div class="menu-title" id="vis-title">谁可以看</div>
+  <div id="vis-modes" class="vis-modes" role="group" aria-label="可见范围">
+    <button type="button" data-mode="all">公开<small>全部好友</small></button>
+    <button type="button" data-mode="priv">私密<small>仅自己可见</small></button>
+    <button type="button" data-mode="only">部分可见<small>选中的好友可见</small></button>
+    <button type="button" data-mode="except">不给谁看<small>选中的好友不可见</small></button>
+  </div>
+  <div id="vis-hint" class="vis-hint"></div>
   <div id="vis-list" class="vis-list"></div>
-  <div class="fs-btns"><button id="vis-all" type="button">全部好友</button><button id="vis-ok" class="btn-primary" type="button">确定</button></div>
+  <div class="fs-btns"><button id="vis-cancel" type="button">取消</button><button id="vis-ok" class="btn-primary" type="button">确定</button></div>
 </div>
 <div id="pull-tip"></div>
 <div id="vpv-backdrop" class="sheet-bd"></div>
@@ -1424,6 +1437,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261119a" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261119a&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261119b" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261119b&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>

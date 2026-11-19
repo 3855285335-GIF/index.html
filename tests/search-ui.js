@@ -60,6 +60,7 @@ window.__chWS = {
       const blk = x => /BLOCKME/.test(x);
       return { ok: true, items: b.items.map(x => blk(x) ? null : '译：' + x), failed: b.items.filter(blk).length, why: b.items.some(blk) ? ['blocked'] : [] };
     }
+    if (b.op === 'frame') return window.__frame ? window.__frame(b) : { ok: true, frame: false, why: 'xfo', url: b.url };
     if (b.op === 'versions') return { ok: true, url: b.url, list: ['20240501000000', '20190302000000', '20150101000000'] };
     if (b.op === 'read') {
       if (b.url.indexOf('gone.example.com') >= 0) return b.at ? DATA.OLD : { ok: false, code: 'gone', msg: '这个网页已经不存在了（404）' };
@@ -79,7 +80,7 @@ window.__chWS = {
   toast: m => __log.push({ toast: m }), acts: (t, items) => { window.__acts = items; }, form: () => {}, copy: () => {}, logErr: () => {}, forward: t => __log.push({ fwd: t }),
   sb: () => ({ from: () => { const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: null }), upsert: async () => ({}) }; return q; } }), uid: () => 'u1'
 };
-localStorage.setItem('ch2ws:u1', JSON.stringify({ pin: ['github.com', 'developer.mozilla.org', 'bilibili.com'], fav: [{ u: 'https://example.org/quantum-intro', t: '量子计算入门：从量子比特到量子门', s: 'example.org' }] }));
+localStorage.setItem('ch2ws:u1', JSON.stringify({ open: 'read', pin: ['github.com', 'developer.mozilla.org', 'bilibili.com'], fav: [{ u: 'https://example.org/quantum-intro', t: '量子计算入门：从量子比特到量子门', s: 'example.org' }] }));
 localStorage.setItem('ch2wsHist:u1', JSON.stringify(['量子计算', '极光 拍摄 参数', '周末 徒步 路线']));
 addEventListener('popstate', e => window.ChatterSearch && ChatterSearch.onPop(e));
 </script><script src="/search.js"></script></body></html>`;
@@ -95,6 +96,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: theme, hasTouch: true });
     await ctx.route(/img\.test/, rt => { const u = new URL(rt.request().url()); rt.fulfill({ contentType: 'image/svg+xml', body: SVG(u.searchParams.get('a'), u.searchParams.get('b')) }); });
     await ctx.route(/youtube|bilibili|vimeo/, rt => rt.fulfill({ contentType: 'text/html', body: '<body style="margin:0;background:#000"></body>' }));
+    await ctx.route(/frame\.test|unsure\.test/, rt => { const u = new URL(rt.request().url()), n = u.pathname.slice(1) || 'a';   // 假的“能嵌的网站”：a → b → c 三页
+      rt.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta name="viewport" content="width=device-width"><body style="font:16px sans-serif;margin:0;padding:24px;background:#fff;color:#222"><h2 style="margin:0 0 12px">示例网站 · 第 ' + n + ' 页</h2><p>这是网站自己的页面，原样显示在 App 里。</p><p><a id="to-b" href="/b">去第 b 页</a> · <a id="to-c" href="/c">去第 c 页</a></p><div style="height:420px;border-radius:14px;background:linear-gradient(135deg,#8b7cf6,#1fd1a5)"></div></body>' }); });
     const pg = await ctx.newPage(); const errs = []; pg.on('pageerror', e => errs.push(e.message)); pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
     await pg.goto('http://localhost:8767/');
     const shot = async name => { await pg.waitForTimeout(250); const f = path.join(OUT, theme + '-' + name + '.png'); await pg.screenshot({ path: f }); (shots[name] = shots[name] || {})[theme] = f; };
@@ -116,7 +119,11 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(t2[1].startsWith('量子计算入门'), '关掉“干净页面优先”马上重排，不重新搜 → ' + t2[1] + '；搜索请求次数 ' + (await pg.evaluate(() => __log.filter(x => x.op === 'search').length)));
       await pg.click('[data-act="tgl-clean"]');
       await pg.click('.ws-r a.t >> text=如何通俗地解释量子计算？');
-      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com') && await on() === 'res', '知乎这类要登录的：直接用浏览器打开');
+      await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err');
+      ok(!(await pg.evaluate(() => __opened.length)) && /用浏览器打开（能用你的登录）/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '知乎这类要登录的：不再自动跳出 App；不让在 App 里显示时给出“用浏览器打开（能用你的登录）”');
+      await pg.click('.ws-v.on .ws-err [data-act="web-ext"]');
+      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com'), '点了才用浏览器打开');
+      await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'res');
       ok(await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Exa'), '结果页标出这次是用 Exa 搜的');
       await pg.click('[data-act="swap"]'); await pg.waitForSelector('.ws-r a.t >> text=量子计算科普合集');
       ok((await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].src)) === 'tavily' && await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Tavily'), '点“换 Tavily 再搜一次”：用 Tavily 重搜，标签跟着变');
@@ -200,7 +207,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(/blilblil\.com 和「哔哩哔哩」（bilibili\.com）只差几个字母/.test(w) && /跳转到了另一个网站：gotowww\.aipages\.dev/.test(w), '输入 www.blilblil.com：提醒可能是仿冒的哔哩哔哩，并说跳到了 gotowww.aipages.dev');
       ok(await pg.$eval('.ws-warn [data-act="rd-goto"]', e => e.dataset.u === 'https://bilibili.com/' && /去真的哔哩哔哩/.test(e.textContent)), '提醒里有“去真的哔哩哔哩（bilibili.com）”');
       const eb = await pg.$$eval('.ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
-      ok(eb[0] === '★去真的哔哩哔哩（bilibili.com）' && eb.indexOf('仍然用浏览器打开（小心）') > 0 && !eb.some(x => x === '★仍然用浏览器打开（小心）'), '疑似仿冒：第一个按钮是去真的网站，“打开原网页”放后面并提醒小心 → ' + eb.join(' / '));
+      ok(eb[0] === '★去真的哔哩哔哩（bilibili.com）' && eb.indexOf('仍然打开原网页（小心）') > 0 && !eb.some(x => x === '★仍然打开原网页（小心）'), '疑似仿冒：第一个按钮是去真的网站，“打开原网页”放后面并提醒小心 → ' + eb.join(' / '));
       const la = await pg.evaluate(() => ['https://www.blilblil.com/', 'https://gitlab.com/', 'https://www.bilibili.com/video/x', 'https://githud.com/', 'https://apple.com.cn/', 'https://twitch.tv/', 'https://goggle.com/', 'https://taobaoo.com/', 'https://zhibo.tv/', 'https://example.org/', 'https://space.bilibili.com/1'].map(u => (ChatterSearch._lookAlike(u) || {}).n || '-'));
       ok(la.join(',') === '哔哩哔哩,-,-,GitHub,-,-,Google,淘宝,-,-,-', '仿冒判断：只提醒真像的，不误伤正规网站 → ' + la.join(','));
     }
@@ -261,6 +268,59 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('.ws-trb [data-act="tr-go"]'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
       ok(true, '点“翻译成中文”：照样能翻');
       ok(!errs.length, '新功能也没有报错 ' + errs.join(' | '));
+
+      // ---------- 在 App 里看原网页 ----------
+      await pg.evaluate(() => { window.__frame = b => /frame\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url } : /unsure\.test/.test(b.url) ? { ok: true, frame: null, code: 'login', url: b.url } : /nowhere\.test/.test(b.url) ? { ok: true, frame: null, code: 'nohost', url: b.url } : { ok: true, frame: false, why: 'xfo', url: b.url }; });
+      await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(80);
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-open"]');
+      ok(await pg.$eval('.ws-sw[data-act="tgl-open"]', e => e.getAttribute('aria-checked')) === 'false', '规则页有“先显示原网页”的开关（这组检查一开始设成了先简洁阅读）');
+      await pg.click('.ws-sw[data-act="tgl-open"]');
+      ok(await pg.$eval('.ws-sw[data-act="tgl-open"]', e => e.getAttribute('aria-checked')) === 'true', '打开“先显示原网页”');
+      await pg.goBack(); await pg.waitForTimeout(120);
+      const depth0 = await pg.evaluate(() => history.state && history.state.ws), op0 = await pg.evaluate(() => window.__opened.length);
+      await typeGo('https://frame.test/a');
+      await pg.waitForSelector('.ws-v.on[data-v="web"] iframe');
+      const frameEl = await pg.$('.ws-v.on iframe');
+      const fr = await frameEl.contentFrame(); await fr.waitForSelector('#to-b');
+      ok(await on() === 'web' && /frame\.test/.test(await pg.$eval('[data-r="wsite"]', e => e.textContent)), '能嵌的网站：直接在 App 里显示原网页（顶上写着网站）');
+      ok(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('sandbox')) && !/allow-top-navigation/.test(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('sandbox'))), '网页框有沙盒，不能把整个 App 跳走');
+      ok((await pg.evaluate(() => window.__opened.length)) === op0, '没有跳到系统浏览器');
+      await shot('13-原网页');
+      await fr.click('#to-b'); await pg.waitForTimeout(250);
+      await (await (await pg.$('.ws-v.on iframe')).contentFrame()).click('#to-c'); await pg.waitForTimeout(250);
+      const cur = async () => (await (await pg.$('.ws-v.on iframe')).contentFrame()).url();
+      ok(/\/c$/.test(await cur()), '网页里点链接：接着在 App 里看');
+      await pg.click('.ws-v.on [data-act="back"]'); await pg.waitForTimeout(300);
+      ok(await on() === 'web' && /\/b$/.test(await cur()), '点“‹”：先在网页里后退一页 → ' + await cur());
+      await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForFunction(d => history.state && history.state.ws === d && (document.querySelector('.ws-v.on') || {}).dataset.v === 'home', depth0, { timeout: 5000 }).catch(() => {});
+      ok(await on() === 'home' && await pg.evaluate(() => history.state && history.state.ws) === depth0 && !(await pg.$('[data-r="wbox"] iframe')), '点“×”：不管网页里点了几层，直接回到进来之前那一页 → ' + await on() + ' ws=' + await pg.evaluate(() => history.state && history.state.ws));
+      await pg.goBack(); await pg.waitForTimeout(150);
+      ok(!(await pg.evaluate(() => ChatterSearch.isOpen())) || (await pg.evaluate(() => history.state && history.state.ws)) !== depth0, '再返回一次就离开这一页（中间没有要多按几次的空记录）');
+      await pg.evaluate(() => ChatterSearch.open()); await pg.waitForTimeout(80);
+      await typeGo('https://frame.test/a'); await pg.waitForSelector('.ws-v.on iframe');
+      await pg.click('.ws-v.on [data-act="web-read"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://frame.test/a', '原网页里点“简洁阅读”：换成简洁阅读（能翻译、调字号）');
+      await pg.goBack(); await pg.waitForTimeout(200);
+      ok(await on() === 'home', '从简洁阅读返回：回到进来之前那一页');
+      await typeGo('https://deny.test/x'); await pg.waitForFunction(() => /不允许在别的 App 里显示原网页，已换成简洁阅读/.test((document.querySelector('[data-r="read"]') || {}).textContent || ''));
+      ok(await on() === 'read' && (await pg.evaluate(() => window.__opened.length)) === op0, '不让嵌的网站：自动换成简洁阅读，说清原因（不跳出 App）');
+      await pg.click('[data-r="rdsc"] [data-act="rd-ext"]');
+      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://deny.test/x', '说明旁边可以“用浏览器打开原网页”');
+      await pg.click('.ws-v.on .ws-bar [data-act="rd-orig"]');
+      ok((await pg.evaluate(() => window.__opened.length)) === op0 + 2 && await on() === 'read', '已经知道不让嵌：“原网页”按钮直接用浏览器打开，不会来回跳');
+      await pg.goBack(); await pg.waitForTimeout(150);
+      await typeGo('https://x.com/someone'); await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err');
+      ok(/用浏览器打开（能用你的登录）/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '要登录的网站（推特等）不让嵌：给出“用浏览器打开（能用你的登录）”');
+      await shot('14-不让嵌');
+      await pg.click('.ws-v.on .ws-err [data-act="web-ext"]');
+      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://x.com/someone', '点了才用浏览器打开');
+      await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(300);
+      await typeGo('https://nowhere.test/'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
+      ok(true, '找不到网站：交给简洁阅读那边按原因提示');
+      await pg.goBack(); await pg.waitForTimeout(150);
+      await typeGo('https://unsure.test/p'); await pg.waitForSelector('.ws-v.on iframe'); await pg.waitForSelector('[data-r="wtip"]:not([hidden])');
+      ok(/没能确认[\s\S]*换简洁阅读/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示，下面提示“看不到内容？换简洁阅读”');
+      ok(!errs.length, '原网页功能没有报错 ' + errs.join(' | '));
     }
     await ctx.close();
   }
@@ -271,7 +331,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const b64 = x => 'data:image/png;base64,' + fs.readFileSync(x).toString('base64');
     await pg.setContent(`<body style="margin:0;background:#d9d6cf;font-family:'Noto Sans CJK SC',sans-serif"><div style="display:flex;gap:28px;padding:28px;width:max-content">
       <div><div style="font-size:15px;color:#4a4655;margin:0 0 10px 6px">浅色</div><img src="${b64(f.light)}" style="width:390px;height:844px;border-radius:38px;box-shadow:0 10px 40px rgba(0,0,0,.18);display:block"></div>
-      <div><div style="font-size:15px;color:#4a4655;margin:0 0 10px 6px">深色</div><img src="${b64(f.dark)}" style="width:390px;height:844px;border-radius:38px;box-shadow:0 10px 40px rgba(0,0,0,.18);display:block"></div></div></body>`);
+      ${f.dark ? `<div><div style="font-size:15px;color:#4a4655;margin:0 0 10px 6px">深色</div><img src="${b64(f.dark)}" style="width:390px;height:844px;border-radius:38px;box-shadow:0 10px 40px rgba(0,0,0,.18);display:block"></div>` : ''}</div></body>`);
     await pg.waitForTimeout(100);
     await pg.screenshot({ path: path.join(OUT, name + '.jpg'), type: 'jpeg', quality: 86, fullPage: true });
   }

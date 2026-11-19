@@ -13,7 +13,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261119-2';
+const VER = '20261119-3';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -457,7 +457,7 @@ function httpErr(st: number, arch: boolean, to: string) {
   if (st >= 500) return new Oops('down', '这个网站自己出错了（' + st + '）', to);
   return new Oops('fetch', '这个网页取不到（' + st + '）', to);
 }
-async function grab(u0: URL, ms = 9000, arch = false) {
+async function grab(u0: URL, ms = 9000, arch = false, headOnly = false) {   // headOnly：只要最后那个网页的响应头（看能不能嵌进 App），不读正文
   let cur = u0;
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ms);
   try {
@@ -479,11 +479,12 @@ async function grab(u0: URL, ms = 9000, arch = false) {
         throw httpErr(r.status, arch, cur.href);
       }
       const ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (headOnly) { try { await r.body?.cancel(); } catch { /* 不要正文 */ } return { html: '', url: cur.href, headers: r.headers, ct }; }
       if (ct && !/html|xml|text\/plain/.test(ct)) {
         try { await r.body?.cancel(); } catch { /* 不要正文 */ }
         throw new Oops('notHtml', /pdf/.test(ct) ? '这是 PDF 文件，用原网页打开' : '这不是网页（是文件），用原网页打开', cur.href);
       }
-      return { html: decode(await readCapped(r, MAX_PAGE), ct), url: cur.href };
+      return { html: decode(await readCapped(r, MAX_PAGE), ct), url: cur.href, headers: r.headers, ct };
     }
     throw new Oops('fetch', '这个网页跳转太多次了', cur.href);
   } catch (e) {
@@ -494,6 +495,50 @@ async function grab(u0: URL, ms = 9000, arch = false) {
     if (/certificate|tls|ssl|handshake/i.test(m)) throw new Oops('fetch', '这个网站的安全证书有问题，连不上', cur.href);
     throw new Oops('fetch', arch ? '互联网档案馆连不上' : '这个网站连不上（对方没响应）', cur.href);
   } finally { clearTimeout(timer); }
+}
+/* ---------- 在 App 里直接显示原网页 ----------
+   网页由手机自己去打开（嵌在 App 里），不经过这台服务器、不转发内容；这里只看对方网站的响应头，
+   判断它让不让别的网站把它嵌进去（X-Frame-Options、Content-Security-Policy 的 frame-ancestors）。
+   不让嵌的网站，手机上会显示一片空白，所以先问一下，不让就直接换简洁阅读。 */
+const APP_ORIGIN = 'https://3855285335-gif.github.io';
+export function frameVerdict(h: Headers, origin: string): { frame: boolean; why?: string } {
+  let app: URL; try { app = new URL(origin || APP_ORIGIN); } catch { app = new URL(APP_ORIGIN); }
+  const csp = h.get('content-security-policy') || '';
+  const lists = [...csp.matchAll(/(?:^|[;,])\s*frame-ancestors\b([^;,]*)/gi)].map(m => m[1].trim().toLowerCase().split(/\s+/).filter(Boolean));
+  if (lists.length) {   // 标准规定：有 frame-ancestors 就以它为准，不再看 X-Frame-Options；有好几条时每一条都要允许
+    const allows = (src: string[]) => !src.includes("'none'") && src.some(x => {
+      if (x === '*') return true;
+      if (x === 'https:' || x === 'http:') return app.protocol === x;
+      const m = /^(?:(https?):\/\/)?(\*\.)?([a-z0-9.-]+)(?::(\d+|\*))?\/?$/.exec(x); if (!m) return false;
+      if (m[1] && m[1] + ':' !== app.protocol) return false;
+      if (m[4] && m[4] !== '*' && m[4] !== (app.port || (app.protocol === 'https:' ? '443' : '80'))) return false;
+      return m[2] ? app.hostname.endsWith('.' + m[3]) : app.hostname === m[3];
+    });
+    return lists.every(allows) ? { frame: true } : { frame: false, why: 'csp' };
+  }
+  if (/deny|sameorigin|allow-from/i.test(h.get('x-frame-options') || '')) return { frame: false, why: 'xfo' };
+  return { frame: true };
+}
+async function doFrame(uid: string, b: Any, c: Any, origin: string) {
+  const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
+  const key = 'f' + await sha(JSON.stringify([uid, u0.href, origin]));
+  const hit = await cget(key);
+  if (hit) return json({ ok: true, cached: true, ...hit });
+  if (await bump(uid, 'f', c.read_per_user_day) < 0) return fail('limit', '今天打开网页太多次了，明天再来');
+  const tries = u0.protocol === 'http:' ? [new URL(u0.href.replace(/^http:/, 'https:')), u0] : [u0];   // App 是 https，http 网页嵌不进来：先试 https 版
+  let got: Any = null, err: Any = null;
+  for (const t of tries) { try { got = await grab(t, 7000, false, true); break; } catch (e) { err = e; } }
+  if (!got) {   // 服务器这边打不开：不一定代表手机打不开（有些网站不让国外服务器访问），交给手机决定
+    if (err instanceof Oops) return json({ ok: true, frame: null, code: err.code, msg: err.message, url: u0.href });
+    throw err;
+  }
+  const fin = new URL(got.url);
+  let v = frameVerdict(got.headers, origin);
+  if (fin.protocol !== 'https:') v = { frame: false, why: 'http' };
+  else if (got.ct && !/html|xml|text\/plain/.test(got.ct)) v = { frame: false, why: /pdf/.test(got.ct) ? 'pdf' : 'file' };
+  const out = { frame: v.frame, why: v.why || '', url: fin.href };
+  bg(cput(key, out));
+  return json({ ok: true, cached: false, ...out });
 }
 // 互联网档案馆经常对同一批服务器限流：太忙或出错时等 1.5 秒自动再试一次
 async function grabArch(u: URL) {
@@ -771,6 +816,7 @@ export async function handle(req: Request): Promise<Response> {
     if (c.enabled === false) return fail('off', '搜索暂时关闭了');
     if (b.op === 'search') return await doSearch(uid, b, c);
     if (b.op === 'read') return await doRead(uid, b, c);
+    if (b.op === 'frame') return await doFrame(uid, b, c, req.headers.get('origin') || String(b.origin || ''));
     if (b.op === 'versions') return await doVersions(uid, b, c);
     if (b.op === 'translate') return await doTranslate(uid, b, c);
     if (b.op === 'usage') return json({ ok: true, used: await usage(), free: { exa: c.exa_free, tavily: c.tavily_free }, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily(), glm: !!sec('ZHIPU_API_KEY'), groq: !!sec('GROQ_API_KEY') } });
@@ -781,5 +827,5 @@ export async function handle(req: Request): Promise<Response> {
     return fail('server', '服务器出错了，请稍后重试');
   }
 }
-export const __test = { tidy, dropTitle, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; } };
+export const __test = { tidy, dropTitle, frameVerdict, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; } };
 if (!env('CHATTER_TEST')) Deno.serve(handle);

@@ -155,6 +155,21 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     return new Response(new ReadableStream({ pull(c) { if (sent > 80) { c.close(); return; } sent++; c.enqueue(chunk); } }), { headers: { 'content-type': 'text/html' } });
   }
   if (u.host === 'home.example.com') return new Response('<html><body><a href="/a">首页链接</a><a href="/b">另一个</a></body></html>', { headers: { 'content-type': 'text/html' } });
+  // 能不能嵌进 App：几种常见的响应头
+  const FR: Record<string, Record<string, string>> = {
+    'fr-open.example.com': {},
+    'fr-deny.example.com': { 'x-frame-options': 'DENY' },
+    'fr-same.example.com': { 'x-frame-options': 'SAMEORIGIN' },
+    'fr-none.example.com': { 'content-security-policy': "default-src 'self'; frame-ancestors 'none'" },
+    'fr-self.example.com': { 'content-security-policy': "frame-ancestors 'self'", 'x-frame-options': 'SAMEORIGIN' },
+    'fr-star.example.com': { 'content-security-policy': 'frame-ancestors *', 'x-frame-options': 'DENY' },
+    'fr-gh.example.com': { 'content-security-policy': "frame-ancestors 'self' https://*.github.io" },
+    'fr-other.example.com': { 'content-security-policy': "frame-ancestors 'self' https://partner.example.org" },
+    'fr-two.example.com': { 'content-security-policy': 'frame-ancestors *, frame-ancestors https://partner.example.org' }
+  };
+  if (FR[u.host]) { hitc('frame-site'); return new Response(new ReadableStream({ pull(c) { c.enqueue(new TextEncoder().encode('x'.repeat(65536))); } }), { headers: { 'content-type': 'text/html', ...FR[u.host] } }); }   // 正文无限长：只看响应头的话照样立刻回来
+  if (u.host === 'plain.example.com') return u.protocol === 'https:' ? new Response('<p>ok</p>', { headers: { 'content-type': 'text/html' } }) : new Response('<p>http</p>', { headers: { 'content-type': 'text/html' } });
+  if (u.host === 'httponly.example.com') { if (u.protocol === 'https:') throw new TypeError('error sending request: tls handshake eof'); return new Response('<p>http only</p>', { headers: { 'content-type': 'text/html' } }); }
   return realFetch(input, init);
 };
 Object.defineProperty(Deno, 'resolveDns', { value: async (host: string, type: string) => {
@@ -445,5 +460,44 @@ reset({ tr_models: { glm: ['gone-model'] } });
 r = await call({ op: 'translate', items: ['only gone model line'] });
 ok(r.j.ok && r.j.items[0] === null && r.j.why.join() === 'upstream', '填的模型全都下线了：这段显示原文，不会卡住');
 reset();
+
+// ---------- 在 App 里直接显示原网页：只看响应头判断能不能嵌进来 ----------
+const fr = async (url: string, origin = 'https://3855285335-gif.github.io', tok: string | null = TOK) => {
+  const res = await handle(new Request('https://proj.supabase.co/functions/v1/chatter-search', { method: 'POST', headers: { 'content-type': 'application/json', origin, ...(tok ? { authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify({ op: 'frame', url }) }));
+  return { st: res.status, j: await res.json() };
+};
+const expect: [string, boolean, string][] = [
+  ['fr-open', true, ''], ['fr-deny', false, 'xfo'], ['fr-same', false, 'xfo'], ['fr-none', false, 'csp'], ['fr-self', false, 'csp'],
+  ['fr-star', true, ''], ['fr-gh', true, ''], ['fr-other', false, 'csp'], ['fr-two', false, 'csp']
+];
+for (const [h, want, why] of expect) {
+  const x = await fr('https://' + h + '.example.com/page');
+  ok(x.j.ok && x.j.frame === want && x.j.why === why, '能不能嵌进 App：' + h + ' → ' + (want ? '能' : '不能（' + why + '）') + ' 实际 ' + JSON.stringify(x.j));
+}
+let x = await fr('https://fr-gh.example.com/page', 'https://evil.example.net');
+ok(x.j.frame === false, '只允许 *.github.io 的网站：别的网站来问就是“不能”（按请求来源判断）');
+x = await fr('https://fr-star.example.com/', 'https://3855285335-gif.github.io', null);
+ok(x.st === 401, '要登录才能问');
+x = await fr('http://plain.example.com/a');
+ok(x.j.frame === true && x.j.url === 'https://plain.example.com/a', 'http 网址：先试 https 版，能用就嵌 https 版 → ' + x.j.url);
+x = await fr('http://httponly.example.com/a');
+ok(x.j.frame === false && x.j.why === 'http', '只有 http 的网站：嵌不进 https 的 App（浏览器会拦），说清原因');
+x = await fr('https://files.example.com/a.pdf');
+ok(x.j.frame === false && x.j.why === 'pdf', 'PDF：不嵌（iPhone 的网页框只显示第一页）');
+x = await fr('https://nohost.example.com/');
+ok(x.j.ok && x.j.frame === null && x.j.code === 'nohost', '找不到网站：交给手机按原因提示 → ' + JSON.stringify(x.j));
+x = await fr('https://login.example.com/');
+ok(x.j.ok && x.j.frame === null && x.j.code === 'login', '服务器被拒（403）：不代表手机打不开，交给手机先试着显示');
+x = await fr('https://redir.example.com/');
+ok(x.j.frame === null && x.j.code === 'bad', '跳到内网地址：拒绝（不能拿来探内网）');
+x = await fr('http://127.0.0.1/');
+ok(!x.j.ok && x.j.code === 'bad', '本机地址：拒绝');
+const fs0 = calls['frame-site'] || 0;
+x = await fr('https://fr-deny.example.com/page');
+ok(x.j.cached === true && (calls['frame-site'] || 0) === fs0, '同一个网址再问：用缓存，不再去取');
+const fv = __test.frameVerdict;
+ok(fv(new Headers({ 'x-frame-options': 'deny' }), '').frame === false && fv(new Headers({ 'content-security-policy': "frame-ancestors 'none' https://3855285335-gif.github.io" }), '').frame === false, "'none' 和别的写在一起也算不让");
+ok(fv(new Headers({ 'content-security-policy': 'frame-ancestors https:' }), 'https://a.github.io').frame === true && fv(new Headers({ 'content-security-policy': 'frame-ancestors http://3855285335-gif.github.io' }), '').frame === false, '写 https: 的允许；协议不对的不允许');
+ok(fv(new Headers({ 'content-security-policy-report-only': "frame-ancestors 'none'" }), '').frame === true, '只报告不拦（Report-Only）的不算');
 console.log(bad ? `\n有 ${bad} 项没通过` : '\n全部通过');
 Deno.exit(bad ? 1 : 0);

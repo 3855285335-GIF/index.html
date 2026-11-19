@@ -22,6 +22,8 @@ const I = {
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  reload: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
+  read: '<path d="M5 6h14M5 10h14M5 14h10M5 18h7"/>',
   more: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
   check: '<path d="M5 12l5 5 9-10"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
@@ -243,6 +245,17 @@ const CSS = `
 .ws-vd b{font-size:15px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ws-vd .f{font-size:12px;color:var(--muted)}
 .ws-site{flex:1;text-align:center;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-wbar{gap:0}
+.ws-web{flex:1;min-height:0;position:relative;background:var(--bg);display:flex;flex-direction:column}
+.ws-web>.ws-sc{flex:1}
+.ws-web iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+.ws-wload{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:14px;background:var(--bg);padding:0 24px;text-align:center}
+.ws-wload .sp{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:wsspin .8s linear infinite}
+@keyframes wsspin{to{transform:rotate(360deg)}}
+.ws-wtip{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 14px;padding-bottom:calc(8px + env(safe-area-inset-bottom));font-size:13px;color:var(--muted);background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.ws-wtip[hidden]{display:none}
+.ws-wtip span{flex:1;min-width:0}
+.ws-wtip .ws-chip{height:32px;font-size:13px;flex-shrink:0}
 .ws-art{padding:12px 24px 40px;line-height:1.85;word-break:break-word}
 .ws-art h1{font-size:1.4em;line-height:1.4;margin:6px 0 10px}
 .ws-art .meta{font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.5}
@@ -312,7 +325,7 @@ const CSS = `
 
 /* ---------- 界面骨架 ---------- */
 let root = null, accountRevision = 0;
-const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map() };
+const W = { on: false, stack: [], type: 'web', tbs: '', cur: null, seq: 0, left: null, showFarms: false, fs: LSg('ch2wsFs', 18), shownRead: null, view: [], used: {}, free: { exa: 2500, tavily: 1000 }, keys: null, trc: new Map(), frm: new Map(), webT: 0, tipT: 0, quiet: false };   // frm：哪些网址能嵌进 App（问过服务器的，记 10 分钟）
 if (SIZES.indexOf(W.fs) < 0) W.fs = 18;
 function bar(id, ph, right) {
   return '<div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button>' +
@@ -332,6 +345,8 @@ function build() {
     '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
     '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div><div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
       '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-vers">' + ico(I.clock) + '历史版本</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
+    '<section class="ws-v" data-v="web"><div class="ws-bar ws-in ws-wbar"><button type="button" class="ws-ib" data-act="web-close" aria-label="关闭网页">' + ico(I.x) + '</button><button type="button" class="ws-ib" data-act="back" aria-label="后退">' + ico(I.back) + '</button><span class="ws-site" data-r="wsite"></span><button type="button" class="ws-ib" data-act="web-read" aria-label="简洁阅读">' + ico(I.read) + '</button><button type="button" class="ws-ib" data-act="web-more" aria-label="更多">' + ico(I.more) + '</button></div>' +
+      '<div class="ws-web" data-r="wbox"></div><div class="ws-wtip" data-r="wtip" hidden></div></section>' +
     '<section class="ws-v" data-v="rules"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" style="color:var(--ink);font-size:16px;font-weight:600">搜索规则</span><span style="width:50px"></span></div><div class="ws-sc"><div class="ws-pad ws-in ws-rules" data-r="rules"></div></div></section>' +
     '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">用浏览器看原图</button></div></section>' +
     '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在原网站打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
@@ -360,7 +375,9 @@ function show() {
   else if (t.v === 'rules') renderRules();
   else if (t.v === 'img') renderImg(t);
   else if (t.v === 'vid') renderVid(t);
+  else if (t.v === 'web') renderPage(t);
   if (t.v !== 'vid') { R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }   // 离开播放页就停掉视频
+  if (t.v !== 'web') unmountWeb();   // 离开网页那一层：网页框拿掉（停掉里面的声音、视频）
   const sc = scroller(t.v); if (sc && t.y != null) sc.scrollTop = t.y;   // 回到上一层时停在原来看到的位置
 }
 function go(v, d) {
@@ -376,18 +393,19 @@ function back() {
 function popTo(n) {
   W.stack.length = Math.max(0, Math.min(n, W.stack.length));
   if (!W.stack.length) { close(); return; }
+  if (W.quiet) return;   // 正在从网页那一层退出来，接下来马上要换到别的页面：先不画，免得闪一下
   show();
 }
 function close() {
   W.on = false; W.stack.length = 0;
-  if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; }
+  if (root) { root.classList.remove('on'); R('vbox').innerHTML = ''; R('vbox').dataset.src = ''; unmountWeb(); }
   document.body.classList.remove('ws-open');
 }
 function resetAccount() {
   accountRevision++;
   clearTimeout(saveT); P = null;
   close();
-  W.seq++; W.cur = null; W.shownRead = null; W.view = []; W.trc.clear();
+  W.seq++; W.cur = null; W.shownRead = null; W.view = []; W.trc.clear(); W.frm.clear();
   W.type = 'web'; W.tbs = ''; W.showFarms = false; W.left = null; W.used = {}; W.keys = null;
   if (root) { root.remove(); root = null; }
 }
@@ -619,12 +637,113 @@ function vidOf(u) {
   if (m) return { src: 'https://player.bilibili.com/player.html?bvid=' + m[1] + '&autoplay=1&high_quality=1&danmaku=0' };
   return null;
 }
-function ext(u) { try { window.open(u, '_blank', 'noopener'); } catch (e) {} }
+function ext(u) { try { window.open(u, '_blank', 'noopener'); } catch (e) {} }   // 用系统浏览器打开：只在网站不让嵌进 App、或者要用浏览器里的登录时才用
 function openUrl(u, t) {
   const vid = vidOf(u);
   if (vid) { go('vid', { u: u, t: t, vid: vid }); return; }
-  if (hit(u, CFG.direct)) { ext(u); return; }
-  go('read', { u: u, t: t });
+  if ((P.open === 'read' && !hit(u, CFG.direct)) || lookAlike(u)) { go('read', { u: u, t: t }); return; }   // 设了“先用简洁阅读”（要登录的网站简洁阅读取不到，照样先试原网页），或者像仿冒网站（简洁阅读那边有红色提醒）
+  go('web', { u: u, t: t });
+}
+function openOrig(u, t, extra) {   // “原网页”：先在 App 里显示；已经知道这个网站不让嵌，就直接用系统浏览器
+  const f = W.frm.get(u);
+  if (f && f.frame === false) { ext(f.url || u); return; }
+  go('web', Object.assign({ u: u, t: t }, extra || {}));
+}
+function openPage(u, t) {   // 聊天里点的链接也在这里打开（不跳出 App）
+  build(); loadPrefs(); loadCfg();
+  if (!W.on) { W.on = true; root.classList.add('on'); document.body.classList.add('ws-open'); }
+  openUrl(u, t);
+}
+
+/* ---------- App 里的网页（原网页） ----------
+   网页由手机直接打开、嵌在 App 里，不经过我们的服务器、不转发内容（这不是代理，也不是 VPN）。
+   很多大网站（谷歌、知乎、B 站、推特……）自己设了“不许别的网站嵌入”，嵌进来会是一片空白，
+   所以先让服务器看一眼对方的响应头：不让嵌就换简洁阅读，并说清原因。
+   网页里点过的链接会留在浏览器历史里：返回键、左上角“‹”先在网页里后退，退到头再回上一层；“×”直接关掉。 */
+const WHY = { xfo: '这个网站不允许在别的 App 里显示原网页', csp: '这个网站不允许在别的 App 里显示原网页', http: '这个网站没有加密（http），App 里不能直接显示', pdf: '这是 PDF 文件', file: '这是文件，不是网页' };
+function renderPage(t) {   // 原网页这一层
+  const d = t.d, box = R('wbox');
+  R('wsite').textContent = host(d.src || d.u);
+  if (d.fail) { unmountWeb(); box.innerHTML = webFail(d); return; }
+  if (d.src) { if (box.dataset.src !== d.src) mountWeb(t); return; }
+  if (box.dataset.src || !box.querySelector('.ws-wload')) { unmountWeb(); box.innerHTML = '<div class="ws-wload"><div class="sp"></div><div>正在打开 ' + esc(host(d.u)) + '…</div></div>'; }
+  if (!d.probing) probeWeb(t);
+}
+async function probeWeb(t) {
+  const d = t.d, account = accountRevision; d.probing = true;
+  let f = W.frm.get(d.u);
+  if (!f || Date.now() - f.at > 10 * 60000) {
+    const r = await B.call({ op: 'frame', url: d.u }, 12000);
+    if (account !== accountRevision) return;
+    f = (r && r.ok) ? { frame: r.frame, why: r.why || '', url: r.url || d.u, code: r.code || '', at: Date.now() } : { frame: null, why: '', url: d.u, code: (r && r.code) || 'net', at: Date.now() };
+    if (r && r.ok) W.frm.set(d.u, f);
+  }
+  d.probing = false;
+  if (top() !== t) return;   // 已经离开这一页
+  let src = '';
+  try { const x = new URL(f.url || d.u); if (x.protocol === 'https:' && x.origin !== location.origin) src = x.href; } catch (e) { /* 网址不对 */ }
+  if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：简洁阅读那边有按原因的提示和按钮（看存档、去真的网站）
+  if (f.frame === false || !src) {
+    const why = WHY[f.why] || (src ? '这个网站不允许在别的 App 里显示原网页' : '这个网址不能在 App 里打开');
+    if (d.fromRead || hit(d.u, CFG.direct) || f.why === 'pdf' || f.why === 'file') { d.fail = { why: why, url: f.url || d.u }; show(); return; }   // 要登录的网站、文件：给出“用浏览器打开”
+    replaceTop(t, 'read', { u: d.u, t: d.t, note: why + '，已换成简洁阅读', noFrame: true }); return;
+  }
+  d.src = src; d.unsure = f.frame === null;
+  show();
+}
+function replaceTop(t, v, d) { if (top() !== t) return; t.v = v; t.d = d; W.shownRead = null; show(); }   // 同一层换成别的页面，不多一条历史
+function mountWeb(t) {
+  const d = t.d, box = R('wbox');
+  unmountWeb();
+  box.dataset.src = d.src;
+  const ld = document.createElement('div'); ld.className = 'ws-wload'; ld.innerHTML = '<div class="sp"></div><div>正在打开 ' + esc(host(d.src)) + '…</div>';
+  const fr = document.createElement('iframe');
+  // 网页在自己的来源里运行，碰不到 Chatter 的登录信息；不给它跳转整个 App、弹对话框的权限
+  fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
+  fr.setAttribute('allow', 'fullscreen; autoplay; encrypted-media; picture-in-picture; clipboard-write');
+  fr.setAttribute('referrerpolicy', 'no-referrer');
+  fr.setAttribute('title', d.t || host(d.src));
+  fr.addEventListener('load', () => {
+    d.loads = (d.loads || 0) + 1; ld.remove();
+    if (d.loads === 1 && !d.tipped) { d.tipped = true; webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000); }
+  });
+  box.appendChild(ld); box.appendChild(fr);
+  fr.src = d.src;
+  clearTimeout(W.webT); W.webT = setTimeout(() => { if (top() === t && !d.loads) webTip(t, '打开得有点慢。', 0); }, 9000);
+  if (foreign(d.t || '') && !d.trTip) { d.trTip = true; webTip(t, '外文网页。', 0, true); }
+}
+function unmountWeb() {
+  if (!root) return;
+  const box = R('wbox'); if (box) { box.innerHTML = ''; box.dataset.src = ''; }
+  const tip = R('wtip'); if (tip) tip.hidden = true;
+  clearTimeout(W.webT); clearTimeout(W.tipT);
+}
+function webTip(t, msg, hideMs, tr) {   // 网页下面的小提示：看不到内容就换简洁阅读
+  const tip = R('wtip'); if (!tip || top() !== t) return;
+  tip.innerHTML = '<span>' + esc(msg + (tr ? '' : '看不到内容？')) + '</span><button type="button" class="ws-chip" data-act="web-read">' + (tr ? '翻成中文看' : '换简洁阅读') + '</button><button type="button" class="ws-x" data-act="web-tipx" aria-label="关掉提示">' + ico(I.x, 14) + '</button>';
+  tip.hidden = false;
+  clearTimeout(W.tipT); if (hideMs) W.tipT = setTimeout(() => { if (top() === t) tip.hidden = true; }, hideMs);
+}
+function webFail(d) {
+  const login = hit(d.u, CFG.direct);
+  const b = (act, label, pri) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '">' + esc(label) + '</button>';
+  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p><small>' +
+    esc(login ? '这类网站要登录才能看，用浏览器打开能用你在浏览器里的登录。' : (d.fail.why === WHY.pdf || d.fail.why === WHY.file) ? '用浏览器或系统自带的阅读器打开。' : '这是网站自己的设置，换哪个 App 都一样；简洁阅读能看文字和图片。') + '</small>' +
+    b('web-ext', login ? '用浏览器打开（能用你的登录）' : '用浏览器打开', true) + (d.fromRead ? b('back', '返回简洁阅读', false) : b('web-read', '试试简洁阅读', false)) + '</div></div></div>';
+}
+function leaveWeb(next) {   // 退出网页那一层：网页里点过的链接在浏览器历史里留下了记录，一步步退回进来之前那一层；next：退完以后要去的页面
+  const depth = W.stack.length; let n = 0;
+  unmountWeb();
+  W.quiet = !!next;
+  const done = () => { W.quiet = false; if (next) next(); else show(); };
+  const step = () => {
+    if (!W.on) { W.quiet = false; return; }
+    if (W.stack.length < depth) { done(); return; }
+    if (n++ >= 40 || !(history.state && history.state.ws)) { W.stack.length = depth - 1; if (!W.stack.length && !next) { W.quiet = false; close(); return; } done(); return; }
+    try { history.back(); } catch (e) { W.stack.length = depth - 1; done(); return; }
+    setTimeout(step, 200);
+  };
+  step();
 }
 function itemActs(it) {
   const h = host(it.u), items = [];
@@ -680,19 +799,20 @@ function banners(d, final) {   // 阅读页顶部的提醒：仿冒网址、跳�
     '<button type="button" data-act="rd-goto" data-u="https://' + esc(lk.d) + '/">去真的' + esc(lk.n) + '（' + esc(lk.d) + '）</button></div>';
   const j = final ? jumped(d.u, final) : '';
   if (j) h += '<div class="ws-jump">这个网址自动跳转到了另一个网站：<b>' + esc(j) + '</b></div>';
+  if (d.note) h += '<div class="ws-jump">' + esc(d.note) + '　<button type="button" class="ws-lnk" data-act="rd-ext">用浏览器打开原网页</button></div>';
   return h;
 }
 function rdErr(d) {   // 打不开时按原因给按钮：被删了先给存档，要登录先给浏览器，限流先给重试，找不到网站先给搜索
   const e = d.err || {}, look = lookAlike(d.u), q = (d.t && !/^https?:/i.test(d.t) && d.t.length < 80) ? d.t : mainLabel(host(d.u));
   const b = (act, label, pri, extra) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '"' + (extra || '') + '>' + esc(label) + '</button>';
-  const arch = pri => d.at ? '' : b('rd-arch', '看互联网档案馆的存档', pri), orig = pri => b('rd-orig', d.at ? '用浏览器打开这一版存档' : (look ? '仍然用浏览器打开（小心）' : '用浏览器打开原网页'), pri && !look);   // 疑似仿冒的网站：不把“打开原网页”放第一个
+  const arch = pri => d.at ? '' : b('rd-arch', '看互联网档案馆的存档', pri), orig = pri => b('rd-orig', d.at ? '打开这一版存档' : (look ? '仍然打开原网页（小心）' : e.code === 'login' ? '用浏览器打开（能用你的登录）' : '打开原网页'), pri && !look, e.code === 'login' || d.noFrame ? ' data-ext="1"' : '');   // 疑似仿冒的网站：不把“打开原网页”放第一个
   const srch = (label, pri) => q ? b('rd-search', label || '搜索「' + q + '」', pri, ' data-q="' + esc(q) + '"') : '';
   let tip = '', btns = '';
   switch (e.code) {
     case 'nohost': tip = '网址可能打错了，或者这个网站已经关了';
       btns = (look ? b('rd-goto', '你要找的是' + look.n + '吗？去 ' + look.d, true, ' data-u="https://' + esc(look.d) + '/"') : '') + srch('', !look) + arch(false); break;
     case 'gone': tip = '原网页被删了，互联网档案馆里可能还留着以前的版本'; btns = arch(true) + srch(d.t ? '搜这个标题，看别处有没有转载' : '', false) + orig(false); break;
-    case 'login': tip = '要登录才能看的网站，用浏览器打开更合适（登录状态在浏览器里）'; btns = orig(true) + arch(false); break;
+    case 'login': tip = '要登录才能看的网站，用浏览器打开更合适（登录状态在浏览器里）'; btns = orig(true) + (d.noFrame ? '' : b('rd-orig', '在 App 里打开原网页', false)) + arch(false); break;
     case 'busy': tip = d.at ? '互联网档案馆经常这样，已经自动重试过一次；通常等一两分钟再点重试就好' : '对方网站暂时不让频繁访问，等一会儿再试，或者用浏览器打开';
       btns = b('rd-retry', '重试', true) + orig(false) + arch(false); break;
     case 'timeout': tip = d.at ? '互联网档案馆比较慢，再试一次通常就好' : '对方网站反应太慢，再试一次，或者看存档'; btns = b('rd-retry', '重试', true) + arch(false) + orig(false); break;
@@ -948,7 +1068,9 @@ function renderRules() {
       '<button type="button" class="ws-row" data-act="rule-add" data-k="' + k + '" style="color:var(--accent)">' + ico(I.plus, 18) + '<span class="ws-tx">添加网站</span></button>';
   };
   const use = s => (W.keys && W.keys[s] === false) ? '还没填密钥' : (W.used[s] != null ? '用了 ' + W.used[s] + ' / ' + (W.free[s] || '?') + ' 次' : '…');
-  const h = '<div class="ws-sec" style="margin-top:10px">排序和过滤</div><div class="ws-card">' +
+  const h = '<div class="ws-sec" style="margin-top:10px">打开网页</div><div class="ws-card">' +
+    sw('tgl-open', P.open !== 'read', '先显示原网页（在 App 里）', '关掉就先用简洁阅读：干净、能翻译、省流量。网站不让在 App 里显示时会自动换简洁阅读') + '</div>' +
+    '<div class="ws-sec">排序和过滤</div><div class="ws-card">' +
     sw('tgl-clean', P.clean, '干净页面优先', '维基百科、GitHub、政府和学校网站往前排') +
     sw('tgl-farm', P.hideFarms, '不看营销号', '百家号、搜狐号、360doc 这类不显示') +
     '<div class="ws-row" data-act="pref-src" style="cursor:pointer"><span class="ws-tx">网页先用哪家搜<span class="ws-sub">这家用完了会自动换另一家</span></span><span class="ws-val">' + SRCN[P.src === 'tavily' ? 'tavily' : 'exa'] + '</span>' + ico(I.chev, 16) + '</div></div>' +
@@ -966,7 +1088,7 @@ function renderRules() {
     '<div class="ws-sec">默认名单</div><div class="ws-card">' +
       '<details><summary>营销号（' + CFG.farms.length + ' 个）</summary><p>' + esc(CFG.farms.join('、')) + '</p></details>' +
       '<details><summary>干净网站（' + CFG.clean.length + ' 个）</summary><p>' + esc(CFG.clean.join('、')) + '</p></details>' +
-      '<details><summary>直接用浏览器打开（' + CFG.direct.length + ' 个）</summary><p>要登录或者不让取内容的网站。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
+      '<details><summary>要登录的网站（' + CFG.direct.length + ' 个）</summary><p>这些网站不让在 App 里显示时，直接给出“用浏览器打开”（能用你在浏览器里的登录）。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
     '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。</div>';
   R('rules').innerHTML = h;
 }
@@ -1028,7 +1150,24 @@ function onClick(e) {
     case 'vid-go': if (it && it.u) { const vid = vidOf(it.u); if (vid) go('vid', { u: it.u, t: it.t, vid: vid }); else ext(it.u); } break;
     case 'vid-out': if (t && t.d.u) ext(t.d.u); break;
     case 'vid-send': if (t && t.d.u) B.forward((t.d.t ? t.d.t + '\n' : '') + t.d.u); break;
-    case 'rd-orig': if (t && t.d.u) ext(archUrl(t.d)); break;
+    case 'rd-orig': if (t && t.d.u) { if (t.d.noFrame || el.dataset.ext) ext(archUrl(t.d)); else openOrig(archUrl(t.d), (t.d.art && t.d.art.title) || t.d.t, { fromRead: true }); } break;
+    case 'rd-ext': if (t && t.d.u) ext(archUrl(t.d)); break;
+    case 'web-close': leaveWeb(); break;
+    case 'web-tipx': R('wtip').hidden = true; break;
+    case 'web-ext': if (t && t.d.u) ext((t.d.fail && t.d.fail.url) || t.d.src || t.d.u); break;
+    case 'web-read': if (t && t.v === 'web') { const d = t.d; leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })); } break;
+    case 'web-more': if (t && t.v === 'web') {
+      const d = t.d, u = d.src || d.u;
+      B.acts(host(u), [
+        { label: '简洁阅读（能翻译、调字号）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
+        { label: '重新加载', fn: () => { if (d.src) { R('wbox').dataset.src = ''; d.loads = 0; show(); } } },
+        { label: '复制链接', fn: () => B.copy(u) },
+        { label: '发给好友', fn: () => B.forward((d.t ? d.t + '\n' : '') + u) },
+        { label: '用浏览器打开', fn: () => ext(u) },
+        { label: '取消', fn: null }
+      ]);
+    } break;
+    case 'tgl-open': P.open = P.open === 'read' ? '' : 'read'; savePrefs(); renderTop(); break;
     case 'rd-retry': if (t) { t.d.err = null; t.d.dirty = true; renderRead(t); } break;
     case 'rd-arch': if (t) go('read', { u: t.d.u, t: t.d.t, at: 'latest' }); break;
     case 'rd-now': if (t) openUrl(t.d.u, t.d.art && t.d.art.title); break;
@@ -1058,5 +1197,5 @@ function onClick(e) {
   }
 }
 
-window.ChatterSearch = { open: open, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
+window.ChatterSearch = { open: open, openPage: openPage, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit };
 })();

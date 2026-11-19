@@ -5,6 +5,7 @@ const path = require('path');
 const { makeEnv, sleep, iso, prof, ME } = require('./harness');
 
 const QUICK = process.argv.includes('--quick');
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7);   // 只跑名字里带这几个字的检查：node run.js --only=朋友圈
 const ROOT = path.resolve(__dirname, '..');
 const uid = i => '00000000-0000-4000-8000-' + String(i).padStart(12, '0');
 const GA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', GK = 'g:' + GA;
@@ -421,11 +422,12 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
         ok(o.headers.Authorization === 'Bearer tok', '调用搜索没带登录凭证');
         if (b.op === 'usage') return resp({ ok: true, used: { exa: 5, tavily: 0 }, free: { exa: 2500, tavily: 1000 }, keys: { exa: true, tavily: true } });
         if (b.op === 'search') return resp({ ok: true, cached: false, left: 70, used: 6, src: b.src || 'exa', type: b.type, q: b.q, items: [{ t: '营销', u: 'https://baijiahao.baidu.com/s?id=1', s: '震惊' }, { t: '普通', u: 'https://a.example.com/1', s: 'x' }, { t: '置顶的', u: 'https://docs.pin.dev/x', s: 'y' }, { t: '维基', u: 'https://zh.wikipedia.org/wiki/x', s: 'z' }, { t: '推特', u: 'https://x.com/a/status/1' }], wiki: { t: '词条', s: '摘要', u: 'https://zh.m.wikipedia.org/wiki/x' }, rel: ['相关一'] });
+        if (b.op === 'frame') return resp({ ok: true, frame: false, why: 'xfo', url: b.url });
         if (b.op === 'read') return resp({ ok: true, u: b.url, title: '文章标题', site: '示例', html: '<p onclick="alert(0)">正文<script>alert(1)</script><img src="https://img.example/a.jpg" onerror="alert(2)"><a href="javascript:alert(3)">坏</a><a href="https://b.example.com/2">好</a></p><iframe src="https://evil/"></iframe>', len: 900 });
       }
       return resp({ sent: 1 });
     };
-    w.localStorage.setItem('ch2ws:' + env.T.S.uid, JSON.stringify({ pin: ['pin.dev'] }));
+    w.localStorage.setItem('ch2ws:' + env.T.S.uid, JSON.stringify({ pin: ['pin.dev'], open: 'read' }));   // 这组检查走“先简洁阅读”；“先显示原网页”在 search-ui.js 里用真浏览器测
     click(env, env.$('btn-web')); await sleep(50);
     const sc = Array.from(w.document.querySelectorAll('script')).find(x => /search\.js\?v=/.test(x.getAttribute('src') || ''));
     ok(sc && !w.ChatterSearch, '点放大镜没有去下载 search.js');
@@ -440,10 +442,15 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
     ok(titles.join(',') === '置顶的,维基,普通,推特', '排序不对（应该：置顶的、维基、普通、推特；营销号隐藏）：' + titles.join(','));
     ok(/隐藏了 1 条营销号/.test(ws.textContent) && ws.querySelector('.ws-kg') && /词条/.test(ws.querySelector('.ws-kg').textContent), '营销号提示或百科卡片没显示');
     const rows = Array.from(ws.querySelectorAll('.ws-r'));
-    click(env, rows[3]); await sleep(50);
-    ok(opened[0] === 'https://x.com/a/status/1' && on() === 'res', '要登录的网站没有直接用浏览器打开：' + opened[0]);
-    click(env, rows[2]); await sleep(150);
-    ok(on() === 'read' && H.state.ws === 3 && calls[1] && calls[1].op === 'read' && calls[1].url === 'https://a.example.com/1', '点结果没进简洁阅读');
+    click(env, rows[3]); await sleep(80);
+    ok(!opened.length && on() === 'web' && /用浏览器打开（能用你的登录）/.test(ws.querySelector('.ws-v.on').textContent), '要登录的网站：不该自动跳出 App，不让嵌时应该给出“用浏览器打开”：' + on() + ' ' + opened[0]);
+    click(env, ws.querySelector('.ws-v.on [data-act="web-ext"]')); await sleep(20);
+    ok(opened[0] === 'https://x.com/a/status/1', '点“用浏览器打开”没打开：' + opened[0]);
+    H.back(); await sleep(120);
+    ok(on() === 'res' && H.state.ws === 2, '从原网页那一层返回没回到结果页：' + on());
+    click(env, ws.querySelectorAll('.ws-r')[2]); await sleep(150);   // 返回结果页时列表重画过：重新取
+    const rd = calls.filter(x => x.op === 'read').pop();
+    ok(on() === 'read' && H.state.ws === 3 && rd && rd.url === 'https://a.example.com/1', '点结果没进简洁阅读');
     const body = ws.querySelector('.ws-body');
     ok(body && /正文/.test(body.textContent) && !/script|onclick|onerror|javascript:|iframe|alert/.test(body.innerHTML), '正文没洗干净：' + (body && body.innerHTML));
     ok(body.querySelector('img').getAttribute('referrerpolicy') === 'no-referrer', '文章图片没加 no-referrer（会被防盗链拦）');
@@ -673,6 +680,162 @@ test('动态点赞：数据库返回错误时恢复计数，可重新提交', as
   } finally { env.close(); }
 });
 
+test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊天图片、文件链接照旧', async () => {
+  const fs = require('fs'), t = Date.now(), db = baseDb(t);
+  serverInsert(db, msg(1, 'bob', 'bob::me', '看看这个 https://news.example.com/a 不错', t - 500));
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await sleep(200); await env.T.openConv('bob::me', 'bob'); await sleep(300);
+    const w = env.w, opened = [], calls = [];
+    w.open = u => { opened.push(u); return null; };
+    w.fetch = async (u, o) => { if (String(u).indexOf('/functions/v1/chatter-search') > 0) { const b = JSON.parse(o.body); calls.push(b); return { ok: true, status: 200, json: async () => b.op === 'frame' ? { ok: true, frame: true, why: '', url: b.url } : { ok: true } }; } return { ok: true, status: 200, json: async () => ({}) }; };
+    const a = env.$('chat-messages').querySelector('a[href="https://news.example.com/a"]');
+    ok(a, '聊天里的网址没变成链接');
+    const ev = new w.MouseEvent('click', { bubbles: true, cancelable: true }); a.dispatchEvent(ev);
+    ok(ev.defaultPrevented && !opened.length, '点聊天里的网址还是跳到了系统浏览器');
+    const sc = Array.from(w.document.querySelectorAll('script')).find(x => /search\.js\?v=/.test(x.getAttribute('src') || ''));
+    ok(sc, '没有去下载网页浏览（search.js）');
+    w.eval(fs.readFileSync(path.join(ROOT, 'search.js'), 'utf8')); sc.onload(); await sleep(120);
+    const ws = env.$('ws'), on = ws && ws.querySelector('.ws-v.on');
+    ok(on && on.dataset.v === 'web' && calls.some(b => b.op === 'frame' && b.url === 'https://news.example.com/a'), '没在 App 里打开这个网址：' + (on && on.dataset.v));
+    ok(ws.querySelector('[data-r="wbox"] iframe') && ws.querySelector('[data-r="wbox"] iframe').getAttribute('src') === 'https://news.example.com/a', '原网页没嵌进来');
+    // 再点一次：search.js 已经下载过，直接打开
+    w.ChatterSearch.closeNow();
+    const ev2 = new w.MouseEvent('click', { bubbles: true, cancelable: true }); a.dispatchEvent(ev2); await sleep(80);
+    ok(ev2.defaultPrevented && ws.classList.contains('on'), '第二次点没在 App 里打开');
+    w.ChatterSearch.closeNow();
+    // 自己存储里的图片链接（大图）不拦
+    const img = w.document.createElement('a'); img.href = 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/bob/x.jpg'; img.textContent = 'x';
+    env.$('chat-messages').appendChild(img);
+    const ev3 = new w.MouseEvent('click', { bubbles: true, cancelable: true }); img.dispatchEvent(ev3);
+    ok(!ev3.defaultPrevented, '聊天图片、文件的链接不该被拦');
+  } finally { env.close(); }
+});
+
+test('朋友圈权限：四种可见范围、发出去再改、不看对方、不让对方看、转发前问服务器', async () => {
+  const t = Date.now();
+  const db = baseDb(t, {
+    profiles: [prof(ME, '我'), prof('bob', 'Bob'), prof('carol', 'Carol')],
+    friendships: [{ owner_acc: ME, friend_acc: 'bob', hide_moments: false, skip_moments: false }, { owner_acc: ME, friend_acc: 'carol', hide_moments: false, skip_moments: true }],
+    moments: [
+      { id: 'm-bob', author_acc: 'bob', body: 'bob 的', images: [], visibility: 'friends', created_at: iso(t - 1000), visible_to: null },
+      { id: 'm-carol', author_acc: 'carol', body: 'carol 的', images: [], visibility: 'friends', created_at: iso(t - 2000), visible_to: null },
+      { id: 'm-me', author_acc: ME, body: '我的', images: [], visibility: 'friends', created_at: iso(t - 3000), visible_to: null }
+    ],
+    moment_audience: [{ moment_id: 'm-me', only_accs: null, hide_accs: ['bob'] }]
+  });
+  const rpcs = [];
+  const env = makeEnv({ db, onRpc: (name, args, d) => {
+    if (name === 'chatter_schema') return { data: 8, error: null };
+    if (name === 'moment_is_open') { rpcs.push(name); return { data: args.p_moment !== 'm-bob', error: null }; }
+    if (name === 'set_moment_perm') {
+      rpcs.push(name);
+      const f = d.friendships.find(x => x.owner_acc === ME && x.friend_acc === args.p_friend);
+      if (!f) return { data: null, error: { message: 'not friends' } };
+      if (args.p_hide !== null) f.hide_moments = args.p_hide;
+      if (args.p_skip !== null) f.skip_moments = args.p_skip;
+      return { data: { hide: f.hide_moments, skip: f.skip_moments }, error: null };
+    }
+  } });
+  try {
+    await env.login(); await sleep(200);
+    env.T.S.v7 = true; await env.T.loadRemarks();
+    ok(env.T.S.v9 === true && env.T.S.mperm.carol && env.T.S.mperm.carol.s === true, '没读到好友的朋友圈权限', env.T.S.mperm);
+    await env.T.momentsLoad(true);
+    const shown = env.T.MO.list.map(m => m.id);
+    ok(shown.indexOf('m-carol') < 0 && shown.indexOf('m-bob') >= 0, '“不看 carol”还显示了她的动态', shown);
+    const meCard = env.$('moment-list').querySelector('.moment[data-id="m-me"] .mo-vis');
+    ok(meCard && /不给 1 位好友看/.test(meCard.textContent), '自己的动态没显示“不给 1 位好友看”', meCard && meCard.textContent);
+    ok(!env.$('moment-list').querySelector('.moment[data-id="m-bob"] .mo-vis'), '别人的动态不该显示可见范围');
+
+    // 发表：不给谁看
+    env.T.openMomentCompose();
+    env.$('moment-text').value = '只是不给 bob 看';
+    env.T.openVisPicker();
+    ok(env.$('vis-list').style.display === 'none', '“公开”时不该列好友');
+    env.$('vis-modes').querySelector('[data-mode="except"]').click();
+    ok(env.$('vis-list').style.display === '' && env.$('vis-list').querySelectorAll('input').length === 2, '“不给谁看”没列出好友');
+    await env.T.applyVis();
+    ok(env.toasts.some(x => /勾选不给看的好友/.test(x)), '一个都没勾就确定，应该提示');
+    const box = env.$('vis-list').querySelector('input[data-acc="bob"]'); box.checked = true; box.dispatchEvent(new env.w.Event('change', { bubbles: true }));
+    await env.T.applyVis();
+    ok(/不给谁看：1 位好友/.test(env.$('moment-vis').textContent), '发表页的按钮没写“不给谁看：1 位好友”', env.$('moment-vis').textContent);
+    await env.T.postMoment(); await sleep(50);
+    const ins = env.db.moments.find(m => m.body === '只是不给 bob 看');
+    ok(ins && Array.isArray(ins.hidden_from) && ins.hidden_from.join() === 'bob' && ins.visible_to == null && ins.visibility === 'friends', '发表时没把“不给 bob 看”交给数据库', ins);
+    ok(env.T.momentVisText(ins) === '不给 1 位好友看', '刚发的动态标签不对', env.T.momentVisText(ins));
+
+    // 发表：私密（原来的“仅自己可见”开关合进来了）
+    env.T.openMomentCompose();
+    env.$('moment-text').value = '私密的';
+    env.T.openVisPicker(); env.$('vis-modes').querySelector('[data-mode="priv"]').click(); await env.T.applyVis();
+    await env.T.postMoment(); await sleep(50);
+    const pv = env.db.moments.find(m => m.body === '私密的');
+    ok(pv && pv.visibility === 'private' && !pv.hidden_from && !pv.visible_to, '私密没发对', pv);
+    ok(!env.$('moment-priv'), '旧的“仅自己可见”开关应该去掉了（合进了“谁可以看”）');
+
+    // 发出去以后改成“部分可见”
+    const mine = env.T.MO.list.find(m => m.id === 'm-me');
+    env.T.openVisPicker(mine);
+    ok(env.$('vis-title').textContent === '修改可见范围' && env.$('vis-modes').querySelector('[data-mode="except"]').classList.contains('on'), '改的时候没选中现在的范围');
+    env.$('vis-modes').querySelector('[data-mode="only"]').click();
+    const c2 = env.$('vis-list').querySelector('input[data-acc="carol"]'); c2.checked = true; c2.dispatchEvent(new env.w.Event('change', { bubbles: true }));
+    await env.T.applyVis(); await sleep(20);
+    const upd = env.log.filter(q => q.table === 'moments' && q.op === 'update').pop();   // 假数据库返回的是同一个对象，看发给数据库的内容
+    const row = (upd && upd.values) || {};
+    ok(Array.isArray(row.visible_to) && row.visible_to.join() === 'carol' && 'hidden_from' in row && row.hidden_from === null && row.visibility === 'friends', '改可见范围时没把两个名单一起交给数据库（另一个要清空）');
+    ok(/仅 1 位好友可见/.test(env.$('moment-list').querySelector('.moment[data-id="m-me"] .mo-vis').textContent), '改完卡片上的标签没更新');
+
+    // 转发别人的：先问服务器
+    env.$('moment-list').querySelector('.moment[data-id="m-bob"] .mo-fwd').click(); await sleep(30);
+    ok(rpcs.includes('moment_is_open') && env.toasts.some(x => /作者设了可见范围，不能转发/.test(x)), '设了范围的别人的动态不该能转发');
+
+    // 好友资料页：朋友圈权限
+    env.T.openProfile('bob'); await sleep(20);
+    ok(env.$('pf-mperm').style.display === '' && env.$('pf-mperm').textContent === '朋友圈权限', '好友资料页没有“朋友圈权限”');
+    env.T.openMomentPerm('bob');
+    env.$('as-items').querySelector('button[data-i="0"]').click(); await sleep(30);
+    ok(env.db.friendships.find(f => f.friend_acc === 'bob').hide_moments === true && env.T.S.mperm.bob.h === true, '“不让对方看”没存上');
+    ok(/不让对方看/.test(env.$('pf-mperm').textContent), '资料页没显示已设的权限', env.$('pf-mperm').textContent);
+    env.T.openMomentPerm('carol');
+    env.$('as-items').querySelector('button[data-i="1"]').click(); await sleep(80);
+    ok(!env.T.S.mperm.carol && env.T.MO.list.some(m => m.id === 'm-carol'), '取消“不看 carol”后她的动态没回来', env.T.MO.list.map(m => m.id));
+    env.T.openProfile('nobody'); await sleep(10);
+    ok(env.$('pf-mperm').style.display === 'none', '不是好友不该显示朋友圈权限');
+  } finally { env.close(); }
+});
+
+test('朋友圈权限：数据库还没更新时，旧功能照常，“不给谁看”不发（不会悄悄发给所有人）', async () => {
+  const t = Date.now();
+  const db = baseDb(t, { moments: [] });
+  const env = makeEnv({ db, onQuery: q => {
+    if (q.table === 'friendships' && q.op === 'select' && /hide_moments/.test(q.cols || '')) return { data: null, error: { message: 'column friendships.hide_moments does not exist' } };
+    if (q.table === 'moments' && (q.op === 'insert' || q.op === 'update') && JSON.stringify(q.rows || q.values || {}).indexOf('hidden_from') >= 0) return { data: null, error: { message: "Could not find the 'hidden_from' column of 'moments'" } };
+    if (q.table === 'moment_audience') return { data: null, error: { message: 'relation "public.moment_audience" does not exist' } };
+  }, onRpc: name => { if (name === 'chatter_schema') return { data: 8, error: null }; if (name === 'set_moment_perm') return { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }; } });
+  try {
+    await env.login(); await sleep(200);
+    env.T.S.v7 = true; await env.T.loadRemarks();
+    ok(env.T.S.v9 === false, '没认出数据库还没更新');
+    env.T.openMomentCompose(); env.$('moment-text').value = '部分可见';
+    env.T.openVisPicker(); env.$('vis-modes').querySelector('[data-mode="only"]').click();
+    const b = env.$('vis-list').querySelector('input[data-acc="bob"]'); b.checked = true; b.dispatchEvent(new env.w.Event('change', { bubbles: true }));
+    await env.T.applyVis(); await env.T.postMoment(); await sleep(50);
+    const m = env.db.moments.find(x => x.body === '部分可见');
+    ok(m && m.visible_to.join() === 'bob' && !('hidden_from' in m), '数据库没更新时“部分可见”应该照旧能发', m);
+    env.T.openMomentCompose(); env.$('moment-text').value = '不给看';
+    env.T.openVisPicker(); env.$('vis-modes').querySelector('[data-mode="except"]').click();
+    const b2 = env.$('vis-list').querySelector('input[data-acc="bob"]'); b2.checked = true; b2.dispatchEvent(new env.w.Event('change', { bubbles: true }));
+    await env.T.applyVis();
+    ok(env.toasts.some(x => /不给谁看.*11-19 的数据库更新/.test(x)), '数据库没更新时选“不给谁看”应该说明原因');
+    ok(env.$('vis-sheet').classList.contains('active') && /全部好友/.test(env.$('moment-vis').textContent), '没生效时选择框应该还开着、按钮仍写“全部好友”（不会让人以为已经排除了）');
+    await env.T.momentsLoad(true);
+    ok(env.T.MO.list.length === 1, '数据库没更新时朋友圈照常显示');
+    env.T.openMomentPerm('bob'); env.$('as-items').querySelector('button[data-i="0"]').click(); await sleep(30);
+    ok(env.toasts.some(x => /先运行 11-19 的数据库更新/.test(x)), '朋友圈权限没说明要先更新数据库');
+  } finally { env.close(); }
+});
+
 // ---------------- 代码检查 ----------------
 async function lint() {
   const { ESLint } = require('eslint');
@@ -703,6 +866,7 @@ async function lint() {
   try { const errs = await lint(); if (errs.length) { bad++; console.log('❌'); errs.slice(0, 30).forEach(e => console.log('   ' + e)); } else console.log('✅'); }
   catch (e) { bad++; console.log('❌ 代码检查没跑起来：' + e.message); }
   for (const tc of tests) {
+    if (ONLY && tc.name.indexOf(ONLY) < 0) continue;
     if (QUICK && tc.slow) { console.log('⏭  ' + tc.name + '（--quick 跳过）'); continue; }
     const s = Date.now();
     try { await tc.fn(); console.log('✅ ' + tc.name + '（' + ((Date.now() - s) / 1000).toFixed(1) + ' 秒）'); }

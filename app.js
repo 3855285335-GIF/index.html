@@ -3498,7 +3498,7 @@ function teardown() {
   document.body.classList.remove('chat-open');
   S.bootInited = false; editWatchAt = 0;
   S.me = null; S.uid = null; S.token = null; S.convs = []; S.msgs = []; S.out = new Map(); S.conv = null; S.peer = null; S.friends = []; S.requests = []; S.profiles = {}; S.online = new Set(); S.fbOnline = new Set(); S.noSigDb = false; S.noPres = false; S.noInbox = false; S.seen = new Set(); S.peerRead = {}; S.reply = null; S.typingUntil = 0; hidden = new Set(); stopFlash();
-  S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
+  S.v6 = undefined; S.v7 = undefined; S.v8 = undefined; S.v9 = undefined; S.mperm = {}; MO.aud = {}; MO.mode = 'all'; MO.vis = null; S.reqKnown = null; PUSH.srv = undefined; PUSH.last = ''; hideNBar(); S.stk = null; stkOk = false; schemaAt = 0; pmUid = null; S.remarks = {}; S.stUsed = null; hideSuggest(); $('emoji-panel').classList.remove('active'); closeProfile();
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
@@ -3510,7 +3510,7 @@ async function start(user) {
   const generation = accountGeneration;
   S.started = true; S.uid = user.id;
   if (!S.me) { const c = LS.get(ck(user.id)); if (c && c.me) hydrate(c); }
-  S.stk = LS.get(stkKey(), null); stkOk = false; S.remarks = LS.get(rmkKey(), {}) || {};
+  S.stk = LS.get(stkKey(), null); stkOk = false; S.remarks = LS.get(rmkKey(), {}) || {}; S.mperm = LS.get(mpKey(), {}) || {};
   showApp(); renderAll();                       // 有缓存就先显示（秒开）
   try {
     let b = await bootstrap();
@@ -3955,7 +3955,7 @@ function searchMsgs() {
 /* ================= 群聊 ================= */
 // 群会话键统一是 g:<群id>：会话列表里就是普通一条会话，点开就是正常聊天窗口
 const GRP = { list: [], members: {}, membersAt: {}, count: {}, cursor: {}, done: new Set(), loadAt: 0, chatT: 0, muteT: 0, invAt: 0, invLoaded: false };
-const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], ats: [], loadAt: 0 };
+const MO = { list: [], likes: {}, comments: {}, cursor: null, has: true, loading: false, imgs: [], urls: [], notices: [], ats: [], loadAt: 0, mode: 'all', vis: null, aud: {} };
 let moAtSel = [];   // 评论时选中的 @ 好友 [{acc,name}]
 function grpOf(k) { const id = gidOf(k); if (!id) return null; return GRP.list.find(function (x) { return x.id === id; }) || null; }
 function grpName(k) { const g = grpOf(k); return g ? g.name : '群聊'; }
@@ -4711,26 +4711,33 @@ async function momentsLoad(reset) {
     const { data, error } = await q;
     if (generation !== accountGeneration) return;
     if (error) throw error;
-    const rows = data || [];
+    const raw = data || [];
+    const rows = raw.filter(function (r) { return r.author_acc === ME() || !mpOf(r.author_acc).s; });   // “不看对方的朋友圈”的不显示
     if (reset) MO.list = rows; else MO.list = MO.list.concat(rows);
-    MO.has = rows.length === 15;
-    if (rows.length) MO.cursor = rows[rows.length - 1].created_at;
+    MO.has = raw.length === 15;
+    if (raw.length) MO.cursor = raw[raw.length - 1].created_at;
     const ids = rows.map(function (r) { return r.id; });
+    const mine = rows.filter(function (r) { return r.author_acc === ME(); }).map(function (r) { return r.id; });
     if (ids.length) await loadMomentViews(rows);
     if (generation !== accountGeneration) return;
     const likes = reset ? {} : Object.assign({}, MO.likes), cmts = reset ? {} : Object.assign({}, MO.comments);
     if (ids.length) {
-      const [lk, cm] = await Promise.all([        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
-        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at,reply_to_acc,parent_id').in('moment_id', ids).order('created_at', { ascending: true })
+      const [lk, cm, au] = await Promise.all([        sb.from('moment_likes').select('moment_id,account_id').in('moment_id', ids),
+        sb.from('moment_comments').select('id,moment_id,author_acc,body,created_at,reply_to_acc,parent_id').in('moment_id', ids).order('created_at', { ascending: true }),
+        (mine.length && S.v9 !== false) ? sb.from('moment_audience').select('moment_id,only_accs,hide_accs').in('moment_id', mine) : Promise.resolve({ data: null, error: null })   // 自己动态的可见名单（只有自己读得到）
       ]);
       if (generation !== accountGeneration) return;
+      if (au && !au.error && au.data) {
+        mine.forEach(function (id) { delete MO.aud[id]; });
+        au.data.forEach(function (x) { MO.aud[x.moment_id] = { only: x.only_accs || null, hide: x.hide_accs || null }; });
+      }
       if (!lk.error) (lk.data || []).forEach(function (x) { (likes[x.moment_id] = likes[x.moment_id] || []).push(x.account_id); });
       if (!cm.error) (cm.data || []).forEach(function (x) { (cmts[x.moment_id] = cmts[x.moment_id] || []).push(x); });
       MO.likes = likes; MO.comments = cmts;
       MO.loadAt = now();
       const accs = new Set(); rows.forEach(function (r) { accs.add(r.author_acc); }); (cm.data || []).forEach(function (c) { accs.add(c.author_acc); }); (lk.data || []).forEach(function (x) { accs.add(x.account_id); });
       const needProf = Array.from(accs).some(function (a) { return !S.profiles[a]; });
-      const sig = ids.map(function (id) { return id + ':' + (likes[id] || []).length + ':' + (cmts[id] || []).length; }).join(',') + '|' + rows.length;
+      const sig = ids.map(function (id) { return id + ':' + (likes[id] || []).length + ':' + (cmts[id] || []).length + (MO.aud[id] ? ':' + JSON.stringify(MO.aud[id]) : ''); }).join(',') + '|' + rows.length;
       if (sig !== MO.sig) { MO.sig = sig; renderMoments(); }   // 内容没变就不重画：切回来不会闪、图片不重新加载
       Promise.all(Array.from(accs).map(function (a) { return fetchProfile(a); })).then(function () { if (generation === accountGeneration && S.me && needProf) { MO.sig = sig; renderMoments(); } }, function () {});
     } else {
@@ -4762,7 +4769,7 @@ function momentCardHTML(m, i) {
   return '<div class="moment" data-id="' + esc(m.id) + '" style="animation-delay:' + (Math.min(i, 6) * 28) + 'ms">' +
     '<div class="mo-head">' + avatarHTML(nickOf(m.author_acc), avatarOf(m.author_acc), false, m.author_acc) +
       '<div class="mo-meta"><div class="mo-name">' + esc(peerName(m.author_acc)) + '</div><div class="mo-time">' + fmtMomentTime(m.created_at) + '</div>' +
-      ((m.author_acc === ME() && m.visibility === 'private') ? '<div class="mo-vis">🔒 仅自己可见</div>' : ((m.author_acc === ME() && Array.isArray(m.visible_to) && m.visible_to.length) ? '<div class="mo-vis">仅 ' + m.visible_to.length + ' 位好友可见</div>' : '')) + '</div>' +
+      (m.author_acc === ME() ? '<button class="mo-vis" data-visedit="1" type="button" aria-label="修改可见范围">' + esc(momentVisText(m)) + ' ›</button>' : '') + '</div>' +
       (m.author_acc === ME() ? '<button class="mo-del" type="button">删除</button>' : '') + '<button class="mo-fwd" type="button">转发</button>' + '</div>' +
     (m.body ? '<div class="mo-text">' + esc(m.body) + '</div>' : '') + grid + vid +
     '<div class="mo-react">' + momentReactHTML(m.id, m.author_acc === ME()) + '</div>' +
@@ -4813,11 +4820,24 @@ function refreshMomentReact(id) {
   const zone = card && card.querySelector('.mo-react');
   if (zone) { const mm = MO.list.find(function (x) { return x.id === id; }); zone.innerHTML = momentReactHTML(id, !!(mm && mm.author_acc === ME())); }
 }
+function momentVis(m) {   // 一条动态现在的可见范围：all 全部好友 / priv 仅自己 / only 部分可见 / except 不给谁看
+  if (m.visibility === 'private') return { mode: 'priv', list: [] };
+  const a = MO.aud[m.id] || {};
+  const only = (a.only && a.only.length) ? a.only : (Array.isArray(m.visible_to) && m.visible_to.length ? m.visible_to : null);
+  if (only) return { mode: 'only', list: only.slice() };
+  if (a.hide && a.hide.length) return { mode: 'except', list: a.hide.slice() };
+  return { mode: 'all', list: [] };
+}
+function visText(mode, n) {
+  return mode === 'priv' ? '🔒 仅自己可见' : mode === 'only' ? '仅 ' + n + ' 位好友可见' : mode === 'except' ? '不给 ' + n + ' 位好友看' : '全部好友可见';
+}
+function momentVisText(m) { const v = momentVis(m); return visText(v.mode, v.list.length); }
 function paintVisLabel() {
   const b = $('moment-vis'); if (!b) return;
-  b.textContent = '谁可以看：' + (MO.vis && MO.vis.length ? MO.vis.length + ' 位好友' : '全部好友');
+  const n = MO.vis ? MO.vis.length : 0;
+  b.textContent = MO.mode === 'priv' ? '🔒 仅自己可见' : MO.mode === 'only' ? '谁可以看：' + n + ' 位好友' : MO.mode === 'except' ? '不给谁看：' + n + ' 位好友' : '谁可以看：全部好友';
 }
-let visSel = [];
+let visSel = [], visMode = 'all', visTarget = null;
 function paintMomentVideo() {
   const box = $('moment-video-preview'); if (!box) return;
   if (!MO.vid) { box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -4834,25 +4854,76 @@ function addMomentVideo(f) {
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.vid = f; MO.vurl = URL.createObjectURL(f); MO.cover = ''; paintMomentVideo();
 }
-function openVisPicker() {
-  visSel = MO.vis ? MO.vis.slice() : [];
+function openVisPicker(target) {   // 不带参数：发表时选；带一条自己的动态：发出去以后改
+  visTarget = (target && target.id) ? target : null;
+  const cur = visTarget ? momentVis(visTarget) : { mode: MO.mode || 'all', list: MO.vis ? MO.vis.slice() : [] };
+  visMode = cur.mode; visSel = cur.list;
   raiseSheet('vis-sheet', 'vis-backdrop');
-  $('vis-list').innerHTML = S.friends.length ? S.friends.map(function (a) {
-    return '<label class="vis-item"><input type="checkbox" data-acc="' + esc(a) + '"' + (visSel.indexOf(a) >= 0 ? ' checked' : '') + '><span>' + esc(peerName(a)) + '</span></label>';
-  }).join('') : '<div class="vis-empty">还没有好友</div>';
+  $('vis-title').textContent = visTarget ? '修改可见范围' : '谁可以看';
+  paintVisSheet();
+  $('vis-modes').onclick = function (e) {
+    const b = e.target.closest('[data-mode]'); if (!b) return;
+    if (b.dataset.mode !== visMode && (b.dataset.mode === 'only' || b.dataset.mode === 'except')) visSel = [];   // 换了“部分可见 / 不给谁看”，名单重选
+    visMode = b.dataset.mode; paintVisSheet();
+  };
   $('vis-list').onchange = function (e) {
     const c = e.target.closest('input[data-acc]'); if (!c) return;
     const a = c.dataset.acc;
     if (c.checked) { if (visSel.indexOf(a) < 0) visSel.push(a); } else visSel = visSel.filter(function (x) { return x !== a; });
+    paintVisHint();
   };
   $('vis-backdrop').classList.add('active'); $('vis-sheet').classList.add('active');
 }
-function closeVis() { $('vis-backdrop').classList.remove('active'); $('vis-sheet').classList.remove('active'); }
+function paintVisHint() {
+  const h = $('vis-hint'); if (!h) return;
+  h.textContent = visMode === 'only' ? '勾选的好友能看（已选 ' + visSel.length + ' 位）' : visMode === 'except' ? '勾选的好友看不到，对方不会收到任何提示（已选 ' + visSel.length + ' 位）' : visMode === 'priv' ? '只有你自己看得到' : '你的全部好友都能看到';
+}
+function paintVisSheet() {
+  document.querySelectorAll('#vis-modes [data-mode]').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === visMode); b.setAttribute('aria-pressed', b.dataset.mode === visMode ? 'true' : 'false'); });
+  const pick = visMode === 'only' || visMode === 'except';
+  const friends = S.friends.slice().concat(visSel.filter(function (a) { return S.friends.indexOf(a) < 0; }));   // 已经不是好友的也列出来，方便取消
+  $('vis-list').style.display = pick ? '' : 'none';
+  $('vis-list').innerHTML = !pick ? '' : friends.length ? friends.map(function (a) {
+    return '<label class="vis-item"><input type="checkbox" data-acc="' + esc(a) + '"' + (visSel.indexOf(a) >= 0 ? ' checked' : '') + '><span>' + esc(peerName(a)) + '</span></label>';
+  }).join('') : '<div class="vis-empty">还没有好友</div>';
+  paintVisHint();
+}
+async function applyVis() {
+  const pick = visMode === 'only' || visMode === 'except', list = pick ? visSel.slice() : null;
+  if (pick && !list.length) { toast(visMode === 'only' ? '勾选能看的好友' : '勾选不给看的好友'); return; }
+  if (visMode === 'except' && S.v9 === false) { toast('“不给谁看”要先运行 11-19 的数据库更新（朋友圈权限）'); return; }
+  if (!visTarget) { MO.mode = visMode; MO.vis = list; paintVisLabel(); closeVis(); return; }
+  const m = visTarget, generation = accountGeneration, btn = $('vis-ok');
+  const patch = { visibility: visMode === 'priv' ? 'private' : 'friends', visible_to: visMode === 'only' ? list : null };
+  if (S.v9 !== false) patch.hidden_from = visMode === 'except' ? list : null;
+  if (btn.disabled) return; btn.disabled = true;
+  try {
+    let r = await sb.from('moments').update(patch).eq('id', m.id).eq('author_acc', ME()).select('id');
+    if (r.error && 'hidden_from' in patch && /hidden_from/.test(r.error.message || '')) {   // 数据库还没更新
+      S.v9 = false;
+      if (visMode === 'except') { toast('“不给谁看”要先运行 11-19 的数据库更新（朋友圈权限）'); return; }
+      delete patch.hidden_from;
+      r = await sb.from('moments').update(patch).eq('id', m.id).eq('author_acc', ME()).select('id');
+    }
+    if (generation !== accountGeneration) return;
+    if (r.error) throw r.error;
+    if (!r.data || !r.data.length) { toast('没改成：这条可能已经删除了'); return; }
+    m.visibility = patch.visibility;
+    m.visible_to = S.v9 === false ? patch.visible_to : null;   // 数据库更新后名单不存在动态本身里
+    if (visMode === 'only' || visMode === 'except') MO.aud[m.id] = { only: visMode === 'only' ? list : null, hide: visMode === 'except' ? list : null };
+    else delete MO.aud[m.id];
+    closeVis(); MO.sig = ''; renderMoments();
+    toast('可见范围已改为：' + momentVisText(m));
+  } catch (e) { if (generation === accountGeneration) toast('修改失败：' + ((e && e.message) || '请重试')); }
+  finally { btn.disabled = false; }
+}
+function closeVis() { visTarget = null; $('vis-backdrop').classList.remove('active'); $('vis-sheet').classList.remove('active'); }
+function renderMomentsFiltered() { MO.sig = ''; if (sb && S.me) momentsLoad(true); }   // 改了“不看对方的朋友圈”：重新取一遍
 let momentComposeGeneration = 0;
 function openMomentCompose() {
   momentComposeGeneration++;
   $('moment-post').disabled = false;
-  MO.imgs = []; MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); MO.urls = []; MO.vis = null; paintVisLabel();
+  MO.imgs = []; MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); MO.urls = []; MO.vis = null; MO.mode = 'all'; paintVisLabel();
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.vid = null; MO.vurl = ''; paintMomentVideo();
   $('moment-text').value = ''; renderMomentEditor();
@@ -4866,7 +4937,7 @@ function closeMomentCompose() {
   MO.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
   try { if (MO.vurl) URL.revokeObjectURL(MO.vurl); } catch (e) {}
   MO.imgs = []; MO.urls = []; MO.vid = null; MO.vurl = ''; MO.cover = '';
-  MO.priv = false; try { const pb = document.getElementById('moment-priv'); if (pb) pb.textContent = '🔒 仅自己可见：关'; } catch (e) {}
+  MO.mode = 'all'; MO.vis = null;
 }
 function renderMomentEditor() {
   $('moment-count').textContent = MO.imgs.length + '/9';
@@ -4889,7 +4960,9 @@ async function postMoment() {
   if (!body && !MO.imgs.length && !MO.vid) { toast('写点什么，或者选一张图片/一段视频'); return; }
   if (body.length > 1000) { toast('最多 1000 个字'); return; }
   const compose = momentComposeGeneration, actor = ME(), images = MO.imgs.slice();
-  const video = MO.vid, cover = MO.cover, visible = MO.vis ? MO.vis.slice() : null, privatePost = MO.priv;
+  const mode = MO.mode || 'all', picked = MO.vis ? MO.vis.slice() : null;
+  const video = MO.vid, cover = MO.cover, privatePost = mode === 'priv', visible = mode === 'only' ? picked : null, hidden = mode === 'except' ? picked : null;
+  if (hidden && S.v9 === false) { toast('“不给谁看”要先运行 11-19 的数据库更新（朋友圈权限），这条还没发'); return; }
   const current = () => momentComposeGeneration === compose && ME() === actor;
   const btn = $('moment-post'); if (btn.disabled) return; btn.disabled = true;
   toast('正在发表…');
@@ -4921,11 +4994,19 @@ async function postMoment() {
       videoUrl = canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
     }
     if (!current()) return;
-    const { data, error } = await sb.from('moments').insert({ author_acc: actor, body, images: urls, visibility: privatePost ? 'private' : 'friends', visible_to: privatePost ? null : visible, video: videoUrl || null, cover: cover || null }).select('id,author_acc,body,images,visibility,created_at,visible_to,video,cover').single();
+    const row = { author_acc: actor, body, images: urls, visibility: privatePost ? 'private' : 'friends', visible_to: visible, video: videoUrl || null, cover: cover || null };
+    if (hidden) row.hidden_from = hidden;   // 数据库会把名单挪进只有作者能读的表里
+    const { data, error } = await sb.from('moments').insert(row).select('id,author_acc,body,images,visibility,created_at,visible_to,video,cover').single();
     if (!current()) return;
-    if (error) throw error;
+    if (error) {
+      if (hidden && /hidden_from/.test(error.message || '')) { S.v9 = false; throw new Error('“不给谁看”要先运行 11-19 的数据库更新（朋友圈权限），这条没发出去'); }
+      throw error;
+    }
     closeMomentCompose(); toast('已发表');
-    if (data) { MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments(); }
+    if (data) {
+      if (visible || hidden) MO.aud[data.id] = { only: visible, hide: hidden };
+      MO.list.unshift(data); MO.likes[data.id] = []; MO.comments[data.id] = []; renderMoments();
+    }
   } catch (e) { if (!current()) return; logErr('momentPost', e); toast('发表失败：' + ((e && e.message) || '请重试')); }
   finally { if (current()) btn.disabled = false; }
 }
@@ -6251,8 +6332,19 @@ function loadRemarks() {
   rmkAt = now();
   rmkLoading = (async () => {
     try {
-      const { data, error } = await sb.from('friendships').select('friend_acc,remark,created_at').eq('owner_acc', ME());
+      let { data, error } = await sb.from('friendships').select(S.v9 === false ? 'friend_acc,remark,created_at' : 'friend_acc,remark,created_at,hide_moments,skip_moments').eq('owner_acc', ME());
+      if (error && S.v9 !== false && /hide_moments|skip_moments/.test(error.message || '')) {   // 还没运行 11-19 的朋友圈权限 SQL
+        S.v9 = false;
+        ({ data, error } = await sb.from('friendships').select('friend_acc,remark,created_at').eq('owner_acc', ME()));
+      }
       if (error) { if (isMissingFn(error) || /remark/.test(error.message || '')) S.v7 = false; else logErr('remarks', error); return; }
+      if (S.v9 !== false) {
+        const mp = {};
+        (data || []).forEach(r => { if (r.hide_moments || r.skip_moments) mp[r.friend_acc] = { h: !!r.hide_moments, s: !!r.skip_moments }; });
+        const changed = JSON.stringify(mp) !== JSON.stringify(S.mperm || {});
+        S.v9 = true; S.mperm = mp; LS.set(mpKey(), mp);
+        if (changed && MO.list.length) { MO.sig = ''; renderMomentsFiltered(); }
+      }
       const old = S.remarks || {}, next = {}, at = {};
       (data || []).forEach(r => { if (r.remark) next[r.friend_acc] = { r: r.remark }; if (r.created_at) at[r.friend_acc] = Date.parse(r.created_at) || 0; });
       S.frAt = at;
@@ -6288,6 +6380,42 @@ function editRemark(acc) {
   openForm('给“' + nickOf(acc) + '”设置备注', [{ ph: '备注（最多 20 字）', hint: '只有你自己看得到；留空就是删除备注', val: remarkOf(acc), max: 20 }], ([v]) => setRemark(acc, v), '保存');
 }
 
+/* ---- 好友的朋友圈权限：不让对方看我的朋友圈 / 不看对方的朋友圈（11-19 的 SQL 运行后才有） ---- */
+const mpKey = () => 'ch2mperm:' + (S.uid || '');
+const mpOf = a => (S.mperm && S.mperm[a]) || { h: false, s: false };
+async function setMomentPerm(acc, hide, skip) {
+  const generation = accountGeneration;
+  try {
+    const { data, error } = await sb.rpc('set_moment_perm', { p_friend: acc, p_hide: hide, p_skip: skip });
+    if (generation !== accountGeneration) return false;
+    if (error) {
+      if (isMissingFn(error)) { S.v9 = false; toast('这个功能要先运行 11-19 的数据库更新（朋友圈权限）'); }
+      else toast('保存失败：' + (/not friends/.test(error.message || '') ? '你们已经不是好友了' : (error.message || '请重试')));
+      return false;
+    }
+    S.mperm = S.mperm || {};
+    const v = { h: !!(data && data.hide), s: !!(data && data.skip) };
+    if (v.h || v.s) S.mperm[acc] = v; else delete S.mperm[acc];
+    LS.set(mpKey(), S.mperm);
+    return true;
+  } catch (e) { toast(isNetErr(e) ? '网络不好，没保存，稍后再试' : '保存失败：' + ((e && e.message) || '请重试')); return false; }
+}
+function openMomentPerm(acc) {
+  if (!acc || S.friends.indexOf(acc) < 0) return;
+  const p = mpOf(acc), who = peerName(acc);
+  openActs('“' + who + '”的朋友圈权限', [
+    { label: '不让对方看我的朋友圈：' + (p.h ? '开' : '关'), fn: async function () {
+      if (await setMomentPerm(acc, !p.h, null)) toast(!p.h ? '已设置：' + who + ' 看不到你的朋友圈（对方不会收到通知）' : '已取消：' + who + ' 又能看到你的朋友圈');
+      if (pfAcc === acc) renderProfile();
+    } },
+    { label: '不看对方的朋友圈：' + (p.s ? '开' : '关'), fn: async function () {
+      if (await setMomentPerm(acc, null, !p.s)) { toast(!p.s ? '已设置：朋友圈里不再显示 ' + who + ' 的动态' : '已取消：朋友圈里又会显示 ' + who + ' 的动态'); MO.sig = ''; renderMomentsFiltered(); }
+      if (pfAcc === acc) renderProfile();
+    } },
+    { label: '关闭', fn: null }
+  ]);
+}
+
 /* ---- 好友资料页 ---- */
 let pfAcc = null;
 function openProfile(acc) {
@@ -6314,7 +6442,9 @@ function renderProfile() {
   const sg = (S.profiles[a] && typeof S.profiles[a].signature === 'string') ? S.profiles[a].signature.trim() : '';
   const se = $('pf-sign'); if (se) { se.textContent = sg; se.style.display = sg ? '' : 'none'; }
   $('pf-remark').textContent = rm ? '修改备注' : '设置备注';
-  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-del'].forEach(id => { $(id).style.display = friend ? '' : 'none'; });
+  const mpb = $('pf-mperm');
+  if (mpb) { const p = mpOf(a); mpb.textContent = '朋友圈权限' + (p.h && p.s ? '：不让对方看、不看对方' : p.h ? '：不让对方看' : p.s ? '：不看对方' : ''); }
+  ['pf-chat', 'pf-voice', 'pf-video', 'pf-remark', 'pf-mperm', 'pf-del'].forEach(id => { const el = $(id); if (el) el.style.display = friend ? '' : 'none'; });
   const addBtn = $('pf-add');
   if (addBtn) {
     const self = a === ME();
@@ -6555,18 +6685,31 @@ window.__chWS = {
   forward: function (text) { openForward({ type: 'text', body: String(text || '') }); },
   sb: function () { return sb; }, uid: function () { return S.uid; }
 };
-let wsLoading = false;
-function openWS() {
-  if (window.ChatterSearch) { window.ChatterSearch.open(); return; }
+let wsLoading = false, wsThen = null;
+function openWS(then) {   // then：下载好以后做什么（默认打开搜索首页）
+  const go = typeof then === 'function' ? then : function () { window.ChatterSearch.open(); };
+  if (window.ChatterSearch) { go(); return; }
+  wsThen = go;
   if (wsLoading) return;
   const generation = accountGeneration;
   wsLoading = true;
   const s = document.createElement('script');
   s.src = 'search.js?v=' + (APP_V || '0');
-  s.onload = function () { wsLoading = false; if (generation !== accountGeneration) return; if (window.ChatterSearch) window.ChatterSearch.open(); else toast('搜索没加载出来，再点一次试试'); };
-  s.onerror = function () { wsLoading = false; s.remove(); toast('搜索没加载出来，检查网络后再点一次'); };
+  s.onload = function () { wsLoading = false; const f = wsThen; wsThen = null; if (generation !== accountGeneration) return; if (window.ChatterSearch && f) f(); else if (!window.ChatterSearch) toast('搜索没加载出来，再点一次试试'); };
+  s.onerror = function () { wsLoading = false; wsThen = null; s.remove(); toast('网页浏览没加载出来，检查网络后再点一次'); };
   document.body.appendChild(s);
 }
+// 聊天里的网址：在 App 里打开（以前是跳到系统浏览器）。聊天图片、文件这些自己存储里的链接照旧
+function openLink(u, t) { openWS(function () { if (window.ChatterSearch.openPage) window.ChatterSearch.openPage(u, t); else window.open(u, '_blank', 'noopener'); }); }
+document.addEventListener('click', function (e) {
+  const a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (!a || a.hasAttribute('download') || a.querySelector('img,video,audio') || !a.closest('#chat-messages')) return;
+  const href = a.getAttribute('href') || '';
+  if (!/^https?:\/\//i.test(href) || href.indexOf(SUPABASE_URL + '/') === 0 || (PROXY_URL && href.indexOf(PROXY_URL) === 0)) return;
+  if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;   // 电脑上按住 Ctrl / ⌘ 点：照旧在新标签页打开
+  e.preventDefault();
+  openLink(href);
+}, true);
 const pushBlocked = () => S.v8 === false || (PUSH.srv === false && now() - PUSH.srvAt < 10 * 60000);
 async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（对方在线、不是好友等情况由数据库判断后跳过）
   if (!S.me || pushBlocked()) return null;
@@ -7254,6 +7397,7 @@ function bindUI() {
   if ($('pf-add')) $('pf-add').onclick = function () { if (this.dataset.acc) addFriend(this); };
   $('pf-voice').onclick = () => pfCall(false); $('pf-video').onclick = () => pfCall(true);
   $('pf-remark').onclick = () => { const a = pfAcc; if (a) editRemark(a); };
+  if ($('pf-mperm')) $('pf-mperm').onclick = () => { const a = pfAcc; if (a) openMomentPerm(a); };
   $('pf-del').onclick = () => { const a = pfAcc; closeProfile(); if (a) setTimeout(() => confirmRemoveFriend(a), 50); };
   $('btn-img').onclick = () => $('file-input').click();
   $('voice-speed').onclick = cycleSpeed; paintSpeed();
@@ -7449,12 +7593,10 @@ function bindUI() {
     try { toast('正在上传封面…'); MO.cover = await upload(f, 'jpg', f.type || 'image/jpeg', 'mcover_'); toast('封面已设置'); }
     catch (x) { logErr('mcover', x); toast('封面上传失败'); }
   };
-  $('moment-vis').onclick = openVisPicker;
-const paintPriv = function () { const b = $('moment-priv'); if (b) b.textContent = '🔒 仅自己可见：' + (MO.priv ? '开' : '关'); };
-if ($('moment-priv')) { $('moment-priv').onclick = function () { MO.priv = !MO.priv; paintPriv(); }; paintPriv(); }
+  $('moment-vis').onclick = function () { openVisPicker(); };
   $('vis-backdrop').onclick = closeVis;
-  $('vis-all').onclick = function () { MO.vis = null; paintVisLabel(); closeVis(); };
-  $('vis-ok').onclick = function () { MO.vis = visSel.length ? visSel.slice() : null; paintVisLabel(); closeVis(); };
+  $('vis-cancel').onclick = closeVis;
+  $('vis-ok').onclick = applyVis;
   document.querySelectorAll('#imgedit-sheet .ie-tab').forEach(function (b) {
     b.onclick = function () { if (b.dataset.t === 'rot') { ieRotate(); return; } ieSetTool(b.dataset.t); };
   });
@@ -7568,13 +7710,25 @@ $('ie-panel-stk').addEventListener('click', function (e) {
       const mm = (MO.list || []).find(function (x) { return String(x.id) === String(id); });
       if (!mm) return;
       if (mm.author_acc !== ME() && (mm.visibility === 'private' || (Array.isArray(mm.visible_to) && mm.visible_to.length))) { toast('这条朋友圈设了可见范围，不能转发'); return; }
-      const list = [{ label: '发给自己（备忘）', fn: function () { forwardMomentTo(mm, ME()); } }];
-      S.friends.forEach(function (a) { list.push({ label: peerName(a), fn: function () { forwardMomentTo(mm, a); } }); });
-      (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardMomentToGroup(mm, g.id); } }); });
-      list.push({ label: '取消', fn: null });
-      openActs('转发朋友圈（连图片/视频）', list);
+      const showFwd = function () {
+        const list = [{ label: '发给自己（备忘）', fn: function () { forwardMomentTo(mm, ME()); } }];
+        S.friends.forEach(function (a) { list.push({ label: peerName(a), fn: function () { forwardMomentTo(mm, a); } }); });
+        (GRP.list || []).forEach(function (g) { list.push({ label: '群 · ' + g.name, fn: function () { forwardMomentToGroup(mm, g.id); } }); });
+        list.push({ label: '取消', fn: null });
+        openActs('转发朋友圈（连图片/视频）', list);
+      };
+      if (mm.author_acc === ME()) { showFwd(); return; }
+      // 别人的：名单只有作者看得到，所以问服务器“这条是不是对全部好友公开”（只回答是或否）
+      const generation = accountGeneration;
+      sb.rpc('moment_is_open', { p_moment: mm.id }).then(function (r) {
+        if (generation !== accountGeneration) return;
+        if (r.error && !isMissingFn(r.error)) { toast('检查不了能不能转发，稍后再试'); return; }
+        if (!r.error && r.data !== true) { toast('作者设了可见范围，不能转发'); return; }
+        showFwd();
+      }, function () { toast('网络不好，稍后再试'); });
       return;
     }
+    if (e.target.closest('[data-visedit]')) { const mv = (MO.list || []).find(function (x) { return String(x.id) === String(id); }); if (mv && mv.author_acc === ME()) openVisPicker(mv); return; }
     if (e.target.closest('.mo-del')) { deleteMoment(id); return; }
     if (e.target.closest('[data-like]')) { toggleMomentLike(id); return; }
     if (e.target.closest('[data-comment]')) { commentMoment(id); return; }
@@ -7623,7 +7777,7 @@ $('btn-export').onclick = () => {
   openActs('导出哪个聊天？', list);
 };
 $('btn-msearch').onclick = searchMsgs;
-$('btn-web').onclick = openWS;
+$('btn-web').onclick = function () { openWS(); };
 $('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;
   $('multi-copy').onclick = multiCopy;
@@ -7889,7 +8043,7 @@ function boot() {
   try { verBoot(); } catch (e) {}
   window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, momentsLoad, openVisPicker, applyVis, loadRemarks, setMomentPerm, openMomentPerm, postMoment, openMomentCompose, momentVisText, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
 document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { retryBadImgs(); } catch (e) {} } });
 // 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）
