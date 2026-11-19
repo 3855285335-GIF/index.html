@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>音乐来源测试</title>
+<style>
+:root{--bg:#f6f3ee;--card:#fff;--ink:#1d1b22;--muted:#77727f;--line:#ebe7e0;--accent:#5b3bd8;--ok:#1f9d63;--bad:#d4421f}
+@media (prefers-color-scheme:dark){:root{--bg:#131119;--card:#1e1b27;--ink:#f1eefb;--muted:#9b96a8;--line:#2b2736;--accent:#9d86ff;--ok:#3ccf8e;--bad:#ff7a5c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK SC",sans-serif;padding:calc(16px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom))}
+main{max-width:640px;margin:0 auto}
+h1{font-size:21px;margin:4px 0 6px}
+p.lead{color:var(--muted);font-size:14px;margin:0 0 16px}
+.card{background:var(--card);border-radius:18px;padding:4px 0;margin:12px 0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px}
+.row+.row{border-top:1px solid var(--line)}
+.row .t{flex:1;min-width:0}
+.row .t b{display:block;font-weight:600;font-size:15px}
+.row .t small{display:block;color:var(--muted);font-size:12.5px;line-height:1.45}
+.st{font-size:13px;white-space:nowrap;color:var(--muted)}
+.st.ok{color:var(--ok)}.st.bad{color:var(--bad)}
+button{font:inherit;border:0;border-radius:14px;height:46px;padding:0 18px;background:var(--accent);color:#fff;width:100%;margin-top:8px;cursor:pointer}
+button.sec{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+button:disabled{opacity:.5}
+.sec-t{font-size:13px;color:var(--muted);margin:22px 4px 6px}
+audio{width:100%;margin-top:8px}
+.note{font-size:13px;color:var(--muted);line-height:1.6;margin:10px 4px}
+</style>
+</head>
+<body>
+<main>
+<h1>音乐来源测试</h1>
+<p class="lead">Chatter 的“音乐”要用免费、合法的来源，而且歌要从你的手机直接播放（不经过我们的服务器，不然免费流量几天就用完）。这一页测一测：在你现在的网络下，哪些来源连得上、能出声。<b>请先关掉 VPN 测一次</b>，再打开 VPN 测一次，把两次结果都发给 Claude。</p>
+
+<button id="go">开始测试（大约 30 秒）</button>
+
+<div class="sec-t">1. 能不能连上（只看网络通不通）</div>
+<div class="card" id="hosts"></div>
+
+<div class="sec-t">2. 能不能真的出声（Audius：免费、不用注册的独立音乐库）</div>
+<div class="card"><div class="row"><div class="t"><b id="aud-t">还没测</b><small id="aud-s">会自动取一首热门歌，试着加载声音</small></div><span class="st" id="aud-st"></span></div></div>
+<audio id="aud" controls preload="none" hidden></audio>
+<p class="note" id="aud-n" hidden>能加载不代表一定出声：请点一下上面的播放按钮，听听有没有声音、卡不卡。</p>
+
+<button class="sec" id="copy" disabled>复制测试结果</button>
+<p class="note">这一页只测网络，不会登录、不会上传任何东西。测试用的网址都是这些音乐网站公开的地址。</p>
+</main>
+<script>
+'use strict';
+// 要测的来源：名字、说明、拿来测通不通的地址（只看能不能连上，不下载内容）
+const HOSTS = [
+  ['Audius 接口', '免费独立音乐库，不用注册、不用密钥', 'https://api.audius.co/'],
+  ['Audius 备用节点', '同上，另一个服务器', 'https://discoveryprovider.audius.co/health_check'],
+  ['Jamendo 接口', '免费正版独立音乐（要免费注册一个开发者号）', 'https://api.jamendo.com/v3.0/'],
+  ['Jamendo 音乐文件', 'Jamendo 的歌放在这里', 'https://prod-1.storage.jamendo.com/'],
+  ['网易云音乐', '国内大站；官方外链播放器只能放部分歌', 'https://music.163.com/'],
+  ['哔哩哔哩播放器', '已经在用（看视频）', 'https://player.bilibili.com/'],
+  ['互联网档案馆', '大量公有领域的老录音', 'https://archive.org/'],
+  ['维基共享资源', '公有领域的音频', 'https://upload.wikimedia.org/'],
+  ['ccMixter', '知识共享授权的混音音乐', 'https://ccmixter.org/'],
+  ['Free Music Archive', '免费音乐档案', 'https://freemusicarchive.org/']
+];
+const $ = id => document.getElementById(id);
+const results = {};
+function row(i, name, desc) { return '<div class="row"><div class="t"><b>' + name + '</b><small>' + desc + '</small></div><span class="st" id="h' + i + '">—</span></div>'; }
+$('hosts').innerHTML = HOSTS.map((h, i) => row(i, h[0], h[1])).join('');
+function setSt(el, ok, text) { el.textContent = text; el.className = 'st ' + (ok === true ? 'ok' : ok === false ? 'bad' : ''); }
+async function probe(url, ms) {   // 能连上就算通（拿不到内容也没关系），超时或被重置算不通
+  const t0 = performance.now(), ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+  try { await fetch(url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now(), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); return { ok: true, ms: Math.round(performance.now() - t0) }; }
+  catch (e) { return { ok: false, ms: Math.round(performance.now() - t0), why: ctl.signal.aborted ? '超时' : '连不上' }; }
+  finally { clearTimeout(tm); }
+}
+async function jget(url, ms) {
+  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
+  finally { clearTimeout(tm); }
+}
+function audioTest(src, ms) {   // 声音能不能加载出来（能开始播放的程度）
+  return new Promise(res => {
+    const a = $('aud'); let done = false; const t0 = performance.now();
+    const fin = (ok, why) => { if (done) return; done = true; clearTimeout(tm); res({ ok, why, ms: Math.round(performance.now() - t0) }); };
+    const tm = setTimeout(() => fin(false, '超时'), ms);
+    a.oncanplay = () => fin(true); a.onloadedmetadata = () => fin(true); a.onerror = () => fin(false, '加载失败');
+    a.preload = 'auto'; a.src = src; a.hidden = false; try { a.load(); } catch (e) { fin(false, '加载失败'); }
+  });
+}
+async function testAudius() {
+  const st = $('aud-st');
+  setSt(st, null, '测试中…'); $('aud-t').textContent = '正在找一首歌…';
+  let host = '';
+  try { const r = await jget('https://api.audius.co/', 8000); if (r && Array.isArray(r.data) && r.data.length) host = r.data[0]; } catch (e) {}
+  if (!host) host = 'https://discoveryprovider.audius.co';
+  try {
+    const j = await jget(host + '/v1/tracks/trending?app_name=Chatter&limit=5', 10000);
+    const tr = j && j.data && j.data[0]; if (!tr) throw new Error('没拿到歌');
+    $('aud-t').textContent = tr.title + ' — ' + ((tr.user && tr.user.name) || '');
+    $('aud-s').textContent = '来自 ' + host.replace(/^https?:\/\//, '');
+    const r = await audioTest(host + '/v1/tracks/' + tr.id + '/stream?app_name=Chatter', 15000);
+    results.audius = r.ok ? '能加载（' + r.ms + ' 毫秒）' : '歌单能拿到，但声音' + r.why;
+    setSt(st, r.ok, r.ok ? '能加载 ' + r.ms + 'ms' : '声音' + r.why);
+    $('aud-n').hidden = !r.ok;
+  } catch (e) {
+    results.audius = '拿不到歌单（' + (e && e.message || e) + '）';
+    setSt(st, false, '拿不到歌单'); $('aud-t').textContent = '没能取到歌';
+  }
+}
+$('go').onclick = async () => {
+  $('go').disabled = true; $('go').textContent = '测试中…'; $('copy').disabled = true;
+  await Promise.all(HOSTS.map(async (h, i) => {
+    const el = $('h' + i); setSt(el, null, '测试中…');
+    const r = await probe(h[2], 10000);
+    results[h[0]] = r.ok ? '通（' + r.ms + ' 毫秒）' : '不通（' + r.why + '）';
+    setSt(el, r.ok, r.ok ? '通 ' + r.ms + 'ms' : '不通·' + r.why);
+  }));
+  await testAudius();
+  $('go').disabled = false; $('go').textContent = '再测一次'; $('copy').disabled = false;
+};
+$('copy').onclick = async () => {
+  const txt = '音乐来源测试结果（' + new Date().toLocaleString('zh-CN') + '，' + (navigator.userAgent.includes('iPhone') ? 'iPhone' : '其他设备') + '）\n' +
+    Object.entries(results).map(([k, v]) => k + '：' + v).join('\n');
+  try { await navigator.clipboard.writeText(txt); $('copy').textContent = '已复制，发给 Claude 就行'; }
+  catch (e) { prompt('复制下面的文字发给 Claude：', txt); }
+};
+</script>
+</body>
+</html>
