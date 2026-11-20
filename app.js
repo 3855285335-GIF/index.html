@@ -1015,7 +1015,7 @@ function msgHTML(m) {
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
     case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
-    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '" data-links="' + esc(glGids(pq.text).length ? pq.text : '') + '">' + qh + mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m)) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
+    default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '" data-links="' + esc(glGids(pq.text).length ? pq.text : '') + '">' + qh + (m.body === NAV_INVITE_TEXT && NAV_UUID.test(m.id) ? navInviteButton(m.id) : mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m))) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
   // 对方选过的气泡颜色：用他自己的颜色显示（本地没同步到就保持默认）
   if (!mine && m.type === 'text') {
@@ -2091,6 +2091,7 @@ async function warmConvs() {   // 启动后先把最近几个会话的消息拉�
 }
 async function openConv(key, peer) {
   if (!S.me) return;
+  closeNavigation(false);
   const generation = ++chatGeneration;
   cancelMediaPreviews();
   olderCursor = null; S.loadingOlder = false;
@@ -2183,6 +2184,7 @@ async function openConv(key, peer) {
 }
 let lastChat = null;   // 刚关掉的聊天（“前进”手势用）
 function closeChat() {
+  closeNavigation(false);
   ++chatGeneration; cancelMediaPreviews(); olderCursor = null; S.loadingOlder = false;
   const generation = accountGeneration;
   if (S.conv) lastChat = { key: S.conv, peer: S.peer };
@@ -2944,6 +2946,7 @@ async function onInvite(p) {
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   musicPause();   // 来电：音乐先停（铃声和通话不跟音乐叠在一起）
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
+  navPanel?.frame.contentWindow?.pauseChatterNavigation?.();
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
   closeNotes(t => t === 'c:' + p.from);
@@ -3520,6 +3523,9 @@ function startTimers() {
   }, 3000);
 }
 function teardown() {
+  closeNavigation(false);
+  navTrips.clear(); navEnds.clear();
+  const outgoingUid = S.uid;
   ++accountGeneration; ++chatGeneration; ++friendSearchSequence;
   iceConfigRequest = null;
   clearTimeout(searchT); clearTimeout(saveMT); clearTimeout(csT);
@@ -3559,7 +3565,7 @@ function teardown() {
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
-  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
+  if (outgoingUid) return idbClear(outgoingUid);
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -3601,8 +3607,8 @@ async function start(user) {
   later(loadFriendBgs, 1200);
 }
 async function onAuth(ev, session) {
-  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
-  if (S.uid && S.uid !== session.user.id) teardown();
+  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { forgetBrowserData(S.uid); teardown(); showAuth(); $('login-pass').value = ''; } return; }
+  if (S.uid && S.uid !== session.user.id) { forgetBrowserData(S.uid); teardown(); }
   S.token = session.access_token;
   if (ev === 'TOKEN_REFRESHED' && S.started) { try { sb.realtime.setAuth(session.access_token); } catch (e) {} return; }
   if (S.started && S.uid === session.user.id) return;
@@ -6217,18 +6223,38 @@ function onConvChange(row) {
   } catch (e) {}
 }
 let logoutPending = false;
+// 搜索模块可能尚未加载。退出时也要按原账号清理旧版留下的离线文章。
+function forgetBrowserData(uid) {
+  if (!uid) return Promise.resolve();
+  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos', 'ch2wsFrm', 'ch2wsTabs', 'ch2muNow', 'ch2muRecent']) LS.del(key + ':' + uid);
+  if (!window.indexedDB) return Promise.resolve();
+  return new Promise(resolve => {
+    const req = indexedDB.open('chatter-ws');
+    req.onupgradeneeded = () => req.transaction.abort(); // 从未用过浏览器，无需创建空库
+    req.onerror = () => resolve();
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction('art', 'readwrite');
+        tx.objectStore('art').delete(IDBKeyRange.bound(uid + '|', uid + '}', false, true));
+        tx.oncomplete = tx.onabort = tx.onerror = () => { db.close(); resolve(); };
+      } catch (e) { db.close(); resolve(); }
+    };
+  }).catch(e => logErr('清理浏览器数据', e));
+}
 async function logout() {
   if (logoutPending) return;
   logoutPending = true;
   const generation = accountGeneration;
   try { await pushLogout(); } catch (e) {}
   if (generation !== accountGeneration) { logoutPending = false; return; }
-  teardown();
+  const cleanup = forgetBrowserData(S.uid);
+  const messageCleanup = teardown();
   showAuth();
   try { Object.keys(localStorage).forEach(k => {
+    if (/^ch2ws(?:Hist|Seen|Pos)?:/.test(k)) return; // 本账号已单独清理
     if (k.startsWith('ch2') && !/^ch2(?:theme|font|lib4:|lastV|imgq|ice)/.test(k)) localStorage.removeItem(k);
   }); } catch (e) {}
-  try { if (window.indexedDB) indexedDB.deleteDatabase('chatter-ws'); } catch (e) {}   // 网页浏览在手机里存的文章（收藏离线看的）也一起删
   // GoTrue may leave a local token after a network failure during sign-out.
   const afterTeardown = accountGeneration;
   try {
@@ -6241,6 +6267,7 @@ async function logout() {
       try { localStorage.removeItem('sb-' + AUTH_KEY_REF + '-auth-token'); } catch (x) {}
     }
   }
+  await Promise.all([cleanup, messageCleanup]);
   if (!S.uid) location.reload();
   else logoutPending = false;
 }
@@ -6447,6 +6474,8 @@ function convActs(it) {
 /* ---- 文字里的网址变成可以点的链接 ---- */
 const URL_RE = /(https?:\/\/[^\s<>"'，。！？、；：（）【】《》「」]+|www\.[a-z0-9-]+\.[^\s<>"'，。！？、；：（）【】《》「」]+)/gi;
 function linkify(t) {
+  const invitation = /^邀请你一起导航 · ([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.exec(t);
+  if (invitation) return navInviteButton(invitation[1]);
   t = String(t == null ? '' : t); let out = '', last = 0;
   String(t).replace(URL_RE, (m, g, off) => {
     const u = m.replace(/[.,!?;:)\]}>]+$/, ''); if (!u) return m;
@@ -6880,7 +6909,8 @@ function restoreMusicLater() {   // 上次听过歌：打开 App 一会儿后在
 /* ---- 应用页（底部菜单的“应用”）：小组件 + 图标格子。以后加导航、今天去哪：在 APPS 里加一项，要小组件就在 appsWidgets 里加 ---- */
 const APPS = [
   { id: 'search', name: '搜索', ic: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', open: function () { openWS(); } },
-  { id: 'music', name: '音乐', ic: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>', open: function () { openMusic(); } }
+  { id: 'music', name: '音乐', ic: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>', open: function () { openMusic(); } },
+  { id: 'map', name: '导航', ic: '<circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5z"/>', open: function () { openNavigation(null); } }
 ];
 const APIC = {
   play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>',
@@ -6909,6 +6939,12 @@ function appsWidgets() {   // 小组件：搜索（大）、音乐、接着看
       '<button type="button" data-app="music-next" aria-label="下一首">' + apIc(APIC.next, 20) + '</button></div></div>'
     : '<div class="apx mu' + (last ? '' : ' wide') + '" data-app="music" role="button"><div class="apx-h">' + apIc(APPS[1].ic, 18) + '音乐</div><span class="apx-art">' + apIc(APPS[1].ic, 26) + '</span><b>听点什么</b><small>免费的独立音乐</small></div>';
   h += mu;
+  navTripsLoad();
+  for (const [peer, item] of navTrips) {
+    if (item.uid !== S.uid || item.until <= Date.now() || !S.friends.includes(peer)) { navTrips.delete(peer); navTripsSave(); continue; }
+    h += '<button type="button" class="apx wide" data-app="resume-map" data-peer="' + esc(peer) +
+      '"><b>返回同行地图</b><small>' + esc(peerName(peer)) + '</small></button>';
+  }
   if (last) h += '<div class="apx" data-app="last" role="button"><div class="apx-h">' + apIc(APIC.page, 18) + '接着看</div><span class="apx-art">' + esc(((apHost(last.u)[0]) || '?').toUpperCase()) + '</span>' +
     '<b>' + esc(last.t || apHost(last.u)) + '</b><small>' + esc(apHost(last.u)) + '</small></div>';
   return h + '</div>';
@@ -6924,6 +6960,12 @@ function appsInit() {   // 应用页的点击：只绑一次
   box.addEventListener('click', function (e) {
     const b = e.target.closest('[data-app]'); if (!b) return;
     const id = b.dataset.app;
+    if (id === 'resume-map') {
+      const peer = b.dataset.peer, item = navTrips.get(peer);
+      if (item && item.uid === S.uid && item.until > Date.now() && S.friends.includes(peer)) openNavigation(peer, item.id, true);
+      else renderApps();
+      return;
+    }
     if (id === 'music-pp') { e.stopPropagation(); if (window.ChatterMusic) window.ChatterMusic.toggle(); return; }
     if (id === 'music-next') { e.stopPropagation(); if (window.ChatterMusic) window.ChatterMusic.next(); return; }
     if (id === 'music-now') { if (window.ChatterMusic) window.ChatterMusic.open('now'); return; }
@@ -7334,6 +7376,105 @@ async function authTry(fn) {   // 登录/注册遇到网络问题自动再试两
   }
   return r;
 }
+// 同源导航面板只取得当前聊天的同行接口；目的地链接可单独打开。
+const NAV_INVITE_TEXT = '邀请你一起导航，点此查看会合地图。';
+const NAV_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+function navInviteButton(id) { return '<button type="button" data-nav-invite="' + esc(id) + '">查看同行邀请</button>'; }
+const navTrips = new Map(); // 可以返回的同行：好友、行程编号、到期时间（不存位置）。也记在手机里：iPhone 在后台把 App 关掉以后，重开还能从应用页回到同行地图
+function navTripsSave() { try { const a = []; for (const [peer, x] of navTrips) if (x.uid === S.uid) a.push([peer, x.id, x.until]); if (S.uid) LS.set('ch2navTrips:' + S.uid, a); } catch (e) {} }
+function navTripsLoad() {
+  if (navTrips.size || !S.uid) return;
+  try { (LS.get('ch2navTrips:' + S.uid, []) || []).forEach(function (x) { if (Array.isArray(x) && x[2] > Date.now()) navTrips.set(String(x[0]), { uid: S.uid, id: String(x[1]), until: +x[2] }); }); } catch (e) {}
+}
+const navEnds = new Map();
+async function retryNavEnd(peer) {
+  const attempt = navEnds.get(peer);
+  if (!attempt || attempt.uid !== S.uid) return;
+  if (!attempt.request) {
+    attempt.request = Promise.resolve(sb.rpc('chatter_navigation',{p_peer:peer,p_action:'end',p_id:attempt.id})).then(result => {
+      if (result.error) throw result.error;
+      if (navEnds.get(peer) === attempt) {
+        navEnds.delete(peer);
+        if (navTrips.get(peer)?.id === attempt.id) { navTrips.delete(peer); navTripsSave(); }
+        if ($('tab-apps')?.classList.contains('active')) renderApps();
+      }
+    }).finally(() => { attempt.request = null; });
+  }
+  await attempt.request;
+}
+window.addEventListener('online', () => {
+  for (const peer of navEnds.keys()) retryNavEnd(peer).catch(error => logErr('待联网结束同行',error));
+});
+let navPanel = null;
+function closeNavigation(pop = true) {
+  const n = navPanel;
+  if (!n) return;
+  if (pop && history.state?.navigation) {
+    if (!n.closing) { n.closing=true; history.back(); }
+    return;
+  }
+  n.frame.contentWindow?.stopChatterNavigation?.();
+  navPanel = null; n.dialog.remove();
+  if ($('tab-apps')?.classList.contains('active')) renderApps();
+  if (n.opener?.isConnected) n.opener.focus();
+}
+function openNavigation(peer, invitation, fromApps = false) {
+  if (navPanel) return;
+  const dialog = document.createElement('div'), frame = document.createElement('iframe');
+  dialog.setAttribute('role','dialog');
+  dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
+  frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
+  navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,fromApps,id:null,opener:document.activeElement,notified:null};
+  frame.src='navigation.html?v=' + (APP_V || '0');   // 和 app.js 同一个版本号：发新版时导航页一起更新
+  document.body.append(dialog); frame.focus();
+  history.pushState({navigation:true},'');
+}
+window.getChatterNavigation = function (sender) {
+  const n = navPanel;
+  if (!n || n.frame.contentWindow!==sender) return null;
+  const current = () => navPanel===n && n.uid===S.uid && (!n.peer || n.fromApps || (n.chat===S.conv && n.peer===S.peer));
+  const style = getComputedStyle(document.body);
+  return {peer:n.peer, fromApps:n.fromApps, peerLabel:n.peer && peerName(n.peer), me:ME(), invitation:n.invitation, font:style.fontFamily, appearance:document.documentElement.dataset.theme,
+    theme:Object.fromEntries(Object.entries({'--paper':'--bg','--surface':'--surface','--ink':'--ink','--muted':'--muted','--line':'--line','--accent':'--accent'}).map(([key,src])=>[key,style.getPropertyValue(src)])),
+    beforeSound:() => {
+      if (!current() || S.incoming || S.call || GC.on || rec.state !== 'idle') return false;
+      musicPause(); return true;
+    },
+    close:() => { if (current()) closeNavigation(); },
+    async getServices(signal) {
+      if (!current()) return null;
+      const result = await sb.from('app_config').select('value').eq('key','navigation').abortSignal(signal).maybeSingle();
+      return current() && !result.error ? result.data?.value : null;
+    },
+    remember(value) {
+      if (!current() || !n.peer) return;
+      if (value) {
+        const remaining = Date.parse(value.expires) - (value.serverTime || Date.now());
+        navTrips.set(n.peer, {uid:n.uid, id:value.id, until:Date.now()+remaining}); navTripsSave();
+      } else if (!n.invitation || navTrips.get(n.peer)?.id === n.invitation) { navTrips.delete(n.peer); navTripsSave(); }
+    },
+    async rpc(action,id,value) {
+      if (!current() || !n.peer || !S.friends.includes(n.peer)) throw new Error('好友或登录状态已变化');
+      if (action === 'end' && n.id === id) {
+        if (!navEnds.has(n.peer)) navEnds.set(n.peer, {uid:n.uid,id});
+        await retryNavEnd(n.peer);
+        return null;
+      }
+      if (navEnds.has(n.peer)) await retryNavEnd(n.peer);
+      if (!current()) throw new Error('已离开原聊天');
+      const result = await sb.rpc('chatter_navigation',{p_peer:n.peer,p_action:action,p_id:id||null,p_value:value||null});
+      if (!current()) throw new Error('已离开原聊天');
+      if (result.error) throw result.error;
+      n.id=result.data?.id||null;
+      return result.data;
+    },
+    notify(id) {
+      if (!current() || n.fromApps || n.id!==id || n.notified===id || !canSendHere()) return;
+      n.notified=id; addLocal(newMsg('text',NAV_INVITE_TEXT,null,{ id }));
+    }
+  };
+};
+
 function bindUI() {
   /* 登录 / 注册 */
   $('tab-login').onclick = () => { $('tab-login').classList.add('active'); $('tab-register').classList.remove('active'); $('login-form').style.display = ''; $('register-form').style.display = 'none'; msgAuth(''); };
@@ -7450,6 +7591,7 @@ function bindUI() {
     document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
   })();
   window.addEventListener('popstate', (e) => {
+    if (navPanel) { closeNavigation(false); return; }
     if (S.call) { armGuard(); return; }   // 通话界面不让滑走
     if (window.ChatterSearch && window.ChatterSearch.onPop(e)) return;   // 搜索里：退一层（结果页 → 首页 → 关掉）
     if (window.ChatterMusic && window.ChatterMusic.onPop(e)) return;     // 音乐里：退一层（正在播放 → 列表 → 首页 → 关掉）
@@ -7462,6 +7604,8 @@ function bindUI() {
   });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
+    const nav = e.target.closest('[data-nav-invite]');
+    if (nav && S.peer && !isGroupKey(S.conv)) { openNavigation(S.peer,nav.dataset.navInvite); return; }
     const rt = e.target.closest('.gl-retry');
     if (rt) {   // 点“重试”：只把这个群的卡片改回加载中再取一次，不整页重绘（以前会把翻历史的人拽回底部）
       const gid = rt.dataset.gid; delete GL.fail[gid]; delete GL.busy[gid];
@@ -7573,7 +7717,7 @@ function bindUI() {
       ]);
       return;
     }
-    openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
+    openActs('聊天选项', [{ label:'一起导航', fn:() => openNavigation(S.peer) }, { label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
   };
   $('cs-close').onclick = closeSearch;
   $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
@@ -8297,7 +8441,7 @@ function boot() {
   try { verBoot(); } catch (e) {}
   window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, clearConv, renderList, renderRequests, renderApps, msgCacheClear, menuAct: (id, k) => { menuId = id; menuAction(k); }, momentsLoad, openVisPicker, applyVis, loadRemarks, setMomentPerm, openMomentPerm, postMoment, openMomentCompose, momentVisText, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { onInvite, get sb() { return sb; }, clearConv, renderList, renderRequests, renderApps, msgCacheClear, menuAct: (id, k) => { menuId = id; menuAction(k); }, momentsLoad, openVisPicker, applyVis, loadRemarks, setMomentPerm, openMomentPerm, postMoment, openMomentCompose, momentVisText, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
 document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { retryBadImgs(); } catch (e) {} } });
 // 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）

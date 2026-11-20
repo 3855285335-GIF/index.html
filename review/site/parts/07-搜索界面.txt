@@ -613,11 +613,9 @@ function officialOf(c) {   // 这次搜索的官网：先看维基数据给的�
   }
   return null;
 }
-function isOff(u, c, off) {   // 这条结果是不是官网
-  const hs = host(u), h = bare(hs); if (!h) return false;
-  if (off && (h === off.h || h.endsWith('.' + off.h))) return true;
-  const toks = String(c.q || '').toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || [];   // 搜 supabase、github copilot：supabase.com、github.com 就是官网
-  return toks.indexOf(mainLabel(h)) >= 0 && /^[^.]+\.(com|cn|com\.cn|net|org|io|dev|app|ai|co)$/.test(h);
+function isOff(u, off) {
+  const h = bare(host(u));
+  return !!(off && h && (h === off.h || h.endsWith('.' + off.h)));
 }
 function arrange(items) {   // 按你的规则：官网排第一，不看的网站去掉，营销号去掉，置顶的排前面，干净的往前挪 3 位
   let farms = 0; const out = [], c = W.cur, off = officialOf(c);
@@ -626,7 +624,7 @@ function arrange(items) {   // 按你的规则：官网排第一，不看的网�
     if (hit(it.u, P.block)) return;
     const farm = hit(it.u, CFG.farms);
     if (farm && P.hideFarms && !W.showFarms) { farms++; return; }
-    const pin = hit(it.u, P.pin), clean = !!P.clean && hit(it.u, CFG.clean), offi = !!c && isOff(it.u, c, off);
+    const pin = hit(it.u, P.pin), clean = !!P.clean && hit(it.u, CFG.clean), offi = !!c && isOff(it.u, off);
     out.push({ it: it, i: i, pin: pin, clean: clean, farm: farm, off: offi, score: i - (offi ? 100000 : 0) - (pin ? 1000 : 0) - (clean ? 3 : 0) });
   });
   out.sort((a, b) => a.score - b.score || a.i - b.i);

@@ -3,7 +3,7 @@
    2) 加速打开：带版本号的程序文件（app.js?v=…）和依赖库存在手机里，第二次打开不用再下载；
       页面本身先联网取，2.5 秒取不到才用手机里存的（所以新版本照样第一次打开就生效，网不好时也能秒开）；
    3) 聊天和朋友圈的图片存在手机里（最多 300 张），看过的图再打开不用重新下载。 */
-const SW_BUILD = '4.2';
+const SW_BUILD = '4.3';
 const SHELL = 'chatter-shell-v1', IMG = 'chatter-img-v1', IMG_MAX = 300;
 const IMG_PREFIX = 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/';
 
@@ -66,8 +66,8 @@ async function pageFirst(net, cache, key, u) {
   } finally { clearTimeout(timer); }
 }
 async function keepFirst(req) {   // 带版本号的文件内容不会变：有就直接用
-  const c = await caches.open(SHELL);
-  const hit = await c.match(req);
+  let c, hit;
+  try { c = await caches.open(SHELL); hit = await c.match(req); } catch { return fetch(req); }
   if (hit) return hit;
   const r = await fetch(req);
   if (r && r.ok) { try { await c.put(req, r.clone()); } catch (x) {} }
@@ -75,9 +75,9 @@ async function keepFirst(req) {   // 带版本号的文件内容不会变：有�
 }
 let imgPuts = 0;
 async function imgFirst(req) {
-  const c = await caches.open(IMG);
+  let c, hit;
   const key = req.url.replace(/[?&]r=\d+$/, '');
-  const hit = await c.match(key);
+  try { c = await caches.open(IMG); hit = await c.match(key); } catch { return fetch(req); }
   if (hit) return hit;
   let r;
   try { r = await fetch(req.url, { mode: 'cors', credentials: 'omit' }); }
@@ -129,7 +129,12 @@ async function openUrl(u) {
     if (dest.origin === scope.origin && (dest.pathname === scope.pathname || dest.pathname === scope.pathname + 'index.html') && !dest.search) url = dest.href;
   } catch (x) {}
   const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const c = list.find(x => x.url.indexOf(scope.href) === 0);
+  const c = list.find(client => {
+    try {
+      const page = new URL(client.url);
+      return page.origin === scope.origin && (page.pathname === scope.pathname || page.pathname === scope.pathname + 'index.html');
+    } catch { return false; }
+  });
   if (c) {   // App 已经开着（可能在后台）：切到前台，让它自己打开那个聊天
     try { c.postMessage({ t: 'open', url }); } catch (x) {}
     try { await c.focus(); } catch (x) {}

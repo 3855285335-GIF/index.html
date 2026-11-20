@@ -856,7 +856,7 @@ test('应用页：底部菜单的“应用”是小组件 + 图标格子；点�
     const tab = env.$('tab-apps');
     ok(tab.classList.contains('active'), '点“应用”没打开应用页');
     const names = Array.from(tab.querySelectorAll('.ap-ic')).map(x => x.textContent.trim());
-    ok(names.join(',') === '搜索,音乐' && tab.querySelector('.apx.wide[data-app="search"]') && /听点什么/.test(tab.querySelector('[data-app="music"]').textContent) && !tab.querySelector('[data-app="last"]'), '应用页：搜索小组件（大）、音乐小组件、图标“搜索、音乐”；没看过网页时不显示“接着看”：' + names.join(','));
+    ok(names.join(',') === '搜索,音乐,导航' && tab.querySelector('.apx.wide[data-app="search"]') && /听点什么/.test(tab.querySelector('[data-app="music"]').textContent) && !tab.querySelector('[data-app="last"]'), '应用页：搜索小组件（大）、音乐小组件、图标“搜索、音乐、导航”；没看过网页时不显示“接着看”：' + names.join(','));
     w.localStorage.setItem('ch2wsSeen:' + env.T.S.uid, JSON.stringify([{ u: 'https://news.example.com/a', t: '一篇新闻', m: 'web', c: 1 }, { u: 'https://news.example.com/b', t: '另一篇', m: 'web', c: 2 }, { u: 'https://wiki.example.org/x', t: '词条', m: 'read', c: 1 }]));
     click(env, d.querySelector('.app-nav button[data-tab="convs"]')); click(env, d.querySelector('.app-nav button[data-tab="apps"]')); await sleep(30);
     ok(/接着看[\s\S]*一篇新闻/.test(tab.querySelector('[data-app="last"]').textContent) && Array.from(tab.querySelectorAll('[data-app="site"]')).map(x => x.dataset.u).join(',') === 'https://news.example.com/,https://wiki.example.org/', '看过网页以后：“接着看”是上次看的那页，搜索小组件下面是常去的网站');
@@ -1082,6 +1082,38 @@ test('朋友圈权限：数据库还没更新时，旧功能照常，“不给�
     ok(env.T.MO.list.length === 1, '数据库没更新时朋友圈照常显示');
     env.T.openMomentPerm('bob'); env.$('as-items').querySelector('button[data-i="0"]').click(); await sleep(30);
     ok(env.toasts.some(x => /先运行 11-19 的数据库更新/.test(x)), '朋友圈权限没说明要先更新数据库');
+  } finally { env.close(); }
+});
+
+test('退出登录会清除本账号的离线文章和浏览记录，保留另一账号', async () => {
+  const env = makeEnv({ db: baseDb(Date.now()) });
+  try {
+    await env.login();
+    const me = env.T.S.uid, other = 'other-account';
+    const db = await new Promise((resolve, reject) => {
+      const q = env.w.indexedDB.open('chatter-ws', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('art', {keyPath:'k'}).createIndex('tm','tm');
+      q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error);
+    });
+    try {
+      const key = u => u + '||https://sample.test/article';
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('art','readwrite');
+        for (const uid of [me,other]) {
+          tx.objectStore('art').put({k:key(uid),uid,tm:1});
+          for (const prefix of ['ch2wsSeen','ch2wsFrm','ch2wsTabs','ch2muNow','ch2muRecent','ch2muLike','ch2mute'])
+            env.w.localStorage.setItem(prefix+':'+uid,'[]');
+        }
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      await env.T.onAuth('SIGNED_OUT', null);
+      const readKeys = () => new Promise(resolve => { const q=db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess=() => resolve(q.result); });
+      for (let attempt=0; attempt<25 && (await readKeys()).includes(key(me)); attempt++) await sleep(20);
+      ok((await readKeys()).join() === key(other), '离线文章清理的账号范围错误');
+      for (const prefix of ['ch2wsSeen','ch2wsFrm','ch2wsTabs','ch2muNow','ch2muRecent'])
+        ok(env.w.localStorage.getItem(prefix+':'+me) === null && env.w.localStorage.getItem(prefix+':'+other) === '[]', prefix+' 清理的账号范围错误');
+      for (const prefix of ['ch2muLike','ch2mute']) ok(env.w.localStorage.getItem(prefix+':'+me) === '[]', '应保留本账号的收藏和设置');
+    } finally { db.close(); }
   } finally { env.close(); }
 });
 
