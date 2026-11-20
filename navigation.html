@@ -1,136 +1,82 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
-    />
-    <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <title>导航 · Chatter</title>
-    <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
-    <link rel="stylesheet" href="navigation.css?v=20261120f" />
-    <script defer src="vendor/leaflet/leaflet.js"></script>
-    <script defer src="navigation.js?v=20261120f"></script>
-  </head>
-  <body>
-    <main>
-      <header>
-        <button id="back" hidden>返回聊天</button>
-        <h1>导航</h1>
-      </header>
-      <section>
-        <form id="search">
-          <label for="query">目的地或具体入口</label>
-          <div class="row">
-            <input
-              id="query"
-              type="search"
-              placeholder="城市、地名、门牌或入口"
-              maxlength="150"
-              required
-            /><button>搜索</button>
-          </div>
-        </form>
-        <p id="search-status" role="status"></p>
-        <div id="results"></div>
-        <button id="nearby" type="button">在我附近的地图上选入口</button>
-        <a id="amap-search" hidden target="_blank" rel="noopener noreferrer">去高德搜索这个地名</a>
-        <details id="manual">
-          <summary>输入已知的 GPS 坐标</summary>
-          <form id="coords">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <title>导航 · Chatter</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="navigation.css?v=20261120g" />
+  <script defer src="vendor/leaflet/leaflet.js"></script>
+  <script defer src="vendor/natural-earth-110m.js"></script>
+  <script defer src="navigation.js?v=20261120g"></script>
+</head>
+<body>
+  <header class="mast"><div class="mast-inner">
+    <span class="compass" aria-hidden="true"></span><span class="brand" lang="en">Chatter</span>
+    <h1>导航</h1><button id="back" hidden>返回聊天</button>
+  </div></header>
+  <main>
+    <section id="destination-search" class="card" aria-labelledby="search-title">
+      <h2 id="search-title">你想去哪里？</h2>
+      <form id="search" role="search">
+        <label for="query" class="sr">搜索目的地</label>
+        <div class="search-box"><i class="icon search-icon" aria-hidden="true"></i><input id="query" type="search" placeholder="搜索城市、地名或入口" maxlength="150" required enterkeyhint="search" /><button class="solid">搜索</button></div>
+      </form>
+      <p id="search-status" role="status"></p><div id="results"></div>
+      <a id="amap-search" hidden target="_blank" rel="noopener noreferrer">用高德搜索这个地名</a>
+      <div class="entry-options">
+        <button id="nearby" type="button"><i class="icon locate-icon" aria-hidden="true"></i>在我附近选点</button>
+        <details id="manual"><summary><i class="icon coord-icon" aria-hidden="true">⌗</i>输入坐标</summary>
+          <form id="coords" class="inset">
             <label>地点名称<input id="place-name" maxlength="120" required /></label>
-            <div class="row">
-              <label
-                >纬度（南北）<input
-                  id="lat"
-                  type="number"
-                  min="-90"
-                  max="90"
-                  step="any"
-                  placeholder="例如 31.23"
-                  required /></label
-              ><label
-                >经度（东西）<input
-                  id="lon"
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="any"
-                  placeholder="例如 121.47"
-                  required
-              /></label>
-            </div>
-            <small>只接受 WGS84 原始坐标。高德、百度地图上复制的数值可能使用其他坐标系。</small
-            ><button>核对地点</button>
+            <div class="pair"><label>纬度<input id="lat" type="number" min="-90" max="90" step="any" placeholder="例如 31.23" required /></label>
+            <label>经度<input id="lon" type="number" min="-180" max="180" step="any" placeholder="例如 121.47" required /></label></div>
+            <small>使用 GPS 原始坐标（WGS84）。高德、百度显示的坐标可能有偏移。</small><button class="solid">核对地点</button>
           </form>
         </details>
-      </section>
-      <section id="confirmed" hidden>
-        <h2 id="dest-name"></h2>
-        <p id="dest-info"></p>
-        <div class="row">
-          <a class="primary" id="route" target="_blank" rel="noopener noreferrer">在高德核对地点并规划路线</a
-          ><button id="copy">复制地点链接</button>
-        </div>
-        <details id="plan">
-          <summary>在 Chatter 内规划路线</summary>
-          <label
-            >出行方式<select id="mode">
-              <option value="foot">步行</option>
-              <option value="bike">骑行</option>
-              <option value="car">驾车</option>
-            </select></label
-          ><label
-            >起点<select id="start-source">
-              <option value="gps">本次设备定位</option>
-              <option value="manual">手填 WGS84 起点</option>
-            </select></label
-          >
-          <div id="from-fields" hidden>
-            <label>起点纬度<input id="from-lat" type="number" min="-90" max="90" step="any" /></label
-            ><label>起点经度<input id="from-lon" type="number" min="-180" max="180" step="any" /></label>
+      </div>
+      <p id="nearby-status" role="status"></p>
+    </section>
+    <section id="confirmed" class="card" hidden aria-labelledby="dest-name">
+      <div class="section-head"><span class="kicker">已选目的地</span><button id="replace" class="subtle">更换地点</button></div>
+      <h2 id="dest-name" tabindex="-1"></h2><p id="dest-info"></p>
+      <details id="coordinates"><summary>查看 GPS 坐标</summary><p id="dest-coords"></p></details>
+      <details id="plan" open><summary>规划路线</summary>
+        <fieldset><legend>出行方式</legend>
+          <div class="modes" id="mode">
+            <label><input type="radio" name="mode" value="foot" checked /><span>步行</span></label>
+            <label><input type="radio" name="mode" value="bike" /><span>骑行</span></label>
+            <label><input type="radio" name="mode" value="car" /><span>驾车</span></label>
           </div>
-          <p>
-            计算时将起终点发送给 FOSSGIS 路线服务。<a
-              href="https://routing.openstreetmap.de/about.html"
-              target="_blank"
-              rel="noopener"
-              >路线来源与署名</a
-            >
-            · © OpenStreetMap 贡献者 · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">纠正地图数据</a>
-          </p>
-          <button id="plan-go">计算路线</button>
-          <p id="plan-status" role="status"></p>
-        </details>
-      </section>
-      <section id="map-section" hidden>
-        <div id="map" aria-label="会合地图"></div>
-        <p id="map-status" role="status"></p>
-        <button id="pick" hidden>在图上重新选点</button> <button id="recenter">显示全部位置</button>
-      </section>
-      <section id="together" hidden>
-        <h2 id="trip-title">一起导航</h2>
-        <p id="trip-status" role="status"></p>
-        <div class="row">
-          <button id="invite" hidden>邀请同行 · 30 分钟</button><button id="accept" hidden>接受邀请</button
-          ><button id="share" hidden>共享我的实时位置</button><button id="end" hidden>结束本次同行</button>
-        </div>
-        <div id="meeting" hidden>
-          <label
-            >我等在哪个入口或楼层<input
-              id="wait-note"
-              maxlength="80"
-              placeholder="例如：东门蓝色售票亭旁" /></label
-          ><button id="wait-here">固定我的等候点</button> <button id="change">提议更换会合点</button>
-          <p id="wait-info"></p>
-          <p id="proposal"></p>
-          <button id="agree" hidden>同意更换会合点</button>
-        </div>
-        <p id="gps" role="status"></p>
-        <p id="other"></p>
-      </section>
-      <p id="notice" role="status"></p>
-    </main>
-  </body>
+        </fieldset>
+        <label class="source">出发地<select id="start-source"><option value="gps">我的当前位置</option><option value="manual">手填 GPS 起点</option></select></label>
+        <div id="from-fields" class="pair" hidden><label>起点纬度<input id="from-lat" type="number" min="-90" max="90" step="any" /></label>
+        <label>起点经度<input id="from-lon" type="number" min="-180" max="180" step="any" /></label></div>
+        <button id="plan-go" class="solid">计算步行路线</button><p id="plan-status" class="feedback" role="status"></p>
+        <small class="credit">算路时会把起终点发给 <a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">FOSSGIS</a>。地图数据 © OpenStreetMap 贡献者 · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">纠正地图数据</a></small>
+      </details>
+      <div class="secondary"><button id="copy">复制地点链接</button><a id="route" target="_blank" rel="noopener noreferrer">在高德查看</a></div>
+      <p id="copy-status" role="status"></p>
+    </section>
+    <section id="map-section" class="card map-card" aria-labelledby="map-title">
+      <div class="map-head"><div><h2 id="map-title">地图总览</h2><p id="map-caption">拖动或放大地图，查看不同地点。</p></div><span class="north" aria-label="地图上方为北">N</span></div>
+      <div id="map" aria-label="交互地图" role="region"></div>
+      <div class="map-foot"><button id="pick">在图上选点</button><button id="recenter" hidden>显示全部位置</button>
+      <p id="map-status" role="status"></p></div>
+    </section>
+    <section id="together" class="card" hidden aria-labelledby="trip-title">
+      <h2 id="trip-title">一起导航</h2><p id="trip-status" role="status"></p>
+      <div class="actions"><button id="invite" class="solid" hidden>邀请好友同行 · 30 分钟</button><button id="accept" class="solid" hidden>接受邀请</button><button id="share" class="solid" hidden>共享我的实时位置</button></div>
+      <div id="people" hidden><p id="gps" role="status"></p><p id="other"></p><p id="separation"></p></div>
+      <div id="meeting" hidden>
+        <label>我在哪儿等<input id="wait-note" maxlength="80" placeholder="例如：东门蓝色售票亭旁" /></label>
+        <div class="actions"><button id="wait-here">固定我的等候点</button><button id="change">提议更换会合点</button></div>
+        <p id="wait-info"></p><p id="proposal"></p><button id="agree" hidden>同意更换会合点</button>
+      </div>
+      <p id="trip-notice" role="status"></p><button id="end" class="subtle" hidden>结束本次同行</button>
+    </section>
+    <p id="notice" role="status"></p>
+  </main>
+</body>
 </html>

@@ -86,11 +86,14 @@ async function read(page, peer, id) {
     assert.equal(pending.active, false);
     assert.equal(pending.peerFix, null);
     assert.ok((await read(c, bob, pending.id)).error);
+    assert.equal(await bn.locator('#plan-go').isVisible(), false);
+    assert.equal(await bn.locator('#back').innerText(), '返回聊天');
     await bn.locator('#accept').click();
     await an.locator('#share').click();
     await bn.locator('#share').click();
     await an.locator('#other').filter({ hasText: '好友更新于' }).waitFor();
     await bn.locator('#other').filter({ hasText: '好友更新于' }).waitFor();
+    await bn.locator('#separation').filter({ hasText: '直线相距约' }).waitFor();
     const view = (await read(b, alice)).data;
     assert.equal(view.peerFix.lat, 31.21);
     assert.equal(view.peerFix.lon, 121.45);
@@ -105,6 +108,22 @@ async function read(page, peer, id) {
     await bn.locator('#agree').click();
     await an.locator('#dest-name').filter({ hasText: '南入口' }).waitFor();
     assert.equal((await read(a, bob)).data.destination.lon, 121.452);
+    const frame = b.frames().find((f) => f.url().includes('/navigation.html'));
+    const stale = await frame.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 100000;
+      document.dispatchEvent(new Event('visibilitychange'));
+      Date.now = now;
+      return {
+        distance: document.getElementById('separation').textContent,
+        other: document.getElementById('other').textContent,
+        liveMarker: !!document.querySelector('#map .nav-pin.peer[title="同行好友的位置"]')
+      };
+    });
+    assert.equal(stale.distance, '');
+    assert.match(stale.other, /最后更新/);
+    assert.equal(stale.liveMarker, false);
+    console.log('定位超过 90 秒后，好友的实时标记和两人距离同时撤下。');
     console.log('固定等候点两人均可见；换入口须对方确认，旧路线在确认前保持有效。');
     await a.context().setOffline(true);
     await a.context().setGeolocation({ latitude: 31.222, longitude: 121.463, accuracy: 18 });
@@ -121,6 +140,7 @@ async function read(page, peer, id) {
     const solo=b.frameLocator('iframe[title="导航"]');
     await solo.locator('#query').waitFor();
     assert.equal(await solo.locator('#together').isVisible(),false);
+    assert.equal(await solo.locator('#back').innerText(), '返回应用');
     await solo.locator('#back').click();await b.locator('#btn-navigation').waitFor();
     console.log('「我 → 应用 → 导航」可独立打开并返回，不向任何好友广播位置。');
     await a.close();

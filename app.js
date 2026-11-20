@@ -7276,7 +7276,7 @@ function openNavigation(peer, invitation) {
   dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
   frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
   navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,id:null,sharing:false,notified:null};
-  frame.src='navigation.html?v=20261120f';
+  frame.src='navigation.html?v=20261120g';
   document.body.append(dialog); dialog.showModal();
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeNavigation(); });
   history.pushState({navigation:true},'');
@@ -7286,7 +7286,7 @@ window.getChatterNavigation = function (sender) {
   if (!n || n.frame.contentWindow!==sender) return null;
   const current = () => navPanel===n && n.uid===S.uid && (!n.peer || (n.chat===S.conv && n.peer===S.peer));
   const style = getComputedStyle(document.body);
-  return {peer:n.peer, me:ME(), invitation:n.invitation, font:style.fontFamily,
+  return {peer:n.peer, peerLabel:n.peer && peerName(n.peer), me:ME(), invitation:n.invitation, font:style.fontFamily, appearance:document.documentElement.dataset.theme,
     theme:Object.fromEntries(Object.entries({'--paper':'--bg','--surface':'--surface','--ink':'--ink','--muted':'--muted','--line':'--line','--accent':'--accent'}).map(([key,src])=>[key,style.getPropertyValue(src)])),
     close:() => { if (current()) closeNavigation(); },
     async rpc(action,id,value) {
