@@ -38,7 +38,7 @@ window.getChatterNavigation = function () {
   return { peer: O.peer || null, peerLabel: O.peer ? '小明' : null, me: 'me', uid: 'u1', fromApps: !O.peer, invitation: O.invitation || null, font: '', appearance: O.dark ? 'dark' : 'light',
     theme: { '--accent': '#07c160' },
     close() { window.__closed = 1; },
-    async getServices() { return O.svc; },
+    async getServices() { if (O.svcDelay) await new Promise((r) => setTimeout(r, O.svcDelay)); return O.svc; },
     remember(v) { window.__remember.push(v ? v.id : null); },
     beforeSound() { return !window.__inCall; },
     notify(id) { window.__notify.push(id); },
@@ -70,7 +70,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function setup(br, o) {
   const ctx = await br.newContext({ viewport: { width: o.w || 390, height: 844 }, deviceScaleFactor: o.shot ? 2 : 1, hasTouch: true, colorScheme: o.dark ? 'dark' : 'light', geolocation: o.geo === false ? undefined : { latitude: A[0], longitude: A[1], accuracy: 8 }, permissions: o.geo === false ? [] : ['geolocation'] });
-  const log = { tiles: [], tdtSearch: 0, photon: 0, route: [], geocoder: 0, esri: 0, said: [] };
+  const log = { tiles: [], tdtSearch: 0, photon: 0, route: [], geocoder: 0, esri: 0, said: [], tdtBad: !!o.tdtBad };
   await ctx.addInitScript(() => {
     const said = [];
     window.__said = said;
@@ -79,7 +79,7 @@ async function setup(br, o) {
   });
   await ctx.route(/tianditu\.gov\.cn\/(vec|cva|img|cia)_w/, (rt) => {
     const u = rt.request().url(); log.tiles.push(/\/(\w+)_w\//.exec(u)[1]);
-    if (o.tdtBad) return rt.fulfill({ status: 403, contentType: 'application/json', body: '{"msg":"权限类型错误","resolve":"请检查您的应用类型","code":"12"}' });
+    if (log.tdtBad) return rt.fulfill({ status: 403, contentType: 'application/json', body: '{"msg":"权限类型错误","resolve":"请检查您的应用类型","code":"12"}' });
     rt.fulfill({ contentType: 'image/png', body: PNG });
   });
   await ctx.route(/api\.tianditu\.gov\.cn\/v2\/search/, (rt) => {
@@ -101,7 +101,8 @@ async function setup(br, o) {
   await ctx.route(/arcgisonline\.com/, (rt) => { log.esri++; rt.fulfill({ contentType: 'image/png', body: PNG }); });
   const pg = await ctx.newPage();
   const errs = []; pg.on('pageerror', (e) => errs.push(String(e)));
-  await pg.goto('http://127.0.0.1:8771/p?o=' + encodeURIComponent(JSON.stringify({ svc: o.svc === undefined ? SVC : o.svc, peer: o.peer, dark: o.dark, hash: o.hash, invitation: o.invitation })));
+  if (o.saved) await ctx.addInitScript((v) => { try { if (location.pathname.endsWith('navigation.html') && !sessionStorage.getItem('seeded')) { localStorage.setItem('ch2navSvc', JSON.stringify(v)); sessionStorage.setItem('seeded', '1'); } } catch (e) {} }, o.saved);
+  await pg.goto('http://127.0.0.1:8771/p?o=' + encodeURIComponent(JSON.stringify({ svc: o.svc === undefined ? SVC : o.svc, peer: o.peer, dark: o.dark, hash: o.hash, invitation: o.invitation, svcDelay: o.svcDelay })));
   const fr = () => pg.frame({ url: /navigation\.html/ });
   for (let i = 0; i < 50 && !(fr() && await fr().evaluate(() => !!window.__nav).catch(() => false)); i++) await sleep(100);
   return { ctx, pg, f: fr(), log, errs };
@@ -205,10 +206,23 @@ const shot = async (s, name) => { await s.pg.screenshot({ path: path.join(OUT, n
     await s.f.click('#banner [data-act="check"]'); await sleep(1500);
     const chk = await s.f.$$eval('#check-list li', (a) => a.map((e) => e.textContent));
     ok(/天地图街道图✗/.test(chk[0]) && /备用卫星图（Esri）✓/.test(chk[3]) && /路线.*✓/.test(chk[5]), '地图服务检查：天地图 ✗、备用图 ✓、路线 ✓ → ' + chk.join(' / '));
-    ok(/浏览器端/.test(await txt(s, '#check-tip')) && /白名单/.test(await txt(s, '#check-tip')), '检查页说清原因：应用类型要选“浏览器端”、白名单先留空，改好不用更新 App');
+    ok(/VPN/.test(await txt(s, '#check-tip')) && /直连/.test(await txt(s, '#check-tip')) && /浏览器端/.test(await txt(s, '#check-tip')), '检查页说清原因：先说开着 VPN（天地图只让国内网络用，关掉或设直连），再说密钥类型');
+    ok(/VPN/.test(await txt(s, '#banner')), '顶上的提示也说“开着 VPN 时会这样”');
     await s.f.click('#check-show'); await sleep(500);
     ok(/tianditu\.gov\.cn\/vec_w/.test(await s.f.$eval('#check-raw', (e) => e.src)) && await vis(s, '#check-raw-wrap'), '“看天地图返回的原文”：在页面里直接显示天地图的回答（能截图发给 AI）');
     await shot(s, '5-天地图不行时的检查');
+    await s.f.click('#check-close');
+    s.log.tdtBad = false;   // 关掉了 VPN：天地图又能用了
+    await s.f.evaluate(() => window.dispatchEvent(new Event('online'))); await sleep(1500);
+    ok(await s.f.evaluate(() => window.__nav.kind) === 'street' && /换回来/.test(await txt(s, '#banner')) && !(await s.f.$eval('#layer', (e) => e.hidden)), '关掉 VPN 以后：自动试一下天地图，通了就换回天地图（不用重开），图层按钮回来');
+    await s.ctx.close();
+
+    /* 2b. 数据库的配置来晚了（手机里存的是旧配置，没有卫星图）：先用旧的，新的到了补上卫星图，并存起来 */
+    s = await setup(br, { svcDelay: 2500, saved: { tiles: SVC.tiles } });
+    await sleep(800);
+    ok(await s.f.$eval('#layer', (e) => e.hidden), '配置还没到：先用手机里存的（只有街道图）');
+    await sleep(2600);
+    ok(!(await s.f.$eval('#layer', (e) => e.hidden)) && await s.f.evaluate(() => !!JSON.parse(localStorage.getItem('ch2navSvc')).sat), '新配置晚到：补上卫星图（图层按钮出现），并存进手机，下次直接有');
     await s.ctx.close();
 
     /* 3. 天地图搜索不让手机直接问（没有跨域头）：换开源数据搜 */

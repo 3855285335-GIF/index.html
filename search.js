@@ -1001,7 +1001,7 @@ function mountWeb(t) {
   const ld = document.createElement('div'); ld.className = 'ws-wload'; ld.innerHTML = '<div class="sp"></div><div>正在打开 ' + esc(host(d.src)) + '…</div>';
   const fr = document.createElement('iframe');
   // 网页在自己的来源里运行，碰不到 Chatter 的登录信息；不给它跳转整个 App、弹对话框的权限
-  fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
+  fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads');   // 不给“开新窗口”：网页里“在新窗口打开”的链接以前会跳到手机自带的浏览器（11-21 用户反馈）
   fr.setAttribute('allow', 'fullscreen; autoplay; encrypted-media; picture-in-picture; clipboard-write');
   fr.setAttribute('referrerpolicy', 'no-referrer');
   fr.setAttribute('title', d.t || host(d.src));

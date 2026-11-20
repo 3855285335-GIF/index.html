@@ -314,6 +314,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const fr = await frameEl.contentFrame(); await fr.waitForSelector('#to-b');
       ok(await on() === 'web' && /frame\.test/.test(await pg.$eval('[data-r="wsite"]', e => e.textContent)), '能嵌的网站：直接在 App 里显示原网页（顶上写着网站）');
       ok(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('sandbox')) && !/allow-top-navigation/.test(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('sandbox'))), '网页框有沙盒，不能把整个 App 跳走');
+      ok(!/allow-popups/.test(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('sandbox'))), '网页框不许开新窗口：网页里“在新窗口打开”的链接不会再跳到手机自带的浏览器');
       ok((await pg.evaluate(() => window.__opened.length)) === op0, '没有跳到系统浏览器');
       await shot('13-原网页');
       await fr.click('#to-b'); await pg.waitForTimeout(250);

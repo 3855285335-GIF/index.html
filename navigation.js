@@ -35,12 +35,12 @@
   /* ---------- 服务地址（数据库里的配置；读不到用手机里上次存的） ---------- */
   let services = {};
   const saved = LSget('ch2navSvc', null);
-  if (bridge && bridge.getServices) {
-    const ac = new AbortController(), timer = setTimeout(() => ac.abort(), saved ? 1200 : 4000);
-    try {
-      const got = await bridge.getServices(ac.signal);
-      if (got && typeof got === 'object') { services = got; LSset('ch2navSvc', got); } else if (saved && typeof saved === 'object') services = saved;
-    } catch { if (saved && typeof saved === 'object') services = saved; } finally { clearTimeout(timer); }
+  let lateSvc = null;
+  if (bridge && bridge.getServices) {   // 手机里有上次的配置就只等 1.2 秒；超时先用存的，晚到的新配置存起来并补上（以前一超时就作废，卫星图一直“没有配置”）
+    const p = Promise.resolve().then(() => bridge.getServices(new AbortController().signal)).catch(() => null);
+    const got = await Promise.race([p, new Promise((r) => setTimeout(() => r(undefined), saved ? 1200 : 4000))]);
+    if (got && typeof got === 'object') { services = got; LSset('ch2navSvc', got); }
+    else { if (saved && typeof saved === 'object') services = saved; if (got === undefined) lateSvc = p; }
   } else if (saved && typeof saved === 'object') services = saved;
   function httpsUrl(v) {
     if (typeof v !== 'string' || v.length > 1600) return null;
@@ -60,7 +60,7 @@
     sat: layerList(services.sat),
     backup: layerList(services.fallback) || BACKUP
   };
-  const TDT = typeof services.tdt === 'string' && /^[0-9a-f]{32}$/i.test(services.tdt) ? services.tdt
+  let TDT = typeof services.tdt === 'string' && /^[0-9a-f]{32}$/i.test(services.tdt) ? services.tdt
     : ((/[?&]tk=([0-9a-f]{32})/i.exec((SETS.street && SETS.street[0].url) || '') || [])[1] || '');
   const ROUTER = (() => { const u = httpsUrl(services.routeBase) || new URL('https://routing.openstreetmap.de/'); u.search = ''; if (!u.pathname.endsWith('/')) u.pathname += '/'; return u.href; })();
   const PHOTON = (httpsUrl(services.searchUrl) || new URL('https://photon.komoot.io/api/')).href;
@@ -142,11 +142,12 @@
   }
   function showLayers() {
     const s = pickSet(kind);
-    if (shown === s) return;
-    if (shown) shown.layers.forEach((l) => map.removeLayer(l));
-    shown = s;
-    s.layers.forEach((l) => l.addTo(map));
-    $('map').classList.toggle('street', s.name === 'street');
+    if (shown !== s) {
+      if (shown) shown.layers.forEach((l) => map.removeLayer(l));
+      shown = s;
+      s.layers.forEach((l) => l.addTo(map));
+      $('map').classList.toggle('street', s.name === 'street');
+    }
     const tdtOk = (sets.street && !sets.street.failed) || (sets.sat && !sets.sat.failed);
     $('layer').hidden = !(sets.street && sets.sat) || !tdtOk;
     $('layer').setAttribute('aria-label', kind === 'sat' ? '换成街道图' : '换成卫星图');
@@ -155,8 +156,31 @@
     ['street', 'sat'].forEach((k) => { const o = sets[k]; if (set.name !== 'backup' && o && o !== set && o.ok === 0) o.failed = true; });   // 天地图两种图用同一个密钥：一种不给，另一种多半也不给
     if (set.name === 'backup') { banner('地图加载不出来：手机网络可能连不上地图服务器。<br><button data-act="check">检查原因</button>', true); return; }
     showLayers();
-    banner('天地图没有给地图，先换成了卫星图（带道路和地名）。<br><button data-act="check">检查原因</button>', true);
+    banner('天地图没有给地图（开着 VPN 时会这样：天地图只让国内网络用），先换成了卫星图。关掉 VPN 后会自动换回来。<br><button data-act="check">检查原因</button>', true);
   }
+  function tryRecover(manual) {   // 用的是备用图时：每 30 秒、联网、回到前台时试一块天地图，通了就换回来（比如刚关掉 VPN）
+    const bad = ['street', 'sat'].map((k) => sets[k]).filter((x) => x && x.failed);
+    if (!bad.length) return Promise.resolve(false);
+    return imgOk(tileUrlOf(bad[0], 12), 6000).then((r) => {
+      if (!r.ok) return false;
+      bad.forEach((x) => { x.failed = false; x.ok = 0; x.bad = 0; });
+      showLayers();
+      banner(manual ? '' : '天地图能用了，已经换回来');
+      return true;
+    });
+  }
+  setInterval(() => { if (!document.hidden) tryRecover(); }, 30000);
+  addEventListener('online', () => tryRecover());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tryRecover(); });
+  if (lateSvc) lateSvc.then((g) => {   // 晚到的配置：存起来；这次缺的（卫星图、搜地点的密钥）补上
+    if (!g || typeof g !== 'object') return;
+    LSset('ch2navSvc', g);
+    const st = layerList(g.tiles), sa = layerList(g.sat);
+    if (!sets.street && st) sets.street = makeSet(st, 'street');
+    if (!sets.sat && sa) sets.sat = makeSet(sa, 'sat');
+    if (!TDT && typeof g.tdt === 'string' && /^[0-9a-f]{32}$/i.test(g.tdt)) TDT = g.tdt;
+    showLayers();
+  });
   $('layer').onclick = () => { kind = kind === 'sat' ? 'street' : 'sat'; LSset('ch2navLayer', kind); showLayers(); };
   showLayers();
 
@@ -763,7 +787,7 @@
   }
   function imgOk(url, ms) {
     return new Promise((res) => {
-      if (!url) { res({ ok: false, why: '没有配置' }); return; }
+      if (!url) { res({ ok: false, why: '还没读到配置（重开导航再看）' }); return; }
       const im = new Image(), t0 = Date.now(), tm = setTimeout(() => { im.src = ''; res({ ok: false, why: '超时' }); }, ms || 8000);
       im.referrerPolicy = 'strict-origin-when-cross-origin';
       im.onload = () => { clearTimeout(tm); res({ ok: im.naturalWidth > 0, ms: Date.now() - t0 }); };
@@ -792,8 +816,9 @@
     tip.textContent = '';
     const res = await Promise.all(items.map(([, f], i) => f().then((r) => { const li = list.children[i]; li.innerHTML = '<b>' + esc(items[i][0]) + '</b><span class="' + (r.ok ? 'ok">✓ 正常' + (r.ms ? '（' + r.ms + ' 毫秒）' : '') : 'bad">✗ ' + esc(r.why || '不行')) + '</span>'; return r; })));
     const tdtTile = res[0].ok || res[1].ok;
+    if (tdtTile) tryRecover(true);   // 天地图又通了：马上换回来
     if (!tdtTile && (res[3].ok || res[5].ok)) {
-      tip.innerHTML = '天地图不给图，但别的服务都通，说明是<b>天地图的密钥</b>的问题。最常见的原因：申请密钥时“应用类型”选成了“服务端”（要选<b>浏览器端</b>），或者填了“域名白名单”（先留空）。改好以后不用更新 App，重开导航就行。';
+      tip.innerHTML = '天地图不给图，但别的服务都通。最常见的原因是<b>开着 VPN</b>：天地图只让国内的网络用，VPN 的出口在国外就会被拒。关掉 VPN（或者在 VPN 里设置 tianditu.gov.cn 走直连），地图会自动换回天地图。没开 VPN 还这样，再看天地图密钥的“应用类型”是不是“浏览器端”、“域名白名单”是不是空的。';
       rawUrl = tileUrlOf(sets.street, 15); $('check-show').hidden = !rawUrl;
     } else if (!tdtTile && !res[3].ok) tip.textContent = '地图服务都连不上：手机网络可能有问题，换个网络试试。';
     else if (!res[2].ok && tdtTile) tip.textContent = '天地图的地图正常，但搜地点不让手机直接问，现在用开源地图数据搜（中文地点会少一些）。';
