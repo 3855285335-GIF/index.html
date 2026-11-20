@@ -6226,7 +6226,7 @@ let logoutPending = false;
 // 搜索模块可能尚未加载。退出时也要按原账号清理旧版留下的离线文章。
 function forgetBrowserData(uid) {
   if (!uid) return Promise.resolve();
-  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos', 'ch2wsFrm', 'ch2wsTabs', 'ch2muNow', 'ch2muRecent']) LS.del(key + ':' + uid);
+  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos', 'ch2wsFrm', 'ch2wsTabs', 'ch2muNow', 'ch2muRecent', 'ch2navRecent', 'ch2navView']) LS.del(key + ':' + uid);
   if (!window.indexedDB) return Promise.resolve();
   return new Promise(resolve => {
     const req = indexedDB.open('chatter-ws');
@@ -6992,8 +6992,13 @@ document.addEventListener('click', function (e) {
   if (!/^https?:\/\//i.test(href) || href.indexOf(SUPABASE_URL + '/') === 0 || (PROXY_URL && href.indexOf(PROXY_URL) === 0)) return;
   if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;   // 电脑上按住 Ctrl / ⌘ 点：照旧在新标签页打开
   e.preventDefault();
+  const place = navPlaceHash(href);
+  if (place) { openNavigation(null, null, false, place); return; }
   openLink(href);
 }, true);
+function navPlaceHash(href) {   // 好友发来的位置：https://…/navigation.html#lat=…&lon=…&name=…
+  try { const u = new URL(href, location.href), me = new URL('navigation.html', location.href); return u.origin === me.origin && u.pathname === me.pathname && /(^|&)lat=/.test(u.hash.slice(1)) ? u.hash : ''; } catch (e) { return ''; }
+}
 const pushBlocked = () => S.v8 === false || (PUSH.srv === false && now() - PUSH.srvAt < 10 * 60000);
 async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（对方在线、不是好友等情况由数据库判断后跳过）
   if (!S.me || pushBlocked()) return null;
@@ -7418,14 +7423,14 @@ function closeNavigation(pop = true) {
   if ($('tab-apps')?.classList.contains('active')) renderApps();
   if (n.opener?.isConnected) n.opener.focus();
 }
-function openNavigation(peer, invitation, fromApps = false) {
-  if (navPanel) return;
+function openNavigation(peer, invitation, fromApps = false, placeHash = '') {
+  if (navPanel) { if (placeHash && !navPanel.peer) navPanel.frame.contentWindow.location.hash = placeHash; return; }
   const dialog = document.createElement('div'), frame = document.createElement('iframe');
   dialog.setAttribute('role','dialog');
   dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
   frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
   navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,fromApps,id:null,opener:document.activeElement,notified:null};
-  frame.src='navigation.html?v=' + (APP_V || '0');   // 和 app.js 同一个版本号：发新版时导航页一起更新
+  frame.src='navigation.html?v=' + (APP_V || '0') + (placeHash || '');   // 和 app.js 同一个版本号：发新版时导航页一起更新
   document.body.append(dialog); frame.focus();
   history.pushState({navigation:true},'');
 }
@@ -7434,12 +7439,9 @@ window.getChatterNavigation = function (sender) {
   if (!n || n.frame.contentWindow!==sender) return null;
   const current = () => navPanel===n && n.uid===S.uid && (!n.peer || n.fromApps || (n.chat===S.conv && n.peer===S.peer));
   const style = getComputedStyle(document.body);
-  return {peer:n.peer, fromApps:n.fromApps, peerLabel:n.peer && peerName(n.peer), me:ME(), invitation:n.invitation, font:style.fontFamily, appearance:document.documentElement.dataset.theme,
+  return {peer:n.peer, fromApps:n.fromApps, peerLabel:n.peer && peerName(n.peer), me:ME(), uid:S.uid, invitation:n.invitation, font:style.fontFamily, appearance:document.documentElement.dataset.theme,
     theme:Object.fromEntries(Object.entries({'--paper':'--bg','--surface':'--surface','--ink':'--ink','--muted':'--muted','--line':'--line','--accent':'--accent'}).map(([key,src])=>[key,style.getPropertyValue(src)])),
-    beforeSound:() => {
-      if (!current() || S.incoming || S.call || GC.on || rec.state !== 'idle') return false;
-      musicPause(); return true;
-    },
+    beforeSound:() => !(!current() || S.incoming || S.call || GC.on || rec.state !== 'idle'),   // 打电话、录语音时导航不出声；音乐不停（以前每次转弯提示都把歌停了，不会再接着放）
     close:() => { if (current()) closeNavigation(); },
     async getServices(signal) {
       if (!current()) return null;
@@ -7471,6 +7473,14 @@ window.getChatterNavigation = function (sender) {
     notify(id) {
       if (!current() || n.fromApps || n.id!==id || n.notified===id || !canSendHere()) return;
       n.notified=id; addLocal(newMsg('text',NAV_INVITE_TEXT,null,{ id }));
+    },
+    sendPlace(p) {   // 把地点发到这个私聊：一行字 + 链接，对方点了直接在 Chatter 的导航里打开
+      if (!current() || !n.peer) throw new Error('已离开原聊天');
+      if (n.fromApps || S.conv !== n.chat || !canSendHere()) throw new Error('从聊天里打开导航才能发');
+      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) throw new Error('地点不对');
+      const u = new URL('navigation.html', location.href);
+      u.hash = new URLSearchParams({ lat: (+p.lat).toFixed(6), lon: (+p.lon).toFixed(6), name: String(p.name || '').slice(0, 60), addr: String(p.addr || '').slice(0, 80) }).toString();
+      addLocal(newMsg('text', '位置：' + String(p.name || '地图上的点').slice(0, 60) + (p.addr ? '（' + String(p.addr).slice(0, 80) + '）' : '') + '\n' + u.href));
     }
   };
 };

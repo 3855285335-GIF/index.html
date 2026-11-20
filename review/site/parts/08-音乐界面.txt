@@ -187,6 +187,16 @@ const CSS = `
 #mu-mini .mu-ib{width:40px;height:40px}
 #mu-mini i{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);width:0}
 body.chat-open #mu-mini{display:none}
+.mu-src{display:flex;gap:4px;margin:2px 12px 10px;background:var(--surface);padding:4px;border-radius:14px;box-shadow:var(--shadow)}
+.mu-src button{flex:1;height:36px;border-radius:10px;background:transparent;color:var(--muted);font-size:14px;padding:0 6px}
+.mu-src button.on{background:var(--accent);color:#fff;font-weight:600}
+.mu-bart{width:74px;height:46px;border-radius:9px;object-fit:cover;background:var(--surface2);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.mu-bv{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 16px calc(20px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center}
+.mu-slot{width:100%;max-width:640px;aspect-ratio:16/9;border-radius:14px;background:#000;margin:4px 0 16px;flex-shrink:0}
+.mu-bv .mu-state{text-align:center;max-width:420px;line-height:1.55}
+#mu-bili{position:fixed;z-index:63;left:-9999px;top:0;width:320px;height:180px;border-radius:14px;overflow:hidden;background:#000}
+#mu-bili iframe{width:100%;height:100%;border:0;display:block}
+body.chat-open #mu-bili{left:-9999px!important}
 `;
 
 /* ---------- 页面 ---------- */
@@ -204,9 +214,10 @@ function build() {
   addCss();
   root = document.createElement('div'); root.id = 'mu'; root.className = 'mu'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '音乐');
   root.innerHTML =
-    '<section class="mu-v" data-v="home">' + bar('搜歌、歌手（英文搜得更多）') + '<div class="mu-chips mu-in" data-r="genres"></div><div class="mu-sc"><div class="mu-in" data-r="home"></div></div></section>' +
+    '<section class="mu-v" data-v="home">' + bar('搜歌、歌手') + '<div class="mu-chips mu-in" data-r="genres"></div><div class="mu-sc"><div class="mu-in" data-r="home"></div></div></section>' +
     '<section class="mu-v" data-v="list"><div class="mu-bar mu-in"><button type="button" class="mu-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="mu-ttl" data-r="ltitle"></span><span style="width:44px"></span></div><div class="mu-sc"><div class="mu-in" data-r="list"></div></div></section>' +
-    '<section class="mu-v" data-v="now"><div class="mu-bar mu-in"><button type="button" class="mu-ib" data-act="back" aria-label="收起">' + ico(I.down) + '</button><span class="mu-ttl" style="font-weight:500;color:var(--muted);font-size:14px">正在播放</span><button type="button" class="mu-ib" data-act="now-more" aria-label="更多">' + ico(I.more) + '</button></div><div class="mu-now" data-r="now"></div></section>';
+    '<section class="mu-v" data-v="now"><div class="mu-bar mu-in"><button type="button" class="mu-ib" data-act="back" aria-label="收起">' + ico(I.down) + '</button><span class="mu-ttl" style="font-weight:500;color:var(--muted);font-size:14px">正在播放</span><button type="button" class="mu-ib" data-act="now-more" aria-label="更多">' + ico(I.more) + '</button></div><div class="mu-now" data-r="now"></div></section>' +
+    '<section class="mu-v" data-v="bili"><div class="mu-bar mu-in"><button type="button" class="mu-ib" data-act="back" aria-label="收起">' + ico(I.down) + '</button><span class="mu-ttl" style="font-weight:500;color:var(--muted);font-size:14px">B 站</span><button type="button" class="mu-ib" data-act="bili-stop" aria-label="停止">' + ico(I.x) + '</button></div><div class="mu-bv" data-r="bili"></div></section>';
   (document.querySelector('.app-container') || document.body).appendChild(root);
   root.addEventListener('click', onClick);
   root.addEventListener('submit', e => { e.preventDefault(); const inp = e.target.querySelector('input'); try { inp.blur(); } catch (x) { /* 没关系 */ } search(inp.value); });
@@ -216,10 +227,12 @@ function build() {
   });
   root.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.r === 'seek') { seekTo(+e.target.value / 1000); M.seeking = false; } });
   root.addEventListener('error', e => { const im = e.target; if (im && im.tagName === 'IMG') artFallback(im); }, true);
+  root.addEventListener('scroll', placeBili, true);
 }
 const R = k => root.querySelector('[data-r="' + k + '"]');
 const V = v => root.querySelector('.mu-v[data-v="' + v + '"]');
 function artFallback(im) {   // 封面的服务器连不上：换 Audius 给的备用服务器，再不行就显示音符
+  if (im.dataset.raw) { const raw = im.dataset.raw; im.removeAttribute('data-raw'); im.src = raw; return; }   // B 站的小图不行：用原图
   const mir = (im.dataset.mir || '').split(' ').filter(Boolean), n = +(im.dataset.n || 0);
   if (n < mir.length) { im.dataset.n = n + 1; im.src = String(im.getAttribute('src') || '').replace(/^https?:\/\/[^/]+/, mir[n]); return; }
   const d = document.createElement('div'); d.className = im.className; d.innerHTML = ico(I.note, im.classList.contains('mu-big') ? 64 : 20); im.replaceWith(d);
@@ -242,7 +255,8 @@ const top = () => M.stack[M.stack.length - 1];
 function show() {
   const t = top(); if (!t) return;
   root.querySelectorAll('.mu-v').forEach(el => el.classList.toggle('on', el.dataset.v === t.v));
-  if (t.v === 'home') renderHome(); else if (t.v === 'list') renderList(t); else if (t.v === 'now') renderNow();
+  if (t.v === 'home') renderHome(); else if (t.v === 'list') renderList(t); else if (t.v === 'now') renderNow(); else if (t.v === 'bili') renderBiliNow();
+  placeBili();
 }
 function go(v, d) {
   M.stack.push({ v: v, d: d || {} });
@@ -254,10 +268,11 @@ function popTo(n) { M.stack.length = Math.max(0, Math.min(n, M.stack.length)); i
 function onPop(e) { if (!M.on) return false; const st = (e && e.state) || history.state; popTo((st && st.mu) || 0); return true; }
 function open(v) {
   build(); ensureAudio(); restore();
-  if (!M.on) { M.on = true; root.classList.add('on'); document.body.classList.add('mu-open'); go(v === 'now' && cur() ? 'now' : 'home'); return; }   // 从迷你条点进来：只有“正在播放”这一层，返回就关掉
+  if (!M.on) { M.on = true; root.classList.add('on'); document.body.classList.add('mu-open'); go(v === 'bili' && M.bili ? 'bili' : v === 'now' && cur() ? 'now' : 'home'); return; }   // 从迷你条点进来：只有“正在播放”这一层，返回就关掉
   if (v === 'now' && cur() && top().v !== 'now') go('now');
+  if (v === 'bili' && M.bili && top().v !== 'bili') go('bili');
 }
-function close() { M.on = false; M.stack.length = 0; if (root) root.classList.remove('on'); document.body.classList.remove('mu-open'); paintMini(); }
+function close() { M.on = false; M.stack.length = 0; if (root) root.classList.remove('on'); document.body.classList.remove('mu-open'); placeBili(); paintMini(); }
 
 /* ---------- 首页：搜索框、曲风、我喜欢 / 最近播放、热门 ---------- */
 function renderHome() {
@@ -271,7 +286,7 @@ function renderHome() {
   else if (L.err) h += msg('没取到歌', L.err, '<button type="button" class="mu-btn pri" data-act="retry" data-k="' + esc(key) + '">重试</button>');
   else if (!L.items.length) h += msg('这一类暂时没有能直接听的歌', '换一类看看');
   else h += rows(L.items, key);
-  h += '<div class="mu-from">歌来自 <a href="https://audius.co" data-act="audius">Audius</a>（免费、公开的独立音乐库），由手机直接播放</div>';
+  h += '<div class="mu-from">热门来自 <a href="https://audius.co" data-act="audius">Audius</a>（免费、公开的独立音乐库）。中文歌：搜索后选“B 站”</div>';
   R('home').innerHTML = h;
   if (!L) loadList(key);
 }
@@ -304,10 +319,12 @@ async function loadList(key, more) {   // key：'trend:曲风' 热门 / 'q:搜�
 /* ---------- 列表页：搜索结果、我喜欢、最近播放 ---------- */
 function search(q) {
   q = String(q || '').replace(/\s+/g, ' ').trim(); if (!q) return;
-  const key = 'q:' + q.toLowerCase();
+  const key = 'q:' + q.toLowerCase(), bkey = 'b:' + q.toLowerCase();
   if (!M.lists[key] || M.lists[key].err) delete M.lists[key];
-  const t = top();
-  if (t && t.v === 'list' && t.d.key && t.d.key.indexOf('q:') === 0) { t.d = { key: key, title: q }; show(); } else go('list', { key: key, title: q });
+  if (!M.lists[bkey] || M.lists[bkey].err) delete M.lists[bkey];
+  const src = /[\u3400-\u9fff]/.test(q) ? 'bili' : 'au';   // 中文先看 B 站（Audius 几乎没有中文歌），别的先看 Audius；上面能换
+  const t = top(), d = { key: key, bkey: bkey, title: q, q: q, src: src };
+  if (t && t.v === 'list' && t.d.q) { t.d = d; show(); } else go('list', d);
 }
 function listOf(key) {
   if (key === 'likes') return { items: likes(), done: true };
@@ -315,6 +332,7 @@ function listOf(key) {
   return M.lists[key] || null;
 }
 function renderList(t) {
+  if (t.d.q && t.d.src === 'bili') { renderBiliList(t); return; }
   const key = t.d.key, L = listOf(key);
   R('ltitle').textContent = key === 'likes' ? '我喜欢' : key === 'recent' ? '最近播放' : '搜「' + t.d.title + '」';
   const box = R('list'); let h = '';
@@ -326,7 +344,83 @@ function renderList(t) {
     h = '<div style="padding:4px 0 2px">' + rows(L.items, key) + '</div>';
     if (key.indexOf('q:') === 0) h += L.done ? '<div class="mu-from">没有更多了</div>' : '<div style="text-align:center"><button type="button" class="mu-btn" data-act="more-res" data-k="' + esc(key) + '"' + (L.more ? ' disabled' : '') + '>' + (L.more ? '正在加载…' : '加载更多') + '</button></div>';
   }
-  box.innerHTML = h;
+  box.innerHTML = (t.d.q ? srcTabs('au') : '') + h;
+}
+const srcTabs = (on) => '<div class="mu-src" role="tablist"><button type="button" role="tab" data-act="src" data-s="bili"' + (on === 'bili' ? ' class="on" aria-selected="true"' : '') + '>B 站 · 中文歌多</button><button type="button" role="tab" data-act="src" data-s="au"' + (on === 'au' ? ' class="on" aria-selected="true"' : '') + '>Audius · 独立音乐</button></div>';
+
+/* ---------- B 站（中文歌）：服务器替手机搜，用 B 站官方播放器在 App 里放 ---------- */
+const plays = n => !n ? '' : n >= 1e8 ? (n / 1e8).toFixed(1) + ' 亿次播放' : n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 0 : 1) + ' 万次播放' : n + ' 次播放';
+const bimg = (x, cls) => x && x.pic ? '<img class="' + cls + '" src="' + esc(x.pic + '@160w_100h_1c.jpg') + '" data-raw="' + esc(x.pic) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<div class="' + cls + '">' + ico(I.note, 20) + '</div>';
+function brows(list, key) {
+  const c = M.bili && M.bili.item;
+  return '<div class="mu-list">' + list.map((x, i) => '<div class="mu-row' + (c && c.bv === x.bv ? ' cur' : '') + '" data-act="brow" data-k="' + esc(key) + '" data-i="' + i + '">' + bimg(x, 'mu-bart') +
+    '<div class="mu-tx"><div class="mu-rt">' + esc(x.t) + '</div><div class="mu-rs">' + esc([x.a, x.d ? mmss(x.d) : '', plays(x.p)].filter(Boolean).join(' · ')) + '</div></div></div>').join('') + '</div>';
+}
+async function loadBili(key, q, more) {
+  const L = M.lists[key] = more ? M.lists[key] : { items: [], loading: true, err: '', page: 0, pages: 1, done: false, q: q };
+  if (more) { if (L.loading || L.done) return; L.loading = true; L.more = true; }
+  const account = acct;
+  const j = B.call ? await B.call({ op: 'bili', q: L.q, page: L.page + 1 }, 15000) : { ok: false, msg: '请先更新 App' };
+  if (account !== acct) return;
+  L.loading = false; L.more = false;
+  if (!j || !j.ok) { const m = (j && j.msg) || '出错了'; if (!more) L.err = m; else B.toast(m); }
+  else {
+    const seen = new Set(L.items.map(x => x.bv)), got = (j.list || []).filter(x => x && x.bv && !seen.has(x.bv));
+    L.items = L.items.concat(got); L.page++; L.pages = j.pages || 1; L.done = L.page >= L.pages || !got.length;
+  }
+  const t = M.on && top(); if (t && t.v === 'list' && t.d.bkey === key && t.d.src === 'bili') show();
+}
+function renderBiliList(t) {
+  const key = t.d.bkey, L = M.lists[key];
+  R('ltitle').textContent = '搜「' + t.d.title + '」';
+  let h = '';
+  if (!L || (L.loading && !L.items.length)) { h = skel(8); if (!L) loadBili(key, t.d.q); }
+  else if (L.err && !L.items.length) h = msg('B 站没搜到', L.err, '<button type="button" class="mu-btn pri" data-act="bretry" data-k="' + esc(key) + '">重试</button>');
+  else if (!L.items.length) h = msg('B 站没找到', '换个说法试试');
+  else h = '<div style="padding:2px 0">' + brows(L.items, key) + '</div>' + (L.done ? '<div class="mu-from">没有更多了</div>' : '<div style="text-align:center"><button type="button" class="mu-btn" data-act="bmore" data-k="' + esc(key) + '"' + (L.more ? ' disabled' : '') + '>' + (L.more ? '正在加载…' : '加载更多') + '</button></div>') +
+    '<div class="mu-from">视频来自 B 站，用 B 站的播放器在这里放</div>';
+  R('list').innerHTML = srcTabs('bili') + h;
+}
+let bhost = null;
+const biliSrc = bv => 'https://player.bilibili.com/player.html?bvid=' + encodeURIComponent(bv) + '&autoplay=1&high_quality=1&danmaku=0';
+function playBili(list, i) {
+  const x = list && list[i]; if (!x) return;
+  if (audio && !audio.paused) audio.pause();   // Audius 的歌先停，不叠在一起
+  M.bili = { list: list.slice(0, 100), i: Math.min(i, 99), item: x };
+  if (!bhost) { bhost = document.createElement('div'); bhost.id = 'mu-bili'; document.body.appendChild(bhost); }
+  bhost.innerHTML = '<iframe allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen title="B 站播放器" src="' + esc(biliSrc(x.bv)) + '"></iframe>';
+  paintMini(); paintBiliRows();
+  if (M.on && top() && top().v === 'bili') renderBiliNow(); else if (M.on) go('bili');
+  try { window.dispatchEvent(new CustomEvent('chatter-music')); } catch (e) { /* 应用页的小组件跟着变 */ }
+}
+function biliStep(d) { const b = M.bili; if (!b || b.list.length < 2) return; playBili(b.list, (b.i + d + b.list.length) % b.list.length); }
+function stopBili() {
+  if (!M.bili) return;
+  M.bili = null;
+  if (bhost) bhost.innerHTML = '';   // 别人的播放器没法暂停，只能拿掉
+  placeBili(); paintMini(); paintBiliRows();
+  if (M.on && top() && top().v === 'bili') back();
+  try { window.dispatchEvent(new CustomEvent('chatter-music')); } catch (e) { /* 应用页的小组件跟着变 */ }
+}
+function paintBiliRows() { if (!root) return; const c = M.bili && M.bili.item; root.querySelectorAll('[data-act="brow"]').forEach(r => { const L = r.dataset.k === 'bnow' ? (M.bili || {}).list : (M.lists[r.dataset.k] || {}).items, it = L && L[+r.dataset.i]; r.classList.toggle('cur', !!(c && it && it.bv === c.bv)); }); }
+function placeBili() {   // B 站的播放器一直留在页面里（挪位置会重新加载）：在 B 站这一页时盖在黑框上，别的时候挪到屏幕外面接着放
+  if (!bhost) return;
+  const slot = M.on && M.bili && top() && top().v === 'bili' && root && R('slot');
+  if (slot) { const r = slot.getBoundingClientRect(); bhost.style.left = r.left + 'px'; bhost.style.top = r.top + 'px'; bhost.style.width = r.width + 'px'; bhost.style.height = r.height + 'px'; }
+  else { bhost.style.left = '-9999px'; bhost.style.top = '0px'; bhost.style.width = '320px'; bhost.style.height = '180px'; }
+}
+addEventListener('resize', placeBili);
+function renderBiliNow() {
+  const b = M.bili, box = R('bili');
+  if (!b) { box.innerHTML = msg('没有在放 B 站的歌', ''); placeBili(); return; }
+  const x = b.item;
+  box.innerHTML = '<div class="mu-slot" data-r="slot"></div>' +
+    '<div class="mu-nt"><div class="mu-tx"><div class="mu-rt">' + esc(x.t) + '</div><div class="mu-rs">' + esc([x.a, x.d ? mmss(x.d) : '', plays(x.p)].filter(Boolean).join(' · ')) + '</div></div></div>' +
+    '<div class="mu-ctl"><button type="button" class="mu-ib mu-side" data-act="bprev" aria-label="上一个"' + (b.list.length < 2 ? ' disabled' : '') + '>' + ico(I.prev, 28) + '</button><button type="button" class="mu-ib mu-side" data-act="bnext" aria-label="下一个"' + (b.list.length < 2 ? ' disabled' : '') + '>' + ico(I.next, 28) + '</button><button type="button" class="mu-ib mu-side" data-act="bsend" aria-label="发给好友">' + ico(I.send, 22) + '</button></div>' +
+    '<div class="mu-state">点画面里的 ▶ 开始放（B 站的播放器要你自己点一下）。离开这一页也会接着放，底部的迷你条能回到这里或者停掉。</div>' +
+    (b.list.length > 1 ? '<div class="mu-up"><div class="mu-sec">这次搜到的</div>' + brows(b.list, 'bnow') + '</div>' : '') +
+    '<div class="mu-from">视频和播放器来自 B 站</div>';
+  requestAnimationFrame(placeBili);
 }
 
 /* ---------- 播放 ---------- */
@@ -335,7 +429,7 @@ function ensureAudio() {
   audio = document.createElement('audio');
   audio.id = 'mu-audio'; audio.preload = 'auto'; audio.setAttribute('playsinline', ''); audio.style.display = 'none';
   document.body.appendChild(audio);
-  audio.addEventListener('play', () => { M.wait = false; paint(); });
+  audio.addEventListener('play', () => { M.wait = false; if (M.bili) stopBili(); paint(); });
   audio.addEventListener('playing', () => { M.wait = false; M.failRow = 0; paint(); });
   audio.addEventListener('pause', () => { M.wait = false; paint(); saveNow(); });   // 缓冲中点了暂停：不再一直显示“正在缓冲…”
   audio.addEventListener('waiting', () => { M.wait = true; paintState(); });
@@ -481,7 +575,7 @@ function paint() {   // 播放 / 暂停按钮、列表里正在放的那首、�
 function paintMini() {
   const t = cur();
   if (!mini) {
-    if (!t) return;
+    if (!t && !M.bili) return;
     const nav = document.querySelector('#app-view .app-nav'); if (!nav) return;
     mini = document.createElement('div'); mini.id = 'mu-mini'; mini.setAttribute('role', 'button'); mini.setAttribute('aria-label', '正在播放，点开');
     nav.parentNode.insertBefore(mini, nav);
@@ -489,9 +583,15 @@ function paintMini() {
       const b = e.target.closest('[data-act]');
       if (b && b.dataset.act === 'mini-pp') { e.stopPropagation(); toggle(); return; }
       if (b && b.dataset.act === 'mini-next') { e.stopPropagation(); step(1); return; }
-      open('now');
+      if (b && b.dataset.act === 'mini-stop') { e.stopPropagation(); stopBili(); return; }
+      open(M.bili ? 'bili' : 'now');
     });
     mini.addEventListener('error', e => { const im = e.target; if (im && im.tagName === 'IMG') artFallback(im); }, true);
+  }
+  if (M.bili) {   // 在放 B 站的：显示它，能点回去或者停掉（没法暂停）
+    const x = M.bili.item, k = 'b|' + x.bv;
+    if (mini.dataset.k !== k) { mini.dataset.k = k; mini.innerHTML = bimg(x, 'mu-art') + '<div class="mu-tx"><div class="mu-rt">' + esc(x.t) + '</div><div class="mu-rs">B 站 · ' + esc(x.a || '') + '</div></div><button type="button" class="mu-ib" data-act="mini-stop" aria-label="停止">' + ico(I.x, 22) + '</button>'; }
+    mini.classList.toggle('on', !M.on); return;
   }
   if (!t) { mini.classList.remove('on'); return; }
   const playing = audio && !audio.paused, key = t.id + '|' + playing;
@@ -559,12 +659,23 @@ function onClick(e) {
     case 'send': { const t = cur(); if (t) B.forward(t.t + (t.a ? ' — ' + t.a : '') + '\nhttps://audius.co' + (t.p || '')); break; }
     case 'now-more': { const t = cur(); if (t) trackActs(t, 'now', M.i); break; }
     case 'audius': if (B.link) B.link(el.getAttribute('href'), 'Audius'); break;
+    case 'src': { const t = top(); if (t && t.d.q) { t.d.src = el.dataset.s; show(); const sc = V('list').querySelector('.mu-sc'); if (sc) sc.scrollTop = 0; } break; }
+    case 'bretry': delete M.lists[el.dataset.k]; show(); break;
+    case 'bmore': { const L0 = M.lists[el.dataset.k]; if (L0) loadBili(el.dataset.k, L0.q, true); show(); break; }
+    case 'brow': { const L = el.dataset.k === 'bnow' ? (M.bili || {}).list : (M.lists[el.dataset.k] || {}).items, i = +el.dataset.i, x = L && L[i]; if (!x) break;
+      if (M.bili && M.bili.item.bv === x.bv) { if (top().v !== 'bili') go('bili'); break; }
+      playBili(L, i); break; }
+    case 'bprev': biliStep(-1); break;
+    case 'bnext': biliStep(1); break;
+    case 'bsend': { const x = M.bili && M.bili.item; if (x) B.forward(x.t + (x.a ? ' — ' + x.a : '') + '\nhttps://www.bilibili.com/video/' + x.bv); break; }
+    case 'bili-stop': stopBili(); break;
   }
 }
 
 /* ---------- 换账号 ---------- */
 function resetAccount() {
   acct++;
+  stopBili(); if (bhost) { bhost.remove(); bhost = null; }
   if (audio) { try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) { /* 没关系 */ } }
   M.q = []; M.i = -1; M.order = null; M.nextUp = null; M.lists = {}; M.restored = false; M.genre = ''; M.upList = []; M.resumeAt = 0;
   close();
@@ -575,8 +686,9 @@ function resetAccount() {
 
 window.ChatterMusic = {
   open: open, onPop: onPop, isOpen: () => M.on, closeNow: close, resetAccount: resetAccount, restore: () => { restore(); },
-  toggle: () => toggle(), next: () => step(1), pause: () => { if (audio && !audio.paused) audio.pause(); },
-  now: () => { const t = cur(); return t ? { t: t.t, a: t.a, art: t.s, playing: !!(audio && !audio.paused) } : null; },
-  _m: M, _toTrack: toTrack, _au: AU, _play: (list, i) => playAt(list, i), _next: t => playNext(t)
+  toggle: () => { if (M.bili) stopBili(); else toggle(); }, next: () => { if (M.bili) biliStep(1); else step(1); },
+  pause: () => { if (audio && !audio.paused) audio.pause(); stopBili(); },   // 来电、打电话、录语音：B 站的没法暂停，只能停掉
+  now: () => { if (M.bili) { const x = M.bili.item; return { t: x.t, a: 'B 站 · ' + (x.a || ''), art: x.pic ? x.pic + '@160w_100h_1c.jpg' : '', playing: true, bili: true }; } const t = cur(); return t ? { t: t.t, a: t.a, art: t.s, playing: !!(audio && !audio.paused) } : null; },
+  _m: M, _toTrack: toTrack, _au: AU, _play: (list, i) => playAt(list, i), _next: t => playNext(t), _bili: (list, i) => playBili(list, i)
 };
 })();

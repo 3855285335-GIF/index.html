@@ -23,6 +23,7 @@ svg .fill { fill: currentColor; stroke: none; }
 .credit a { color: inherit; }
 
 #map { position: fixed; inset: 0; background: #dfe6ea; z-index: 0; }
+#map, #map * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }   /* iPhone 长按地图不弹“存储图像”菜单（长按是用来选点的） */
 :root[data-dark] #map { background: #20262b; }
 :root[data-dark] #map.street .leaflet-tile-pane { filter: invert(.92) hue-rotate(180deg) brightness(.9) contrast(.9); }   /* 街道图跟着深色主题变暗，卫星图不动 */
 .leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted); }
