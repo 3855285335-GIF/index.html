@@ -501,12 +501,31 @@ ok(!x.j.ok && x.j.code === 'bad', '本机地址：拒绝');
 x = await fr('https://mobile-ok.example.com/');
 ok(x.j.frame === true && x.j.mobile === true && /iPhone/.test(lastFrameUA), '做了手机适配的网页：mobile = true（用 iPhone 的身份去问）');
 x = await fr('https://desktop-only.example.com/');
-ok(x.j.frame === true && x.j.mobile === false, '没做手机适配的电脑版网页：mobile = false（手机上换 Safari 窗口打开）');
+ok(x.j.frame === true && x.j.mobile === false, '没做手机适配的电脑版网页：mobile = false（手机上缩小到整页显示）');
 const mr = __test.mobileReady;
 ok(mr('<meta content="width=device-width" name="viewport">') === true && mr('<html><head><title>x</title></head>') === false && mr('x'.repeat(100)) === null && mr('') === null, '手机适配判断：属性顺序不同也认得；读到页头还没有就是电脑版；读不到不下结论');
 const fs0 = calls['frame-site'] || 0;
 x = await fr('https://fr-deny.example.com/page');
 ok(x.j.cached === true && (calls['frame-site'] || 0) === fs0, '同一个网址再问：用缓存，不再去取');
+// 一次问好几个（结果页出来时先问好，点的时候不用等）
+const frs = async (urls: unknown, tok: string | null = TOK) => {
+  const res = await handle(new Request('https://proj.supabase.co/functions/v1/chatter-search', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://3855285335-gif.github.io', ...(tok ? { authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify({ op: 'frames', urls }) }));
+  return { st: res.status, j: await res.json() };
+};
+const fs1 = calls['frame-site'] || 0;
+let xs = await frs(['https://fr-open.example.com/m1', 'https://fr-none.example.com/m1', 'https://desktop-only.example.com/m1', 'https://nohost.example.com/', 'javascript:alert(1)', 'https://fr-open.example.com/m1']);
+const byU = (u: string) => (xs.j.list || []).find((y: Any) => y.u === u) || {};
+ok(xs.j.ok && xs.j.list.length === 5 && byU('https://fr-open.example.com/m1').frame === true && byU('https://fr-none.example.com/m1').frame === false && byU('https://fr-none.example.com/m1').why === 'csp'
+  && byU('https://desktop-only.example.com/m1').mobile === false && byU('https://nohost.example.com/').code === 'nohost' && byU('javascript:alert(1)').code === 'bad', '一次问好几个：每个都有结论，重复的只问一次，坏网址说“不能打开”、找不到的说找不到 → ' + JSON.stringify(xs.j.list.map((y: Any) => [y.u.slice(8, 20), y.frame, y.why || y.code || ''])));
+ok((calls['frame-site'] || 0) - fs1 === 3, '一次问好几个：同时去取，每个网站只取一次 → ' + ((calls['frame-site'] || 0) - fs1));
+xs = await frs(Array.from({ length: 12 }, (_, i) => 'https://fr-open.example.com/n' + i));
+ok(xs.j.list.length === 8, '一次最多问 8 个（多的不管）');
+xs = await frs(['https://fr-open.example.com/m1']);
+ok(xs.j.list[0].cached === true && xs.j.list[0].frame === true, '问过的再问：用缓存');
+xs = await frs(['https://fr-open.example.com/m1'], null);
+ok(xs.st === 401, '一次问好几个也要登录');
+xs = await frs('not-a-list');
+ok(xs.j.ok && Array.isArray(xs.j.list) && !xs.j.list.length, '传的不是列表：返回空列表，不出错');
 const fv = __test.frameVerdict;
 ok(fv(new Headers({ 'x-frame-options': 'deny' }), '').frame === false && fv(new Headers({ 'content-security-policy': "frame-ancestors 'none' https://3855285335-gif.github.io" }), '').frame === false, "'none' 和别的写在一起也算不让");
 ok(fv(new Headers({ 'content-security-policy': 'frame-ancestors https:' }), 'https://a.github.io').frame === true && fv(new Headers({ 'content-security-policy': 'frame-ancestors http://3855285335-gif.github.io' }), '').frame === false, '写 https: 的允许；协议不对的不允许');

@@ -4,7 +4,8 @@
 //   op: 'search'    搜网页 / 图片 / 视频 / 新闻 / 深挖。同样的搜索 24 小时内直接用缓存，不花额度、不算次数
 //                   网页、新闻、视频默认先用 Exa，Exa 用完自动换 Tavily；图片先用 Tavily
 //                   深挖：维基百科、互联网档案馆、论文库（OpenAlex）、GitHub、Hacker News，全部免费
-//   op: 'read'      简洁阅读：服务器把网页取回来，只留正文和图片；at='latest' 或时间戳 = 看互联网档案馆的存档
+//   op: 'frame'     这个网页能不能放进 App 里显示（只看响应头，不转发内容）；op: 'frames' 一次问最多 8 个（结果页出来时先问好，点的时候不用等）
+//   op: 'read'      阅读模式：服务器把网页取回来，只留正文和图片；at='latest' 或时间戳 = 看互联网档案馆的存档
 //   op: 'versions'  这个网页在互联网档案馆里有哪些历史版本
 //   op: 'translate' 翻译一组段落（网页正文、搜索结果的标题和摘要、搜索词）：智谱为主、Groq 备用，30 天内同一段不重复翻
 //   op: 'usage'     这个月 Exa、Tavily 各用了多少次
@@ -13,7 +14,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261120-1';
+const VER = '20261120-2';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -385,7 +386,7 @@ function failAll(list: string[], why: Record<string, string>) {
   return fail('upstream', '搜索服务暂时没响应，稍后再试');
 }
 
-/* ---------- 简洁阅读 ---------- */
+/* ---------- 阅读模式（服务器取回网页，只留正文、图片和链接） ---------- */
 function publicV4(host: string) {
   const [a, b, c] = host.split('.').map(Number);
   return a > 0 && a < 224 && a !== 10 && a !== 127 &&
@@ -516,7 +517,7 @@ async function grab(u0: URL, ms = 9000, arch = false, headOnly = false, sniff = 
 /* ---------- 在 App 里直接显示原网页 ----------
    网页由手机自己去打开（嵌在 App 里），不经过这台服务器、不转发内容；这里只看对方网站的响应头，
    判断它让不让别的网站把它嵌进去（X-Frame-Options、Content-Security-Policy 的 frame-ancestors）。
-   不让嵌的网站，手机上会显示一片空白，所以先问一下，不让就直接换简洁阅读。 */
+   不让嵌的网站，手机上会显示一片空白，所以先问一下，不让就换阅读模式（服务器取来的内容，还在 App 里）。 */
 const APP_ORIGIN = 'https://3855285335-gif.github.io';
 export function frameVerdict(h: Headers, origin: string): { frame: boolean; why?: string } {
   let app: URL; try { app = new URL(origin || APP_ORIGIN); } catch { app = new URL(APP_ORIGIN); }
@@ -536,26 +537,39 @@ export function frameVerdict(h: Headers, origin: string): { frame: boolean; why?
   if (/deny|sameorigin|allow-from/i.test(h.get('x-frame-options') || '')) return { frame: false, why: 'xfo' };
   return { frame: true };
 }
-async function doFrame(uid: string, b: Any, c: Any, origin: string) {
-  const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
+async function frameOne(uid: string, url: unknown, c: Any, origin: string): Promise<Any> {   // 一个网址的结论（不包成回应）；出错时也给结论
+  const u0 = safeUrl(url); if (!u0) return { frame: null, code: 'bad', msg: '这个网址不能打开', reject: true };   // reject：问都没问（单个问时按出错回）
   const key = 'f2' + await sha(JSON.stringify([uid, u0.href, origin]));
   const hit = await cget(key);
-  if (hit) return json({ ok: true, cached: true, ...hit });
-  if (await bump(uid, 'f', c.read_per_user_day) < 0) return fail('limit', '今天打开网页太多次了，明天再来');
+  if (hit) return { cached: true, ...hit };
+  if (await bump(uid, 'f', c.read_per_user_day) < 0) return { frame: null, code: 'limit', msg: '今天打开网页太多次了，明天再来', reject: true };
   const tries = u0.protocol === 'http:' ? [new URL(u0.href.replace(/^http:/, 'https:')), u0] : [u0];   // App 是 https，http 网页嵌不进来：先试 https 版
   let got: Any = null, err: Any = null;
   for (const t of tries) { try { got = await grab(t, 7000, false, true, 65536, MOBILE_UA); break; } catch (e) { err = e; } }
   if (!got) {   // 服务器这边打不开：不一定代表手机打不开（有些网站不让国外服务器访问），交给手机决定
-    if (err instanceof Oops) return json({ ok: true, frame: null, code: err.code, msg: err.message, url: u0.href });
+    if (err instanceof Oops) return { frame: null, code: err.code, msg: err.message, url: u0.href };
     throw err;
   }
   const fin = new URL(got.url);
   let v = frameVerdict(got.headers, origin);
   if (fin.protocol !== 'https:') v = { frame: false, why: 'http' };
   else if (got.ct && !/html|xml|text\/plain/.test(got.ct)) v = { frame: false, why: /pdf/.test(got.ct) ? 'pdf' : 'file' };
-  const out = { frame: v.frame, why: v.why || '', url: fin.href, mobile: mobileReady(got.html) };   // mobile：false = 没做手机适配的电脑版页面，手机上该用 Safari 窗口打开
+  const out = { frame: v.frame, why: v.why || '', url: fin.href, mobile: mobileReady(got.html) };   // mobile：false = 没做手机适配的电脑版页面（手机上缩小到整页显示）
   bg(cput(key, out));
-  return json({ ok: true, cached: false, ...out });
+  return { cached: false, ...out };
+}
+async function doFrame(uid: string, b: Any, c: Any, origin: string) {
+  const r = await frameOne(uid, b.url, c, origin);
+  if (r.reject) return fail(r.code, r.msg);
+  return json({ ok: true, ...r });
+}
+async function doFrames(uid: string, b: Any, c: Any, origin: string) {   // 结果页出来时一次问好前几个结果（最多 8 个，同时问），点的时候就不用等了
+  const urls = [...new Set((Array.isArray(b.urls) ? b.urls : []).map((x: unknown) => String(x || '')).filter(Boolean))].slice(0, 8);
+  const list = await Promise.all(urls.map(async u => {
+    try { const { reject: _r, ...r } = await frameOne(uid, u, c, origin); return { u, ...r }; }
+    catch { return { u, frame: null, code: 'server' }; }
+  }));
+  return json({ ok: true, list });
 }
 // 网页开头有 <meta name="viewport" content="width=device-width…"> 就是做了手机适配；读不到正文时不下结论（null）
 export function mobileReady(html: string): boolean | null {
@@ -661,7 +675,7 @@ async function doRead(uid: string, b: Any, c: Any) {
   const key = 'r' + await sha(JSON.stringify([uid, u0.href, at]));
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
-  if (await bump(uid, 'r', c.read_per_user_day) < 0) return fail('limit', '今天简洁阅读打开太多次了，明天再来；可以先点“原网页”');
+  if (await bump(uid, 'r', c.read_per_user_day) < 0) return fail('limit', '今天阅读模式打开太多次了，明天再来');
   let target = u0;
   if (at) {
     if (at === 'latest') {
@@ -841,6 +855,7 @@ export async function handle(req: Request): Promise<Response> {
     if (b.op === 'search') return await doSearch(uid, b, c);
     if (b.op === 'read') return await doRead(uid, b, c);
     if (b.op === 'frame') return await doFrame(uid, b, c, req.headers.get('origin') || String(b.origin || ''));
+    if (b.op === 'frames') return await doFrames(uid, b, c, req.headers.get('origin') || String(b.origin || ''));
     if (b.op === 'versions') return await doVersions(uid, b, c);
     if (b.op === 'translate') return await doTranslate(uid, b, c);
     if (b.op === 'usage') return json({ ok: true, used: await usage(), free: { exa: c.exa_free, tavily: c.tavily_free }, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily(), glm: !!sec('ZHIPU_API_KEY'), groq: !!sec('GROQ_API_KEY') } });

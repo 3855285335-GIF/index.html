@@ -462,7 +462,7 @@ function hideSplash() {
   s.classList.add('done');
   setTimeout(function () { try { s.remove(); } catch (e) {} }, 700);
 }
-function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); hideSplash(); }
+function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); hideSplash(); setTimeout(function () { preloadWS(); }, 5000); }
 function showAuth(msg) {
   $('app-view').classList.remove('active'); $('auth-view').classList.add('active');
   document.body.classList.remove('chat-open');
@@ -6837,11 +6837,20 @@ function openWS(then) {   // then：下载好以后做什么（默认打开搜�
   if (wsLoading) return;
   const generation = accountGeneration;
   wsLoading = true;
+  const slow = setTimeout(function () { if (wsLoading) toast('正在打开搜索…'); }, 500);   // 网慢的时候点了放大镜要有反应
   const s = document.createElement('script');
   s.src = 'search.js?v=' + (APP_V || '0');
-  s.onload = function () { wsLoading = false; const f = wsThen; wsThen = null; if (generation !== accountGeneration) return; if (window.ChatterSearch && f) f(); else if (!window.ChatterSearch) toast('搜索没加载出来，再点一次试试'); };
-  s.onerror = function () { wsLoading = false; wsThen = null; s.remove(); toast('网页浏览没加载出来，检查网络后再点一次'); };
+  s.onload = function () { clearTimeout(slow); wsLoading = false; const f = wsThen; wsThen = null; if (generation !== accountGeneration) return; if (window.ChatterSearch && f) f(); else if (!window.ChatterSearch) toast('搜索没加载出来，再点一次试试'); };
+  s.onerror = function () { clearTimeout(slow); wsLoading = false; wsThen = null; s.remove(); toast('网页浏览没加载出来，检查网络后再点一次'); };
   document.body.appendChild(s);
+}
+let wsPre = false;
+function preloadWS() {   // 打开 App 一会儿以后趁空闲先把搜索界面下载到手机里（后台小助手会存下来）：第一次点放大镜、聊天里的链接都不用等下载
+  if (wsPre || window.ChatterSearch || wsLoading || !S.uid || navigator.onLine === false) return;
+  try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) { /* 读不到就照常 */ }
+  wsPre = true;
+  const go = function () { try { fetch('search.js?v=' + (APP_V || '0'), { credentials: 'same-origin' }).catch(function () { wsPre = false; }); } catch (e) { wsPre = false; } };
+  if (window.requestIdleCallback) window.requestIdleCallback(go, { timeout: 8000 }); else go();
 }
 // 聊天里的网址：在 App 里打开（以前是跳到系统浏览器）。聊天图片、文件这些自己存储里的链接照旧
 function openLink(u, t) { openWS(function () { if (window.ChatterSearch.openPage) window.ChatterSearch.openPage(u, t); else window.open(u, '_blank', 'noopener'); }); }

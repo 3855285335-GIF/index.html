@@ -160,6 +160,8 @@ function addHist(q) { if (P && P.noHist) return; LSs(uidKey('ch2wsHist'), [q].co
 const CSS = `
 .ws{position:fixed;inset:0;z-index:60;display:none;background:var(--bg);color:var(--ink);font-family:var(--font)}
 .ws.on{display:block}
+.ws.on.gone{display:none}
+.ws a[href]{-webkit-touch-callout:none}
 .ws-v{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg)}
 .ws-v.on{display:flex}
 .ws-in{width:100%;max-width:760px;margin:0 auto}
@@ -252,12 +254,16 @@ const CSS = `
 .ws-vd .f{font-size:12px;color:var(--muted)}
 .ws-site{flex:1;text-align:center;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-wbar{gap:0}
-.ws-web{flex:1;min-height:0;position:relative;background:var(--bg);display:flex;flex-direction:column}
+.ws-web{flex:1;min-height:0;position:relative;background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
 .ws-web>.ws-sc{flex:1}
 .ws-web iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff;transform-origin:0 0}
 .ws-web.wide{overflow:auto;-webkit-overflow-scrolling:touch}
 .ws-web.wide iframe{width:980px;right:auto}
 .ws-wload{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:14px;background:var(--bg);padding:0 24px;text-align:center}
+.ws-wload.thin{inset:0 0 auto 0;height:3px;padding:0;background:transparent;overflow:hidden;pointer-events:none}
+.ws-wload.thin>*{display:none}
+.ws-wload.thin::after{content:'';position:absolute;left:0;top:0;height:3px;width:40%;border-radius:2px;background:var(--accent);animation:wsbar 1.1s ease-in-out infinite}
+@keyframes wsbar{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
 .ws-wload .sp{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:wsspin .8s linear infinite}
 @keyframes wsspin{to{transform:rotate(360deg)}}
 .ws-wtip{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 14px;padding-bottom:calc(8px + env(safe-area-inset-bottom));font-size:13px;color:var(--muted);background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
@@ -332,6 +338,8 @@ const CSS = `
 /* 收藏、浏览记录、输入联想、页内查找、朗读、手机里保存的文章 */
 .ws-quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
 .ws-quick+.ws-grid{margin-top:18px}
+.ws-r:active,.ws-row[data-act]:active,.ws-vd:active,.ws-quick button:active{background:var(--surface2)}
+.ws-tile:active,.ws-chip:active,.ws-btn:active,.ws-ib:active,.ws-tool button:active{opacity:.55}
 .ws-quick button{display:flex;align-items:center;gap:8px;height:48px;padding:0 14px;border-radius:16px;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);font-size:15px;min-width:0}
 .ws-quick button svg{color:var(--accent);flex-shrink:0}
 .ws-quick b{margin-left:auto;font-weight:500;color:var(--muted);font-size:13px}
@@ -443,20 +451,22 @@ function show() {
   const sc = scroller(t.v); if (sc && t.y != null) sc.scrollTop = t.y;   // 回到上一层时停在原来看到的位置
 }
 function go(v, d) {
+  if (W.quiet) { W.afterQuiet = () => go(v, d); return; }   // 正在悄悄退网页的历史：等退完再进新的一层，不然会被正在退的那一步顶掉
   const cur = top(); if (cur) { const sc = scroller(cur.v); if (sc) cur.y = sc.scrollTop; if (cur.v === 'read') { clearTimeout(W.posT); savePos(); } }
   W.stack.push({ v: v, d: d || {} });
   try { history.pushState({ ws: W.stack.length }, '', location.href); } catch (e) {}
   show();
 }
 function back() {
+  if (W.quiet) return;   // 正在退网页的历史，别多退一步
   if (history.state && history.state.ws) { try { history.back(); return; } catch (e) {} }
   popTo(W.stack.length - 1);
 }
 function popTo(n) {
   const cur = top(); if (cur && cur.v === 'read') { clearTimeout(W.posT); savePos(); }   // 离开文章时记下看到哪了
+  if (W.quiet) return;   // 正在从网页那一层退出来：页面栈由 leaveWeb 管，这里不动（以前会在退到头时把搜索整个关掉）
   W.stack.length = Math.max(0, Math.min(n, W.stack.length));
   if (!W.stack.length) { close(); return; }
-  if (W.quiet) return;   // 正在从网页那一层退出来，接下来马上要换到别的页面：先不画，免得闪一下
   show();
 }
 function close() {
@@ -538,6 +548,7 @@ async function fetchRes() {
     if (r.src && typeof r.used === 'number') W.used[r.src] = r.used;
   } else c.err = r || { code: 'net', msg: '出错了' };
   renderRes();
+  if (c.done) prefetchFrames(c);
   if (c.done && c.type !== 'images' && P.autoTr !== false && resForeign(c)) trRes(c);   // 外文结果：标题和摘要自动翻成中文
 }
 async function loadUsage() {
@@ -589,8 +600,6 @@ function renderRes() {
     (c.type !== 'deep' ? '<button type="button" class="ws-srcb" data-act="src" aria-label="换一家搜">' + esc(sn) + ico(I.down, 13) + '</button>' : '');
   const tl = (TBS.find(x => x[0] === (c.tbs || '')) || TBS[0])[1];
   let f = '';
-  if (c.type === 'web' || c.type === 'news') f += '<button type="button" class="ws-chip ' + (P.clean ? 'soft' : 'soft off') + '" data-act="tgl-clean">' + (P.clean ? ico(I.check, 13) : '') + '干净页面优先</button>' +
-    '<button type="button" class="ws-chip ' + (P.hideFarms ? 'soft' : 'soft off') + '" data-act="tgl-farm">' + (P.hideFarms ? ico(I.check, 13) : '') + '不看营销号</button>';
   if (c.type !== 'deep') f += '<button type="button" class="ws-chip soft' + (c.tbs ? '' : ' off') + '" data-act="tbs">' + esc(tl) + ico(I.down, 13) + '</button>';
   if (c.done && c.type !== 'images' && (c.tr || resForeign(c))) f += '<button type="button" class="ws-chip ' + (c.trOn ? 'soft' : 'soft off') + '" data-act="res-tr">' + (c.tr === 'busy' ? '正在翻译…' : (c.trOn ? ico(I.check, 13) + '已翻成中文' : '翻译成中文')) + '</button>';
   R('filters').innerHTML = f; R('filters').style.display = f ? '' : 'none';
@@ -606,9 +615,9 @@ function renderRes() {
   const tail = [];
   if (c.loading) tail.push('<button type="button" class="ws-btn" disabled>正在搜…</button>');
   else if (c.err) tail.push(errCard(c.err, 'retry'));
-  else if (c.type !== 'deep' && (c.used === 'exa' || c.used === 'tavily')) tail.push('<button type="button" class="ws-btn" data-act="swap">换 ' + SRCN[otherSrc(c.used)] + ' 再搜一次，看看别的结果</button>');
-  if (c.done && !c.from && /[㐀-鿿]/.test(c.q) && c.type !== 'images') tail.push('<button type="button" class="ws-btn" data-act="q-en">翻成英文再搜一次（外文资料多得多，结果自动翻成中文）</button>');
-  if (c.type !== 'deep' && c.type !== 'images' && c.done) tail.push('<button type="button" class="ws-btn" data-act="tab" data-t="deep">去“深挖”看看（档案馆、论文、代码、讨论）</button>');
+  else if (c.type !== 'deep' && (c.used === 'exa' || c.used === 'tavily')) tail.push('<button type="button" class="ws-btn" data-act="swap">换 ' + SRCN[otherSrc(c.used)] + ' 再搜一次</button>');
+  if (c.done && !c.from && /[㐀-鿿]/.test(c.q) && c.type !== 'images') tail.push('<button type="button" class="ws-btn" data-act="q-en">翻成英文再搜（外文资料更多，结果会翻回中文）</button>');
+  if (c.type !== 'deep' && c.type !== 'images' && c.done) tail.push('<button type="button" class="ws-btn" data-act="tab" data-t="deep">深挖：档案馆、论文、代码、讨论</button>');
   if (c.data && c.data.partial) tail.unshift('<div class="ws-note">Exa 和 Tavily 这个月都用完了，上面只有维基共享资源的图</div>');
   if (W.left != null && W.left < 20 && c.type !== 'deep') tail.push('<div class="ws-note">今天还能搜 ' + W.left + ' 次（搜过的词再搜不算）</div>');
   let head = '';
@@ -744,7 +753,45 @@ function openUrl(u, t) {
   if (lookAlike(u)) { go('read', { u: u, t: t }); return; }   // 像仿冒网站：阅读模式那边有红色提醒
   go('web', { u: u, t: t });
 }
-function noFrame(u) { const f = W.frm.get(u); return !!(f && f.frame === false); }
+/* 网站能不能放进 App 的结论按网站记在手机里（7 天）：同一个网站的规矩基本一样，下次点它的网页直接打开，不用再问服务器 */
+const FRM_DAYS = 7, FRM_MAX = 400;
+const hostOf = u => { try { return new URL(u).hostname.toLowerCase(); } catch (e) { return ''; } };
+function frmHosts() { const m = LSg(uidKey('ch2wsFrm'), {}); return m && typeof m === 'object' ? m : {}; }
+function rememberFrame(u, f) {   // 只记确定的结论（能 / 不能）；服务器没确认的、文件不记
+  if (!f || (f.frame !== true && f.frame !== false) || f.why === 'pdf' || f.why === 'file') return;
+  const h = hostOf(f.url || u); if (!h) return;
+  const m = frmHosts(); m[h] = { f: f.frame ? 1 : 0, m: f.mobile === false ? 0 : 1, w: f.why || '', t: Date.now() };
+  const ks = Object.keys(m); if (ks.length > FRM_MAX) ks.sort((a, b) => m[a].t - m[b].t).slice(0, ks.length - FRM_MAX).forEach(k => { delete m[k]; });
+  LSs(uidKey('ch2wsFrm'), m);
+}
+function knownFrame(u) {   // 先看这个网址刚问过的（10 分钟内），再看这个网站以前的结论（7 天内）
+  const f = W.frm.get(u); if (f && Date.now() - f.at < 10 * 60000) return f;
+  const h = hostOf(u), x = h && frmHosts()[h];
+  if (x && Date.now() - x.t < FRM_DAYS * 86400000) return { frame: !!x.f, why: x.w || (x.f ? '' : 'xfo'), url: u, code: '', mobile: x.m ? true : false, at: Date.now(), host: true };
+  return null;
+}
+function noFrame(u) { const f = knownFrame(u); return !!(f && f.frame === false); }
+function prefetchFrames(c) {   // 结果一出来，先替前 8 个结果问好“能不能放进 App”（一次请求）：点的时候直接打开，不用等
+  if (!c || c.pf || !c.done || c.type === 'images' || c.type === 'videos') return;
+  c.pf = true;
+  try { if (navigator.connection && navigator.connection.saveData) return; } catch (e) { /* 读不到就照常 */ }
+  const all = c.type === 'deep' ? ((c.data && c.data.groups) || []).reduce((a, g) => a.concat(g.items || []), []) : (c.items || []);
+  const off = officialOf(c);
+  const urls = [];
+  [off && off.u].concat(all.map(it => it && it.u)).forEach(u => {
+    if (u && /^https?:\/\//i.test(u) && !vidOf(u) && !lookAlike(u) && !knownFrame(u) && urls.indexOf(u) < 0 && urls.length < 8) urls.push(u);
+  });
+  if (!urls.length) return;
+  const account = accountRevision;
+  B.call({ op: 'frames', urls: urls }, 15000).then(r => {
+    if (account !== accountRevision || !r || !r.ok || !Array.isArray(r.list)) return;   // 服务器还是旧版本（不认识 frames）：点的时候再问
+    r.list.forEach(x => {
+      if (!x || !x.u || !('frame' in x) || x.code === 'server' || x.code === 'limit') return;
+      const f = { frame: x.frame, why: x.why || '', url: x.url || x.u, code: x.code || '', mobile: x.mobile, at: Date.now() };
+      W.frm.set(x.u, f); rememberFrame(x.u, f);
+    });
+  });
+}
 function openPage(u, t) {   // 聊天里点的链接也在这里打开（不跳出 App）
   build(); loadPrefs(); loadCfg();
   if (!W.on) { W.on = true; root.classList.add('on'); document.body.classList.add('ws-open'); }
@@ -759,35 +806,40 @@ function openPage(u, t) {   // 聊天里点的链接也在这里打开（不跳�
 const WHY = { xfo: '这个网站不让别的 App 显示它的原网页', csp: '这个网站不让别的 App 显示它的原网页', http: '这个网站没有加密（http），App 里不能直接显示原网页', pdf: '这是 PDF 文件', file: '这是文件，不是网页' };
 function renderPage(t) {   // 原网页这一层
   const d = t.d, box = R('wbox');
-  R('wsite').textContent = host(d.src || d.u);
+  R('wsite').textContent = host(d.fin || d.src || d.u);
   if (d.fail) { unmountWeb(); box.innerHTML = webFail(d); return; }
   if (d.src) { if (box.dataset.src !== d.src) mountWeb(t); return; }
   if (box.dataset.src || !box.querySelector('.ws-wload')) { unmountWeb(); box.innerHTML = '<div class="ws-wload"><div class="sp"></div><div>正在打开 ' + esc(host(d.u)) + '…</div></div>'; }
   if (!d.probing) probeWeb(t);
 }
 async function probeWeb(t) {
-  const d = t.d, account = accountRevision; d.probing = true;
-  let f = W.frm.get(d.u);
-  if (!f || Date.now() - f.at > 10 * 60000) {
-    const r = await B.call({ op: 'frame', url: d.u }, 12000);
+  const d = t.d, account = accountRevision;
+  let f = knownFrame(d.u);
+  if (!f) {
+    d.probing = true;
+    // 问服务器的同时，先在“正在打开”后面开始加载网页：能放进来的，问完马上就能看；不能的，浏览器只取了一个网页文件，不会下载里面的图片
+    if (/^https:\/\//i.test(d.u) && d.u.indexOf(location.origin) !== 0) { d.src = d.u; d.pending = true; show(); }
+    const r = await B.call({ op: 'frame', url: d.u }, 8000);
     if (account !== accountRevision) return;
     f = (r && r.ok) ? { frame: r.frame, why: r.why || '', url: r.url || d.u, code: r.code || '', mobile: r.mobile, at: Date.now() } : { frame: null, why: '', url: d.u, code: (r && r.code) || 'net', at: Date.now() };
-    if (r && r.ok) W.frm.set(d.u, f);
+    if (r && r.ok) { W.frm.set(d.u, f); rememberFrame(d.u, f); }
+    d.probing = false;
   }
-  d.probing = false;
   if (top() !== t) return;   // 已经离开这一页
   let src = '';
   try { const x = new URL(f.url || d.u); if (x.protocol === 'https:' && x.origin !== location.origin) src = x.href; } catch (e) { /* 网址不对 */ }
+  const drop = () => { d.src = ''; d.pending = false; };
   // 手机仍显示联网但搜索服务连接失败时，收藏的本机副本也能打开。
   if (f.frame === null && f.code === 'net' && !d.fromRead && isFav(d.u, '')) {
     const saved = await artGet(d.u, '');
     if (account !== accountRevision || top() !== t) return;
-    if (saved?.art?.ok) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }
+    if (saved?.art?.ok) { drop(); replaceTop(t, 'read', { u: d.u, t: d.t }); return; }
   }
-  if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：阅读模式那边有按原因的提示和按钮（看存档、去真的网站）
+  if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { drop(); replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：阅读模式那边有按原因的提示和按钮（看存档、去真的网站）
   if (f.frame === false || !src) {   // 嵌不进 App：不跳出去
     const why = WHY[f.why] || (src ? '这个网站不让别的 App 显示它的原网页' : '这个网址不能在 App 里显示原网页');
     const url = f.url || d.u;
+    drop();
     addVisit({ u: d.u, t: d.t, s: host(url), m: 'web' });
     // 视频网站、文件、从阅读模式点过来的：给按钮（在浏览器打开），不变成文字
     if (d.fromRead || hit(url, CFG.video) || hit(d.u, CFG.video) || f.why === 'pdf' || f.why === 'file') { d.fail = { why: why, url: url, vid: hit(url, CFG.video) || hit(d.u, CFG.video) }; show(); return; }
@@ -795,9 +847,12 @@ async function probeWeb(t) {
     return;
   }
   d.desk = f.mobile === false;   // 电脑版网页（没做手机适配）：按电脑的宽度排版，再缩小到整页能看全
-  d.src = src; d.unsure = f.frame === null;
+  d.unsure = f.frame === null;
+  if (f.url && hostOf(f.url) !== hostOf(d.u)) d.fin = f.url;   // 跳到了别的网站（比如短网址）：顶上写真正的网站
+  const box = R('wbox');
+  if (d.pending && box && box.dataset.src === d.u) { d.pending = false; fitDesk(); renderPage(t); if (d.loads) webReady(t); }   // 网页已经在后面加载了：直接用
+  else { d.pending = false; d.src = src; show(); }
   addVisit({ u: d.u, t: d.t, s: host(src), m: 'web' });
-  show();
 }
 function replaceTop(t, v, d) { if (top() !== t) return; t.v = v; t.d = d; W.shownRead = null; show(); }   // 同一层换成别的页面，不多一条历史
 function mountWeb(t) {
@@ -811,14 +866,13 @@ function mountWeb(t) {
   fr.setAttribute('allow', 'fullscreen; autoplay; encrypted-media; picture-in-picture; clipboard-write');
   fr.setAttribute('referrerpolicy', 'no-referrer');
   fr.setAttribute('title', d.t || host(d.src));
-  fr.addEventListener('load', () => {
-    d.loads = (d.loads || 0) + 1; ld.remove();
-    if (d.loads === 1 && !d.tipped) { d.tipped = true; if (d.desk) webTip(t, '电脑版网页，已缩小到整页能看全。', 8000, 'zoom'); else webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000); }
-  });
+  fr.addEventListener('load', () => { d.loads = (d.loads || 0) + 1; if (!d.pending) webReady(t); });
+  const thin = () => { if (!ld.isConnected || top() !== t) return; if (d.pending) { setTimeout(thin, 400); return; } ld.classList.add('thin'); };
+  setTimeout(thin, 1500);
+  fr.src = d.src;   // 先给网址再放进页面：不然会先加载一次空白页，被当成“加载好了”
   box.appendChild(ld); box.appendChild(fr);
   fitDesk();
-  fr.src = d.src;
-  clearTimeout(W.webT); W.webT = setTimeout(() => { if (top() === t && !d.loads) webTip(t, '打开得有点慢。', 0); }, 9000);
+  clearTimeout(W.webT); W.webT = setTimeout(() => { if (top() === t && !d.loads && !d.pending) webTip(t, '打开得有点慢。', 0); }, 9000);
   if (foreign(d.t || '') && !d.trTip) { d.trTip = true; webTip(t, '外文网页。', 0, 'tr'); }
 }
 function unmountWeb() {
@@ -827,14 +881,22 @@ function unmountWeb() {
   const tip = R('wtip'); if (tip) tip.hidden = true;
   clearTimeout(W.webT); clearTimeout(W.tipT);
 }
+function webReady(t) {   // 网页加载好了、也确认能放进来：拿掉“正在打开”，第一次打开时给一句提示
+  const d = t.d, box = R('wbox'); if (top() !== t || !box) return;
+  const ld = box.querySelector('.ws-wload'); if (ld) ld.remove();
+  if (d.tipped) return;
+  d.tipped = true;
+  if (d.desk) webTip(t, '电脑版网页，已缩小到整页能看全。', 8000, 'zoom');
+  else webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000);
+}
 function fitDesk() {   // 电脑版网页：按 980 像素宽排版，再整体缩小到屏幕宽（手机浏览器打开电脑版网页也是这样）；“放大”以后按原大小显示，可以左右拖
   if (!root) return;
   const t = top(), d = t && t.v === 'web' ? t.d : null, box = R('wbox'), fr = box && box.querySelector('iframe');
   if (!fr) return;
   const desk = !!(d && d.desk), zoom = desk && !!d.zoom;
   box.classList.toggle('wide', zoom);
-  const w = box.clientWidth, h = box.clientHeight, sc = desk && !zoom && w > 0 && w < 980 ? w / 980 : 1;
-  if (sc < 1) { fr.style.width = (w / sc) + 'px'; fr.style.height = (h / sc) + 'px'; fr.style.transform = 'scale(' + sc + ')'; }
+  const w = box.clientWidth, sc = desk && !zoom && w > 0 && w < 980 ? w / 980 : 1;
+  if (sc < 1) { fr.style.width = '980px'; fr.style.height = (100 / sc) + '%'; fr.style.transform = 'scale(' + sc + ')'; }   // 高度按百分比：下面的提示条出现、收起时自动跟着变
   else { fr.style.width = ''; fr.style.height = ''; fr.style.transform = ''; }
 }
 function webTip(t, msg, hideMs, kind) {   // 网页下面的小提示。kind：'tr' 外文（翻成中文看）、'zoom' 电脑版网页（放大），其余：看不到内容就换阅读模式
@@ -850,18 +912,28 @@ function webFail(d) {   // 原网页显示不了、又不适合换成文字（�
   return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p>' + (sub ? '<small>' + esc(sub) + '</small>' : '') +
     b('web-ext', '在浏览器打开', true) + (d.fail.vid && d.t && !/^https?:/i.test(d.t) ? b('web-vsearch', '找能直接播放的', false) : '') + (d.fromRead ? b('back', '返回', false) : '') + '</div></div></div>';
 }
-function leaveWeb(next) {   // 退出网页那一层：网页里点过的链接在浏览器历史里留下了记录，一步步退回进来之前那一层；next：退完以后要去的页面
-  const depth = W.stack.length; let n = 0;
+function leaveWeb(next) {   // 退出网页那一层：网页里点过的链接在浏览器历史里留了记录，要一条条退掉。画面先马上回到上一层（或马上关掉），历史在后面悄悄退；next：退完以后要去的页面
+  const depth = W.stack.length; let n = 0, timer = 0, ended = false;
   unmountWeb();
-  W.quiet = !!next;
-  const done = () => { W.quiet = false; if (next) next(); else show(); };
-  const step = () => {
-    if (!W.on) { W.quiet = false; return; }
-    if (W.stack.length < depth) { done(); return; }
-    if (n++ >= 40 || !(history.state && history.state.ws)) { W.stack.length = depth - 1; if (!W.stack.length && !next) { W.quiet = false; close(); return; } done(); return; }
-    try { history.back(); } catch (e) { W.stack.length = depth - 1; done(); return; }
-    setTimeout(step, 200);
+  W.quiet = true; W.stack.length = Math.max(0, depth - 1);
+  if (!next) { if (W.stack.length) show(); else root.classList.add('gone'); }
+  const finish = () => {
+    if (ended) return; ended = true;
+    removeEventListener('popstate', onStep); clearTimeout(timer);
+    W.quiet = false; if (root) root.classList.remove('gone');
+    const later = W.afterQuiet; W.afterQuiet = null;
+    if (!W.on) return;
+    if (next) next(); else if (!W.stack.length) close();
+    if (later && W.on) later();   // 退历史的时候点了别的：现在再打开
   };
+  const step = () => {
+    const ws = history.state && history.state.ws;
+    if (!W.on || !ws || ws < depth || n++ >= 40) { finish(); return; }
+    try { history.back(); } catch (e) { finish(); return; }
+    clearTimeout(timer); timer = setTimeout(step, 220);   // 网页框里的那几条退的时候不发通知：等一会儿再看
+  };
+  const onStep = () => { clearTimeout(timer); timer = setTimeout(step, 0); };   // 退一步马上接着退，不再固定等 0.2 秒
+  addEventListener('popstate', onStep);
   step();
 }
 function itemActs(it) {
