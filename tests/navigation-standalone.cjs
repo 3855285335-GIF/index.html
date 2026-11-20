@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
   const server = http.createServer((req, res) => {
     const p = new URL(req.url, 'http://localhost').pathname.slice(1);
     if (
-      !/^(navigation\.(html|js|css)|vendor\/natural-earth-110m\.js|vendor\/leaflet\/(leaflet\.(js|css)|images\/[a-z0-9-]+\.png))$/.test(p)
+      !/^(navigation\.(html|js|css)|navigation-sound\.js|vendor\/(earth-relief-50m\.webp|navigation-cue\.wav)|vendor\/natural-earth-110m\.js|vendor\/leaflet\/(leaflet\.(js|css)|images\/[a-z0-9-]+\.png))$/.test(p)
     ) {
       res.writeHead(404);
       res.end();
@@ -21,7 +21,7 @@ const root = path.resolve(__dirname, '..');
         '.html': 'text/html; charset=utf-8',
         '.js': 'text/javascript',
         '.css': 'text/css',
-        '.png': 'image/png'
+        '.wav': 'audio/wav', '.webp': 'image/webp', '.png': 'image/png'
       }[path.extname(p)]
     );
     fs.createReadStream(path.join(root, p)).pipe(res);
@@ -63,7 +63,41 @@ const root = path.resolve(__dirname, '..');
     await page.addInitScript(() => Object.defineProperty(navigator, 'geolocation', { value: {
       getCurrentPosition(_ok, fail) { window.locationRequested(); fail({ code: 1 }); }
     }}));
+    await page.addInitScript(() => {
+      window.spoken = [];
+      window.voices = [{ localService: true, name: '测试普通话', lang: 'zh-CN' }];
+      Object.defineProperty(window, 'speechSynthesis', { value: {
+        getVoices: () => window.voices,
+        speak: (u) => window.spoken.push(u.text),
+        cancel: () => {}
+      } });
+      Object.defineProperty(window, 'SpeechSynthesisUtterance', { value: class { constructor(text) { this.text = text; } } });
+    });
     await page.goto(base);
+    await page.waitForSelector('#map.relief');
+    await page.click('#map-expand');
+    assert.ok(await page.locator('#map-dialog').isVisible());
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('main #map-expand');
+    assert.equal(await page.locator('#map-expand').innerText(), '全屏地图');
+    assert.deepEqual(await page.evaluate(() => window.spoken), []);
+    await page.click('#open-sound');
+    assert.ok(await page.locator('#sound-options [value=off]').isChecked());
+    await page.click('#try-voice');
+    assert.equal((await page.evaluate(() => window.spoken)).length, 1);
+    assert.ok(await page.locator('#sound-options [value=off]').isChecked());
+    const cue = page.waitForResponse(r => r.url().endsWith('navigation-cue.wav'));
+    await page.click('#try-sound');
+    const wave = await cue;
+    assert.ok(wave.ok());
+    assert.equal((await wave.body()).subarray(0,4).toString(), 'RIFF');
+    await page.evaluate(() => { window.voices[0].localService = false; });
+    await page.click('#try-voice');
+    await page.locator('#sound-status').filter({hasText:'本机普通话'}).waitFor();
+    assert.equal((await page.evaluate(() => window.spoken)).length, 1);
+    await page.evaluate(() => { window.voices[0].localService = true; });
+    await page.locator('#sound-options [value=voice]').check();
+    await page.click('#close-sound');
     await page.locator('#map .overview-land').waitFor({ state: 'attached' });
     assert.equal(streetRequests, 0);
     assert.equal(geolocationRequests, 0);
@@ -85,7 +119,7 @@ const root = path.resolve(__dirname, '..');
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), theme + width);
         const form = await page.locator('#search').boundingBox(), map = await page.locator('#map').boundingBox();
         if (width > 820) assert.ok(map.x >= form.x + form.width);
-        else assert.ok(map.y > form.y);
+        else assert.ok(map.y + map.height <= form.y);
       }
     }
     await page.setViewportSize({ width: 390, height: 844 });
@@ -113,12 +147,18 @@ const root = path.resolve(__dirname, '..');
       routeQueries = [];
     await page.route('https://routing.openstreetmap.de/**', async (r) => {
       const request = new URL(r.request().url());
+      assert.equal(request.searchParams.get('steps'), 'true');
       routeQueries.push(request.pathname);
       const line = [[114.3, 30.51], snappedFar ? [114.35, 30.56] : [114.31, 30.52]];
       await r.fulfill({
         json: {
           code: 'Ok',
-          routes: [{ geometry: { type: 'LineString', coordinates: line }, distance: 1700, duration: 1200 }]
+          routes: [{ geometry: { type: 'LineString', coordinates: line }, distance: 1700, duration: 1200,
+            legs: [{ steps: [
+              { name: '东街', distance: 900, maneuver: { type: 'depart' } },
+              { name: '车站路', distance: 800, maneuver: { type: 'turn', modifier: 'left' } },
+              { name: '', distance: 0, maneuver: { type: 'arrive' } }
+            ] }] }]
         }
       });
     });
@@ -133,7 +173,15 @@ const root = path.resolve(__dirname, '..');
     await page.fill('#from-lat', '30.51');
     await page.fill('#from-lon', '114.30');
     await page.click('#plan-go');
-    await page.locator('#plan-status').filter({ hasText: '1.70 公里' }).waitFor();
+    await page.locator('#route-summary').waitFor();
+    assert.equal(await page.locator('#duration').innerText(), '20');
+    assert.equal(await page.locator('#distance').innerText(), '1.7');
+    assert.match((await page.evaluate(() => window.spoken)).at(-1), /步行前往南站.*20 分钟.*1.7 公里/);
+    await page.locator('#steps summary').click();
+    assert.match(await page.locator('#step-list li').nth(1).innerText(), /左转.*车站路/);
+    await page.getByRole('button', {name:'朗读第 2 段'}).click();
+    assert.match((await page.evaluate(() => window.spoken)).at(-1), /路线预览，第 2 段.*左转.*车站路/);
+    await page.locator('#plan summary').click();
     assert.equal(routeQueries[0], '/routed-foot/route/v1/driving/114.3,30.51;114.31,30.52');
     snappedFar = true;
     await page.getByRole('radio', { name: '骑行' }).check();
@@ -142,11 +190,19 @@ const root = path.resolve(__dirname, '..');
     await page.click('#plan-go');
     await page.locator('#plan-status').filter({ hasText: '相距较远' }).waitFor();
     assert.ok(routeQueries[1].startsWith('/routed-bike/'));
+    assert.equal(await page.locator('#route-summary').isVisible(), false);
     assert.equal(
       new URL(await page.locator('#route').getAttribute('href')).searchParams.get('position'),
       '114.31,30.52'
     );
     console.log('步行路线按选定入口计算；骑行服务返回远处道路时拒绝绘制并保留原终点。');
+    await page.click('#replace');
+    assert.ok(await page.locator('#recent-places button').filter({hasText:'乙城'}).isVisible());
+    await page.locator('#recent-places button').click();
+    assert.equal(await page.locator('#dest-name').innerText(), '南站');
+    await page.click('#replace');
+    await page.click('#clear-recents');
+    assert.equal(await page.locator('#recents').isVisible(), false);
     await search('故障');
     await page.locator('#search-status').filter({ hasText: '未完成' }).waitFor();
     assert.equal(await page.locator('#route').isVisible(), false);
@@ -163,6 +219,9 @@ const root = path.resolve(__dirname, '..');
       contentType: 'image/png', body: fs.readFileSync(path.join(root, 'vendor/leaflet/images/marker-icon.png'))
     }));
     await page.reload();
+    await page.click('#open-sound');
+    assert.ok(await page.locator('#sound-options [value=off]').isChecked());
+    await page.click('#close-sound');
     await page.locator('#map .leaflet-tile-loaded').first().waitFor();
     await page.click('#pick');
     await page.locator('#map').click({ position: { x: 115, y: 91 } });

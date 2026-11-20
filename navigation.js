@@ -1,6 +1,13 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  const sound = window.createNavigationSound?.();
+  if (!sound) {
+    $('open-sound').hidden = true;
+    $('hear-route').hidden = true;
+  }
+  const recents = [];
+  let routeSpeech = '';
   let bridge = null;
   try {
     if (parent !== window) bridge = parent.getChatterNavigation?.(window);
@@ -65,6 +72,8 @@
   function createMap() {
     if (map || !window.L) return;
     map = L.map('map', { minZoom: 2, maxZoom: 19, scrollWheelZoom: false, worldCopyJump: true });
+    map.zoomControl.setPosition('topright');
+    L.control.scale({ imperial: false, maxWidth: 70 }).addTo(map);
     map.attributionControl.setPrefix(false);
     map.zoomControl.getContainer().querySelectorAll('a').forEach((el, i) => {
       el.title = i === 0 ? '放大地图' : '缩小地图';
@@ -72,6 +81,12 @@
     });
     const overview = L.layerGroup();
     const [land, rivers] = window.chatterOverview || [];
+    const polarLimit = 85.05112878;
+    map.createPane('terrain').style.zIndex = 350;
+    const relief = L.imageOverlay('vendor/earth-relief-50m.webp', [[-polarLimit, -180], [polarLimit, 180]], {
+      pane: 'terrain', className: 'earth-relief', interactive: false
+    }).addTo(overview);
+    relief.on('load', () => $('map').classList.add('relief'));
     if (land && rivers) {
       L.geoJSON(land, { interactive: false, style: { className: 'overview-land', weight: 1, fillOpacity: 1 } }).addTo(overview);
       L.geoJSON(rivers, { interactive: false, style: { className: 'overview-river', weight: 1.2, opacity: 0.85 } }).addTo(overview);
@@ -97,15 +112,22 @@
     tiles.on('tileload', ({ coords }) => visibleStreetTiles.add(key(coords)));
     tiles.on('tileunload', ({ coords }) => visibleStreetTiles.delete(key(coords)));
     tiles.on('load', () => {
-      if (map.hasLayer(tiles) && map.getContainer().querySelector('.leaflet-tile:not(.leaflet-tile-loaded)') === null && visibleStreetTiles.size) $('map-status').textContent = '';
+      if (map.hasLayer(tiles) && map.getContainer().querySelector('.leaflet-tile:not(.leaflet-tile-loaded)') === null && visibleStreetTiles.size) {
+        $('map-status').textContent = '';
+        $('map-region').hidden = true;
+      }
     });
     tiles.on('tileerror', () => {
-      if (map.hasLayer(tiles)) $('map-status').textContent = '部分街道底图未加载。可继续搜索、输入坐标或用高德核对入口。';
+      if (map.hasLayer(tiles)) {
+        $('map-status').textContent = '部分街道底图未加载。可看区域总览，或用高德核对入口。';
+        $('map-region').hidden = false;
+      }
     });
     const overviewCredit = '<a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a>';
     map.on('zoomend', () => {
       const street = map.getZoom() >= 6;
       $('map').classList.toggle('street', street);
+      if (!street) $('map-region').hidden = true;
       if (street && !map.hasLayer(tiles)) {
         map.removeLayer(overview);
         map.attributionControl.removeAttribution(overviewCredit);
@@ -128,6 +150,7 @@
         $('map-status').textContent = zoom < 16 ? '请先放大到能看清街道和入口，再点具体位置。' : '这里的街道底图未加载，请搜索地点或输入已知坐标。';
         return;
       }
+      if ($('map-dialog').open) closeMap(true);
       if (!trip) clearSelection();
       $('manual').open = true;
       $('place-name').value = '';
@@ -195,6 +218,52 @@
       didFit = true;
     }
   }
+  const mapDialog = $('map-dialog');
+  const mapSlot = document.createComment('地图在页面中的位置');
+  $('map-section').before(mapSlot);
+  let focusPlaceName = false;
+  function closeMap(toName = false) {
+    focusPlaceName = toName;
+    mapDialog.close();
+  }
+  $('map-expand').onclick = () => {
+    if (mapDialog.open) return closeMap();
+    mapDialog.append($('map-section'));
+    $('map-expand').textContent = '收起地图';
+    mapDialog.showModal();
+    map?.invalidateSize();
+    $('map-expand').focus();
+  };
+  mapDialog.addEventListener('close', () => {
+    mapSlot.after($('map-section'));
+    $('map-expand').textContent = '全屏地图';
+    map?.invalidateSize();
+    (focusPlaceName ? $('place-name') : $('map-expand')).focus();
+    focusPlaceName = false;
+  });
+  $('map-region').onclick = () => {
+    if (map) map.setView(map.getCenter(), 5);
+  };
+  function renderRecents() {
+    const list = $('recent-places');
+    list.replaceChildren();
+    $('recents').hidden = !recents.length;
+    for (const place of recents) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = place.name;
+      const detail = document.createElement('small');
+      detail.textContent = place.address || coordText(place);
+      button.append(detail);
+      button.onclick = () => choosePlace(place);
+      list.append(button);
+    }
+  }
+  $('clear-recents').onclick = () => {
+    recents.length = 0;
+    renderRecents();
+    $('query').focus();
+  };
   function choosePlace(place) {
     if (!validPlace(place)) return;
     choosing = false;
@@ -203,6 +272,11 @@
       action('propose', trip.id, place);
       render();
     } else if (!trip) {
+      const old = recents.findIndex((p) => p.lat === place.lat && p.lon === place.lon && p.name === place.name);
+      if (old >= 0) recents.splice(old, 1);
+      recents.unshift({ ...place });
+      if (recents.length > 3) recents.pop();
+      renderRecents();
       select(place);
       $('dest-name').focus();
     }
@@ -238,6 +312,13 @@
     ++routeRevision;
     routerRequest?.abort();
     routeLine = null;
+    sound?.stop();
+    routeSpeech = '';
+    $('route-summary').hidden = true;
+    $('step-list').replaceChildren();
+    $('steps').open = false;
+    $('route-audio-status').textContent = '';
+    $('plan').querySelector('summary').textContent = '规划路线';
     $('plan-status').textContent = '';
     $('plan-go').disabled = false;
     $('plan-go').textContent = '计算' + document.querySelector('#mode :checked + span').textContent + '路线';
@@ -249,6 +330,73 @@
       Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lon - a.lon) / 2) ** 2;
     return 12742000 * Math.asin(Math.sqrt(Math.min(1, h)));
   }
+  const directionNames = {
+    left: '左转', right: '右转', 'slight left': '向左前方行进', 'slight right': '向右前方行进',
+    'sharp left': '向左急转', 'sharp right': '向右急转', straight: '直行', uturn: '掉头'
+  };
+  function stepTitle(step) {
+    const maneuver = step?.maneuver;
+    if (!maneuver || !Number.isFinite(step.distance) || step.distance < 0) return '';
+    const road = typeof step.name === 'string' ? step.name.trim().slice(0, 100) : '';
+    let instruction;
+    switch (maneuver.type) {
+      case 'depart': instruction = '从起点出发'; break;
+      case 'arrive': return '到达路线终点';
+      case 'roundabout': case 'rotary':
+        instruction = Number.isInteger(maneuver.exit) && maneuver.exit > 0 ? '进入环岛，从第 ' + maneuver.exit + ' 个出口驶出' : '进入环岛';
+        break;
+      case 'exit roundabout': case 'exit rotary': instruction = '离开环岛'; break;
+      case 'on ramp': instruction = '进入匝道'; break;
+      case 'off ramp': instruction = '驶离匝道'; break;
+      case 'merge': instruction = '汇入道路'; break;
+      case 'fork': instruction = ({left:'在岔路靠左','slight left':'在岔路靠左',right:'在岔路靠右','slight right':'在岔路靠右'})[maneuver.modifier] || '经过岔路'; break;
+      case 'turn': case 'continue': case 'end of road': instruction = directionNames[maneuver.modifier] || '沿路线前行'; break;
+      default: instruction = '沿路线前行';
+    }
+    return road ? instruction + ' · ' + road : instruction;
+  }
+  function presentRoute(route, gap) {
+    const minutes = Math.max(1, Math.round(route.duration / 60));
+    const unit = route.distance >= 1000 ? '公里' : '米';
+    const distance = unit === '公里' ? Number((route.distance / 1000).toFixed(2)) : Math.round(route.distance);
+    const mode = document.querySelector('#mode :checked + span').textContent;
+    $('duration').textContent = minutes;
+    $('distance').textContent = distance;
+    $('distance-unit').textContent = unit;
+    $('route-gap').textContent = '道路终点距所选入口约 ' + Math.round(gap) + ' 米。';
+    routeSpeech = mode + '前往' + dest.name + '，预计 ' + minutes + ' 分钟，全程约 ' + distance + ' ' + unit + '。';
+    const list = $('step-list');
+    for (const leg of Array.isArray(route.legs) ? route.legs : []) {
+      for (const step of Array.isArray(leg?.steps) ? leg.steps : []) {
+        const title = stepTitle(step);
+        if (!title) continue;
+        const row = document.createElement('li'), text = document.createElement('span'), listen = document.createElement('button');
+        text.textContent = title;
+        const length = step.distance > 0 ? '本段约 ' + Math.round(step.distance) + ' 米' : '';
+        if (length) {
+          const detail = document.createElement('small');
+          detail.textContent = length;
+          text.append(detail);
+        }
+        const index = list.children.length + 1;
+        listen.type = 'button';
+        listen.textContent = '听';
+        listen.setAttribute('aria-label', '朗读第 ' + index + ' 段');
+        listen.onclick = () => sound?.read('路线预览，第 ' + index + ' 段。' + title.replace(' · ', '，') + '。' + length, $('route-audio-status'));
+        row.append(text);
+        if (sound) row.append(listen);
+        list.append(row);
+      }
+    }
+    $('steps').hidden = !list.children.length;
+    $('route-summary').hidden = false;
+    $('plan-status').textContent = '';
+    $('plan').open = false;
+    $('plan').querySelector('summary').textContent = '调整路线';
+    $('route-heading').focus();
+    sound?.announce(routeSpeech, $('route-audio-status'));
+  }
+  $('hear-route').onclick = () => { if (routeSpeech) sound?.read(routeSpeech, $('route-audio-status')); };
   function changeStart() {
     resetRoute();
     $('from-fields').hidden = $('start-source').value !== 'manual';
@@ -303,7 +451,7 @@
           profile +
           '/route/v1/driving/' +
           path +
-          '?overview=full&geometries=geojson',
+          '?overview=full&geometries=geojson&steps=true',
         { signal: ctl.signal, credentials: 'omit' }
       );
       const data = response.ok && (await response.json());
@@ -315,7 +463,7 @@
         !Array.isArray(raw) ||
         raw.length < 2 ||
         !Number.isFinite(r.distance) ||
-        !Number.isFinite(r.duration)
+        !Number.isFinite(r.duration) || r.duration < 0 || r.distance < 0
       )
         throw new Error('暂时没有可核对的路线。可用高德查看已选地点。');
       const line = raw.map(([lon, lat]) => ({ lat, lon }));
@@ -333,14 +481,7 @@
         );
       routeLine = line.map((p) => [p.lat, p.lon]);
       draw(true);
-      $('plan-status').textContent =
-        '约 ' +
-        (r.distance / 1000).toFixed(2) +
-        ' 公里 · 预计 ' +
-        Math.max(1, Math.round(r.duration / 60)) +
-        ' 分钟。路线终点距选定位置约 ' +
-        Math.round(toGap) +
-        ' 米。时间按道路数据估算。';
+      presentRoute(r, toGap);
     } catch (e) {
       if (rev === routeRevision && !stopped)
         $('plan-status').textContent =
@@ -596,6 +737,16 @@
     }
     render();
     draw(!prev && !!value);
+    let announcement;
+    if (prev && !trip) announcement = '本次同行已结束。';
+    if (trip && prev?.id === trip.id) {
+      if (!prev.active && trip.active) announcement = '双方已加入同行。';
+      if (trip.proposal && prev.proposal?.key !== trip.proposal.key && trip.proposal.by !== bridge?.me)
+        announcement = '好友提议更换会合点，请打开同行页面确认。';
+      if (prev.destination && (prev.destination.name !== trip.destination.name || prev.destination.lat !== trip.destination.lat || prev.destination.lon !== trip.destination.lon))
+        announcement = '会合点已更新为' + trip.destination.name + '。';
+    }
+    if (announcement) sound?.announce(announcement, $('trip-notice'));
   }
   function backendError(err) {
     const missing = ['PGRST202', '42883'].includes(err?.code);
@@ -743,6 +894,8 @@
   });
   function dispose() {
     stopped = true;
+    recents.length = 0;
+    sound?.dispose();
     ++generation;
     clearInterval(timer);
     resetRoute();

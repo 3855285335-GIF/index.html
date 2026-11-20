@@ -6,17 +6,25 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>导航 · Chatter</title>
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="navigation.css?v=20261120g" />
+  <link rel="stylesheet" href="navigation.css?v=20261120h" />
   <script defer src="vendor/leaflet/leaflet.js"></script>
   <script defer src="vendor/natural-earth-110m.js"></script>
-  <script defer src="navigation.js?v=20261120g"></script>
+  <script defer src="navigation-sound.js?v=20261120h"></script>
+  <script defer src="navigation.js?v=20261120h"></script>
 </head>
 <body>
   <header class="mast"><div class="mast-inner">
     <span class="compass" aria-hidden="true"></span><span class="brand" lang="en">Chatter</span>
-    <h1>导航</h1><button id="back" hidden>返回聊天</button>
+    <h1>导航</h1><div class="mast-actions"><button id="open-sound" aria-label="导航声音，当前静音" aria-haspopup="dialog" aria-controls="sound-dialog"><span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="sound-label">声音</span></button><button id="back" hidden>返回聊天</button></div>
   </div></header>
   <main>
+    <section id="map-section" class="card map-card" aria-labelledby="map-title">
+      <div class="map-head"><div><h2 id="map-title">地图总览</h2><p id="map-caption">拖动或放大地图，查看不同地点。</p></div><span class="north" aria-label="地图上方为北">N</span></div>
+      <div id="map" aria-label="交互地图" role="region"></div>
+      <div class="map-foot"><button id="map-expand" aria-haspopup="dialog">全屏地图</button><button id="map-region" hidden>看区域总览</button><button id="pick">在图上选点</button><button id="recenter" hidden>显示全部位置</button>
+      <p id="map-status" role="status"></p></div>
+    </section>
+    <div class="sheet">
     <section id="destination-search" class="card" aria-labelledby="search-title">
       <h2 id="search-title">你想去哪里？</h2>
       <form id="search" role="search">
@@ -26,8 +34,8 @@
       <p id="search-status" role="status"></p><div id="results"></div>
       <a id="amap-search" hidden target="_blank" rel="noopener noreferrer">用高德搜索这个地名</a>
       <div class="entry-options">
-        <button id="nearby" type="button"><i class="icon locate-icon" aria-hidden="true"></i>在我附近选点</button>
-        <details id="manual"><summary><i class="icon coord-icon" aria-hidden="true">⌗</i>输入坐标</summary>
+        <button id="nearby" type="button"><i class="icon locate-icon" aria-hidden="true"></i><span>在我附近选点<small>使用本次定位</small></span></button>
+        <details id="manual"><summary><i class="icon coord-icon" aria-hidden="true">⌗</i><span>输入坐标<small>使用已知经纬度</small></span></summary>
           <form id="coords" class="inset">
             <label>地点名称<input id="place-name" maxlength="120" required /></label>
             <div class="pair"><label>纬度<input id="lat" type="number" min="-90" max="90" step="any" placeholder="例如 31.23" required /></label>
@@ -37,11 +45,19 @@
         </details>
       </div>
       <p id="nearby-status" role="status"></p>
+      <div id="recents" hidden><div class="section-head"><h3>刚选过的地点</h3><button id="clear-recents" class="subtle">清除</button></div><div id="recent-places"></div></div>
     </section>
     <section id="confirmed" class="card" hidden aria-labelledby="dest-name">
       <div class="section-head"><span class="kicker">已选目的地</span><button id="replace" class="subtle">更换地点</button></div>
       <h2 id="dest-name" tabindex="-1"></h2><p id="dest-info"></p>
-      <details id="coordinates"><summary>查看 GPS 坐标</summary><p id="dest-coords"></p></details>
+
+      <div id="route-summary" hidden aria-labelledby="route-heading">
+        <div class="section-head"><h3 id="route-heading" tabindex="-1">路线概览</h3><button id="hear-route" class="subtle">听摘要</button></div>
+        <dl class="metrics"><div><dt>预计用时</dt><dd><strong id="duration"></strong> 分钟</dd></div><div><dt>全程</dt><dd><strong id="distance"></strong> <span id="distance-unit"></span></dd></div></dl>
+        <p id="route-gap"></p>
+        <details id="steps" hidden><summary>查看沿途路段</summary><ol id="step-list"></ol></details>
+        <p id="route-audio-status" role="status"></p>
+      </div>
       <details id="plan" open><summary>规划路线</summary>
         <fieldset><legend>出行方式</legend>
           <div class="modes" id="mode">
@@ -57,13 +73,8 @@
         <small class="credit">算路时会把起终点发给 <a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">FOSSGIS</a>。地图数据 © OpenStreetMap 贡献者 · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">纠正地图数据</a></small>
       </details>
       <div class="secondary"><button id="copy">复制地点链接</button><a id="route" target="_blank" rel="noopener noreferrer">在高德查看</a></div>
+      <details id="coordinates"><summary>查看 GPS 坐标</summary><p id="dest-coords"></p></details>
       <p id="copy-status" role="status"></p>
-    </section>
-    <section id="map-section" class="card map-card" aria-labelledby="map-title">
-      <div class="map-head"><div><h2 id="map-title">地图总览</h2><p id="map-caption">拖动或放大地图，查看不同地点。</p></div><span class="north" aria-label="地图上方为北">N</span></div>
-      <div id="map" aria-label="交互地图" role="region"></div>
-      <div class="map-foot"><button id="pick">在图上选点</button><button id="recenter" hidden>显示全部位置</button>
-      <p id="map-status" role="status"></p></div>
     </section>
     <section id="together" class="card" hidden aria-labelledby="trip-title">
       <h2 id="trip-title">一起导航</h2><p id="trip-status" role="status"></p>
@@ -77,6 +88,17 @@
       <p id="trip-notice" role="status"></p><button id="end" class="subtle" hidden>结束本次同行</button>
     </section>
     <p id="notice" role="status"></p>
+    </div>
   </main>
+  <dialog id="sound-dialog" aria-labelledby="sound-title">
+    <div class="section-head"><h2 id="sound-title">导航声音</h2><button id="close-sound" class="subtle" autofocus>完成</button></div>
+    <fieldset id="sound-options"><legend>本次导航</legend>
+      <label><input type="radio" name="sound" value="off" checked /><span>静音<small>只显示文字</small></span></label>
+      <label><input type="radio" name="sound" value="tone" /><span>提示音<small>算好路线或同行有变化时，响一声</small></span></label>
+      <label><input type="radio" name="sound" value="voice" /><span>中文播报<small>读出路线摘要和会合点变化</small></span></label>
+    </fieldset>
+    <div class="secondary"><button id="try-sound">试听提示音</button><button id="try-voice">试听中文</button></div><p id="sound-status" role="status"></p>
+  </dialog>
+  <dialog id="map-dialog" aria-labelledby="map-title"></dialog>
 </body>
 </html>
