@@ -12,6 +12,13 @@ create unlogged table if not exists chatter_navigation_private.trips (
   foreign key(left_acc,right_acc) references public.friendships(owner_acc,friend_acc) on delete cascade,
   foreign key(right_acc,left_acc) references public.friendships(owner_acc,friend_acc) on delete cascade
 );
+alter table chatter_navigation_private.trips
+  add column if not exists accepted_at timestamptz,
+  add column if not exists renew_by text,
+  add column if not exists renew_key uuid;
+-- 兼容已在隔离环境运行的上一版。保留现有会合期限。
+update chatter_navigation_private.trips set accepted_at=expires-interval '30 minutes'
+  where accepted and accepted_at is null;
 alter table chatter_navigation_private.trips enable row level security;
 revoke all on chatter_navigation_private.trips from public, anon, authenticated;
 create index if not exists chatter_navigation_expiry on chatter_navigation_private.trips(expires);
@@ -51,7 +58,20 @@ begin
     case p_action
       when 'accept' then
         if trip.inviter=me then raise insufficient_privilege; end if;
-        update chatter_navigation_private.trips set accepted=true where id=p_id returning * into trip;
+        if not trip.accepted then
+          update chatter_navigation_private.trips set accepted=true, accepted_at=stamp, expires=stamp+interval '30 minutes'
+            where id=p_id returning * into trip;
+        end if;
+      when 'offer_more' then
+        if not trip.accepted or trip.expires >= trip.accepted_at + interval '3 hours' then raise exception '无法再延长同行'; end if;
+        if trip.renew_by is null then
+          update chatter_navigation_private.trips set renew_by=me,renew_key=gen_random_uuid() where id=p_id returning * into trip;
+        end if;
+      when 'accept_more' then
+        if not trip.accepted or trip.renew_by is null or trip.renew_by=me or
+           trip.renew_key::text is distinct from (p_value->>'key') then raise exception '续时邀请已变化'; end if;
+        update chatter_navigation_private.trips set expires=least(expires+interval '30 minutes',accepted_at+interval '3 hours'),
+          renew_by=null,renew_key=null where id=p_id returning * into trip;
       when 'propose' then
         if not trip.accepted or nullif(trim(p_value->>'name'),'') is null then raise exception '先接受同行并核对地点'; end if;
         update chatter_navigation_private.trips set proposal=value||jsonb_build_object('name',left(trim(p_value->>'name'),120),'by',me,'key',gen_random_uuid())
@@ -86,7 +106,9 @@ begin
   peer_fix := case when me=a then trip.right_fix else trip.left_fix end;
   if not trip.accepted or (peer_fix->>'time')::numeric < extract(epoch from stamp)*1000-90000 then peer_fix:=null; end if;
   return jsonb_build_object('id',trip.id,'inviter',trip.inviter,'active',trip.accepted,'destination',trip.destination,
-                            'expires',trip.expires,'peerFix',peer_fix,'proposal',trip.proposal,
+                            'expires',trip.expires,'serverTime',floor(extract(epoch from stamp)*1000),
+                            'canExtend',trip.accepted and trip.expires<trip.accepted_at+interval '3 hours',
+                            'renewBy',trip.renew_by,'renewKey',trip.renew_key,'peerFix',peer_fix,'proposal',trip.proposal,
                             'myWait',case when me=a then trip.left_wait else trip.right_wait end,
                             'peerWait',case when me=a then trip.right_wait else trip.left_wait end);
 end $$;

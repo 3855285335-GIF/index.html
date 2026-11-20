@@ -828,7 +828,7 @@ test('动态点赞：数据库返回错误时恢复计数，可重新提交', as
   } finally { env.close(); }
 });
 
-test('应用页：右上角“应用”打开小组件 + 图标格子；点“音乐”才下载 music.js；返回一层层退；音乐请求直接发给 Audius（不经过我们的服务器）', async () => {
+test('应用页：底部菜单的“应用”是小组件 + 图标格子；点“音乐”才下载 music.js；请求并进通讯录（没有请求不占地方）；音乐请求直接发给 Audius', async () => {
   const fs = require('fs'), t = Date.now(), env = makeEnv({ db: baseDb(t) });
   try {
     await env.login(); await sleep(200);
@@ -841,25 +841,37 @@ test('应用页：右上角“应用”打开小组件 + 图标格子；点“�
       if (u.indexOf('https://api.audius.co/v1/tracks/trending') === 0) return resp({ data: [TR(1), TR(2), Object.assign(TR(3), { access: { stream: false } }), Object.assign(TR(4), { stream_conditions: { usdc_purchase: {} } })] });
       return resp({ sent: 1 });
     };
-    click(env, env.$('btn-apps')); await sleep(30);
-    const av = env.$('apps-view');
-    ok(av && av.classList.contains('on') && H.state && H.state.apps === 1, '点“应用”没打开应用页：' + JSON.stringify(H.state));
-    const names = Array.from(av.querySelectorAll('.ap-ic')).map(x => x.textContent.trim());
-    ok(names.join(',') === '搜索,音乐,导航' && /音乐[\s\S]*点这里听歌/.test(av.querySelector('.apw').textContent), '应用页应该有音乐小组件和“搜索、音乐、导航”三个图标：' + names.join(','));
+    const navs = Array.from(d.querySelectorAll('.app-nav button')).map(b => b.dataset.tab);
+    ok(navs.join(',') === 'convs,contacts,apps,moments,me' && !env.$('btn-apps') && !env.$('tab-requests'), '底部菜单应该是：消息、通讯录、应用、朋友圈、我（“请求”不再单独占一页）：' + navs.join(','));
+    // 请求：在通讯录顶上，没有请求时整块不显示；角标在“通讯录”上
+    env.T.S.requests = []; env.T.renderRequests ? env.T.renderRequests() : null;
+    ok(env.$('req-sec') && env.$('req-sec').hidden && env.$('req-sec').closest('#tab-contacts'), '没有好友请求时：通讯录里不显示“新的朋友”');
+    env.T.S.requests = [{ id: 'r1', from_acc: 'zoe', from_name: '佐伊', to_acc: 'me', status: 'pending' }];
+    if (env.T.renderRequests) env.T.renderRequests();
+    const badge = env.$('req-badge');
+    ok(!env.$('req-sec').hidden && /佐伊/.test(env.$('request-list').textContent) && badge && badge.closest('button').dataset.tab === 'contacts' && badge.style.display !== 'none' && badge.textContent === '1', '有好友请求时：通讯录顶上出现“新的朋友”，角标在“通讯录”上');
+    env.T.S.requests = []; if (env.T.renderRequests) env.T.renderRequests();
+    // 应用页
+    click(env, d.querySelector('.app-nav button[data-tab="apps"]')); await sleep(30);
+    const tab = env.$('tab-apps');
+    ok(tab.classList.contains('active'), '点“应用”没打开应用页');
+    const names = Array.from(tab.querySelectorAll('.ap-ic')).map(x => x.textContent.trim());
+    ok(names.join(',') === '搜索,音乐,导航' && tab.querySelector('.apx.wide[data-app="search"]') && /听点什么/.test(tab.querySelector('[data-app="music"]').textContent) && !tab.querySelector('[data-app="last"]'), '应用页：搜索小组件（大）、音乐小组件、图标“搜索、音乐、导航”；没看过网页时不显示“接着看”：' + names.join(','));
+    w.localStorage.setItem('ch2wsSeen:' + env.T.S.uid, JSON.stringify([{ u: 'https://news.example.com/a', t: '一篇新闻', m: 'web', c: 1 }, { u: 'https://news.example.com/b', t: '另一篇', m: 'web', c: 2 }, { u: 'https://wiki.example.org/x', t: '词条', m: 'read', c: 1 }]));
+    click(env, d.querySelector('.app-nav button[data-tab="convs"]')); click(env, d.querySelector('.app-nav button[data-tab="apps"]')); await sleep(30);
+    ok(/接着看[\s\S]*一篇新闻/.test(tab.querySelector('[data-app="last"]').textContent) && Array.from(tab.querySelectorAll('[data-app="site"]')).map(x => x.dataset.u).join(',') === 'https://news.example.com/,https://wiki.example.org/', '看过网页以后：“接着看”是上次看的那页，搜索小组件下面是常去的网站');
     ok(!Array.from(d.querySelectorAll('script')).some(x => /music\.js/.test(x.getAttribute('src') || '')), '还没点音乐就下载了 music.js');
-    click(env, av.querySelector('[data-app="music"]')); await sleep(30);
+    click(env, tab.querySelector('[data-app="music"]')); await sleep(30);
     const sc = Array.from(d.querySelectorAll('script')).find(x => /music\.js\?v=/.test(x.getAttribute('src') || ''));
-    ok(sc && !w.ChatterMusic, '点“音乐”没有去下载 music.js');
+    ok(sc && !w.ChatterMusic, '点音乐小组件没有去下载 music.js');
     w.eval(fs.readFileSync(path.join(ROOT, 'music.js'), 'utf8')); sc.onload(); await sleep(200);
     const mu = env.$('mu');
     ok(mu && mu.classList.contains('on') && H.state && H.state.mu === 1, '音乐首页没打开：' + JSON.stringify(H.state));
     const rows = Array.from(mu.querySelectorAll('.mu-row .mu-rt')).map(x => x.textContent);
     ok(rows.join(',') === '测试歌 1,测试歌 2', '热门列表不对（不能直接播的两首要去掉）：' + rows.join(','));
-    ok(calls.some(u => /^https:\/\/api\.audius\.co\/v1\/tracks\/trending\?app_name=Chatter&time=week&limit=50$/.test(u)) && !calls.some(u => /functions\/v1/.test(u) && /audius/.test(u)), '热门应该直接问 Audius（带 app_name、本周、50 首）：' + calls.filter(u => /audius/.test(u)).join(' | '));
+    ok(calls.some(u => /^https:\/\/api\.audius\.co\/v1\/tracks\/trending\?app_name=Chatter&time=week&limit=50$/.test(u)) && !calls.some(u => /functions\/v1/.test(u) && /audius/.test(u)), '热门应该直接问 Audius（带 app_name、本周、50 首）');
     H.back(); await sleep(150);
-    ok(!mu.classList.contains('on') && av.classList.contains('on'), '音乐首页返回：应该回到应用页');
-    H.back(); await sleep(150);
-    ok(!av.classList.contains('on'), '应用页返回：应该关掉');
+    ok(!mu.classList.contains('on') && tab.classList.contains('active'), '音乐首页返回：回到应用页');
     ok(d.querySelector('#app-view .app-nav') && !d.getElementById('mu-mini'), '没放过歌：不该出现迷你播放条');
   } finally { env.close(); }
 });
@@ -1089,7 +1101,8 @@ test('退出登录会清除本账号的离线文章和浏览记录，保留另�
         const tx = db.transaction('art','readwrite');
         for (const uid of [me,other]) {
           tx.objectStore('art').put({k:key(uid),uid,tm:1});
-          env.w.localStorage.setItem('ch2wsSeen:'+uid,'[]');
+          for (const prefix of ['ch2wsSeen','ch2wsFrm','ch2wsTabs','ch2muNow','ch2muRecent','ch2muLike','ch2mute'])
+            env.w.localStorage.setItem(prefix+':'+uid,'[]');
         }
         tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
       });
@@ -1097,7 +1110,9 @@ test('退出登录会清除本账号的离线文章和浏览记录，保留另�
       const readKeys = () => new Promise(resolve => { const q=db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess=() => resolve(q.result); });
       for (let attempt=0; attempt<25 && (await readKeys()).includes(key(me)); attempt++) await sleep(20);
       ok((await readKeys()).join() === key(other), '离线文章清理的账号范围错误');
-      ok(env.w.localStorage.getItem('ch2wsSeen:'+me) === null && env.w.localStorage.getItem('ch2wsSeen:'+other) === '[]', '浏览记录清理的账号范围错误');
+      for (const prefix of ['ch2wsSeen','ch2wsFrm','ch2wsTabs','ch2muNow','ch2muRecent'])
+        ok(env.w.localStorage.getItem(prefix+':'+me) === null && env.w.localStorage.getItem(prefix+':'+other) === '[]', prefix+' 清理的账号范围错误');
+      for (const prefix of ['ch2muLike','ch2mute']) ok(env.w.localStorage.getItem(prefix+':'+me) === '[]', '应保留本账号的收藏和设置');
     } finally { db.close(); }
   } finally { env.close(); }
 });

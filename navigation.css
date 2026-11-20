@@ -233,3 +233,7 @@ dialog::backdrop { background: #13152380; }
 #step-list li button { position: absolute; right: 0; top: 0; min-width: 44px; padding: 0 9px; color: var(--accent); background: var(--surface); }
 
 @media (max-height: 620px) and (max-width: 819px) { #map { height: 37svh; min-height: 180px; } }
+
+dialog:not([open]) { display: none; }
+dialog.dialog-fallback[open] { position: fixed; z-index: 2000; inset: 0; margin: auto; height: fit-content; }
+#map-dialog.dialog-fallback[open] { height: 100%; }

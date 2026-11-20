@@ -74,6 +74,15 @@ async function read(page, peer, id) {
     await openChat(a, alice, bob);
     await openChat(b, bob, alice);
     const an = await enter(a);
+    // 同一设备的系统时钟快了六分钟；GPS 时间戳也来自该设备。
+    await an.locator('#manual summary').waitFor();
+    const af = a.frames().find(f => f.url().includes('/navigation.html'));
+    await af.evaluate(() => {
+      Object.defineProperty(crypto,'randomUUID',{value:undefined});
+      const now = Date.now, gps = navigator.geolocation.watchPosition.bind(navigator.geolocation);
+      Date.now = () => now()+360000;
+      navigator.geolocation.watchPosition = (ok, fail, options) => gps(p => ok({coords:p.coords,timestamp:p.timestamp+360000}), fail, options);
+    });
     await offerPoint(an, '测试场馆东入口', 31.21014, 121.45013);
     const marker = new URL(await an.locator('#route').getAttribute('href'));
     assert.equal(marker.searchParams.get('position'), '121.45013,31.21014');
@@ -84,6 +93,8 @@ async function read(page, peer, id) {
     await bn.locator('#accept').waitFor();
     const pending = (await read(a, bob)).data;
     assert.equal(pending.active, false);
+    const invite = await b.evaluate(id => __T.S.msgs.find(m=>m.id===id)?.body,pending.id);
+    assert.equal(invite,'邀请你一起导航，点此查看会合地图。');
     assert.equal(pending.peerFix, null);
     assert.ok((await read(c, bob, pending.id)).error);
     assert.equal(await bn.locator('#plan-go').isVisible(), false);
@@ -110,6 +121,21 @@ async function read(page, peer, id) {
     assert.equal(view.peerFix.lat, 31.21);
     assert.equal(view.peerFix.lon, 121.45);
     console.log('双方同意后可见彼此位置，精确经纬度交给高德标记，陌生账号读不到同行。');
+    await an.locator('#renew').click();
+    await bn.locator('#renew').filter({hasText:'同意延长'}).click();
+    await bn.locator('#renew').filter({hasText:'提议延长'}).waitFor();
+    assert.ok(Date.parse((await read(b,alice)).data.expires) - Date.parse(view.expires) >= 1799000);
+    await an.locator('#back').click();
+    await a.locator('#btn-more').waitFor();
+    assert.equal((await read(a,bob)).data.id, pending.id);
+    await a.evaluate(()=>__T.closeChat());
+    await a.click('.app-nav [data-tab=apps]');
+    await a.click('[data-app="resume-map"]');
+    await an.locator('#share').waitFor();
+    assert.equal(await an.locator('#back').innerText(), '返回应用');
+    await an.locator('#share').click();
+    await an.locator('#gps').filter({hasText:'我的位置更新于'}).waitFor();
+    console.log('手机时钟快六分钟仍能共享；返回聊天后可从应用回到原同行，重新点击才恢复定位；两人确认后续时。');
     await an.locator('#wait-note').fill('东门蓝色售票亭');
     await an.locator('#wait-here').click();
     await bn.locator('#wait-info').filter({ hasText: '东门蓝色售票亭' }).waitFor();
@@ -124,10 +150,10 @@ async function read(page, peer, id) {
     assert.equal(await guestFrame.evaluate(() => navSpoken.filter(s => s.includes('会合点已更新为南入口')).length), 1);
     const frame = b.frames().find((f) => f.url().includes('/navigation.html'));
     const stale = await frame.evaluate(() => {
-      const now = Date.now;
-      Date.now = () => now() + 100000;
+      const now = performance.now.bind(performance);
+      Object.defineProperty(performance, 'now', {configurable:true,value:() => now()+100000});
       document.dispatchEvent(new Event('visibilitychange'));
-      Date.now = now;
+      delete performance.now;
       return {
         distance: document.getElementById('separation').textContent,
         other: document.getElementById('other').textContent,
@@ -142,26 +168,37 @@ async function read(page, peer, id) {
     await a.context().setOffline(true);
     await a.context().setGeolocation({ latitude: 31.222, longitude: 121.463, accuracy: 18 });
     await a.context().setOffline(false);
+    // 好友来电使用正常 UI 信令入口；测试接听键可命中，随后点拒绝，不占用真实麦克风。
+    await bn.locator('#map-expand').click();
+    await b.evaluate(from => window.__T.onInvite({from,id:crypto.randomUUID(),sdp:{type:'offer',sdp:'v=0'}}),alice);
+    await b.locator('#incoming-ui.active').waitFor();
+    assert.ok(await b.locator('#btn-answer').evaluate(el => {
+      const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+    }));
+    await b.click('#btn-decline');
+    await bn.locator('#map-expand').click();
+    await bn.locator('#gps').filter({hasText:'来电已暂停定位'}).waitFor();
+    assert.equal((await read(b,alice)).data.id,pending.id);
+    await b.context().setOffline(true);
     await bn.locator('#end').click();
-    await an.locator('#trip-status').filter({ hasText: '选好入口' }).waitFor();
-    assert.equal((await read(b, alice, pending.id)).data, null);
+    await bn.locator('#trip-status').filter({hasText:'等待联网'}).waitFor();
     await bn.locator('#back').click();
     await b.locator('#btn-more').waitFor();
+    assert.equal((await read(a,bob)).data.id,pending.id);
+    await b.context().setOffline(false);
+    await an.locator('#trip-status').filter({ hasText: '此邀请已结束' }).waitFor();
+    assert.equal((await read(b, alice, pending.id)).data, null);
     assert.equal(await b.evaluate(() => __T.S.peer), alice);
-    console.log('断网重连后结束共享，服务端移除临时会话，返回后仍是原好友。');
+    console.log('全屏地图上来电接听键可命中，拒绝后保留同行。断网点结束后可返回聊天，同一会话重连即从服务器删除。');
     await b.evaluate(()=>__T.closeChat());
-    await b.click('.app-nav [data-tab="me"]'); await b.click('#btn-navigation');
+    await b.click('.app-nav [data-tab="apps"]');
+    await b.click('#tab-apps .ap-grid [data-app="map"]');
     const solo=b.frameLocator('iframe[title="导航"]');
     await solo.locator('#query').waitFor();
     assert.equal(await solo.locator('#together').isVisible(),false);
     assert.equal(await solo.locator('#back').innerText(), '返回应用');
-    await solo.locator('#back').click();await b.locator('#btn-navigation').waitFor();
-
-    await b.click('.app-nav [data-tab="convs"]');
-    await b.click('#btn-apps');
-    await b.click('#apps-view [data-app="map"]');
-    await b.frameLocator('iframe[title="导航"]').locator('#back').click();
-    const musicIcon = b.locator('#apps-view.on .ap-grid [data-app="music"]');
+    await solo.locator('#back').click();
+    const musicIcon = b.locator('#tab-apps.active .ap-grid [data-app="music"]');
     await musicIcon.click();
     await b.locator('.mu-v.on[data-v="home"] [data-act="back"]').click();
     await musicIcon.waitFor();
@@ -170,7 +207,7 @@ async function read(page, peer, id) {
       const audio = document.getElementById('mu-audio');
       audio.src = 'vendor/navigation-cue.wav'; audio.loop = true; await audio.play();
     });
-    await b.click('#apps-view .ap-grid [data-app="map"]');
+    await b.click('#tab-apps .ap-grid [data-app="map"]');
     await solo.locator('#open-sound').click();
     assert.equal(await b.evaluate(() => document.getElementById('mu-audio').paused), false);
     await solo.locator('#try-sound').click();
@@ -183,7 +220,7 @@ async function read(page, peer, id) {
     await musicIcon.waitFor();
     console.log('真实音乐播放器用本地音频播放；打开静音导航继续播，主动试听后暂停音乐。');
     console.log('共用应用页的导航可打开并返回格子；搜索、音乐入口仍在。');
-    console.log('「我 → 应用 → 导航」可独立打开并返回，不向任何好友广播位置。');
+    console.log('「应用 → 导航」可独立打开并返回，不向任何好友广播位置。');
     await a.close();
     await b.close();
     await c.close();

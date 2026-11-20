@@ -58,7 +58,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       if (u.pathname === '/') return J({ data: ['https://api.audius.co'] });
       if (u.pathname === '/v1/tracks/trending') { await new Promise(r => setTimeout(r, 150)); const g = u.searchParams.get('genre'); return J({ data: g ? TREND.slice(0, 4).map(t => Object.assign({}, t, { id: t.id + g.replace(/\W/g, ''), title: g + ' · ' + t.title })) : TREND }); }
       if (u.pathname === '/v1/tracks/search') { const off = +u.searchParams.get('offset') || 0, q = u.searchParams.get('query'); if (q === '没有') return J({ data: [] }); if (q === '坏了') return rt.fulfill({ status: 500, body: '' });
-        return J({ data: off >= 40 ? [] : Array.from({ length: 20 }, (_, i) => TR(100 + off + i, { title: q + ' 第 ' + (off + i + 1) + ' 首' })) }); }
+        if (q === '少量') return J({ data: off >= 90 ? [] : Array.from({ length: 30 }, (_, i) => TR(500 + off + i, { title: '少量 ' + (off + i + 1), access: { stream: i % 5 < 2 } })) });   // 一页 30 条里只有 12 条能播
+        return J({ data: off >= 60 ? [] : Array.from({ length: 30 }, (_, i) => TR(100 + off + i, { title: q + ' 第 ' + (off + i + 1) + ' 首' })) }); }
       const m = /^\/v1\/tracks\/([^/]+)\/stream$/.exec(u.pathname);
       if (m) { if (/^bad/.test(m[1])) return rt.fulfill({ status: 404, body: '' }); return rt.fulfill({ status: 302, headers: { location: 'http://localhost:8768/cidstream/' + m[1] + '?signature=x', 'access-control-allow-origin': '*' } }); }
       rt.fulfill({ status: 404, body: '' });
@@ -95,16 +96,16 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(s1 && !s1.paused && s1.src === 'https://api.audius.co/v1/tracks/t0/stream?app_name=Chatter', '点一首：打开“正在播放”，手机直接从 Audius 取歌开始放 → ' + JSON.stringify(s1));
       const meta = await pg.evaluate(() => navigator.mediaSession && navigator.mediaSession.metadata && { t: navigator.mediaSession.metadata.title, a: navigator.mediaSession.metadata.artist, n: navigator.mediaSession.metadata.artwork.length });
       ok(meta && meta.t === '夜里的海' && meta.a === '音乐人 0' && meta.n === 3, '锁屏和耳机线控能看到歌名、歌手、封面（系统的“正在播放”）→ ' + JSON.stringify(meta));
-      await pg.click('[data-act="toggle"]'); await pg.waitForTimeout(150);
+      await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.paused; }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).paused && /M8 5\.5v13/.test(await pg.$eval('[data-act="toggle"]', e => e.innerHTML)) && await pg.evaluate(() => navigator.mediaSession.playbackState) === 'paused', '点暂停：停下，按钮变回“播放”');
       await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(true, '再点：接着放');
-      await pg.click('[data-act="next"]'); await pg.waitForTimeout(200);
+      await pg.click('[data-act="next"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.getAttribute('src').includes('/t1/stream'); }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).src.includes('/t1/stream') && await pg.$eval('.mu-nt .mu-rt', e => e.textContent) === 'Morning Coffee', '下一首');
       await pg.waitForFunction(() => document.getElementById('mu-audio').getAttribute('src').includes('/t2/stream'), null, { timeout: 6000 }).catch(() => {});
       ok((await st()).src.includes('/t2/stream'), '放完自动下一首');
       await pg.evaluate(() => { document.getElementById('mu-audio').currentTime = 0; });
-      await pg.click('[data-act="prev"]'); await pg.waitForTimeout(150);
+      await pg.click('[data-act="prev"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.getAttribute('src').includes('/t1/stream'); }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).src.includes('/t1/stream'), '刚开始放时点“上一首”：回到上一首');
       await pg.waitForFunction(() => document.getElementById('mu-audio').currentTime > 0.1).catch(() => {});
       await pg.click('[data-act="next"]'); await pg.waitForFunction(() => document.getElementById('mu-audio').currentTime > 0.1, null, { timeout: 5000 }).catch(() => {});
@@ -134,7 +135,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       // 别的声音开始放：音乐先停
       await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       await pg.evaluate(() => document.getElementById('voice').play());
-      await pg.waitForTimeout(150);
+      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.paused; }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).paused, '放语音消息、视频或者通话开始时：音乐自动先停，不叠在一起');
       await pg.evaluate(() => document.getElementById('voice').pause());
     }
@@ -149,7 +150,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('#mu-mini [data-act="mini-pp"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(!(await pg.evaluate(() => ChatterMusic.isOpen())), '迷你条上点播放：直接放，不打开页面');
       await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.currentTime = 2.2; ChatterMusic._m.savedAt = 0; });
-      await pg.waitForTimeout(500);
+      await pg.waitForFunction(() => { const v = JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'); return v && v.at >= 2; }, null, { timeout: 4000 }).catch(() => {});
       const sv = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'));
       ok(sv && sv.at >= 2 && sv.q.length === 12, '放的时候每 5 秒把位置记在手机里（重开能接着听）→ ' + (sv && sv.at) + ' 秒');
       await pg.evaluate(() => { const v = document.createElement('video'); v.muted = true; v.id = 'mutedv'; v.src = '/voice.wav'; document.body.appendChild(v); return v.play().catch(() => {}); });
@@ -157,7 +158,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(!(await st()).paused, '静音的视频开始放（比如视频通话里自己的画面）：音乐不停');
       await pg.evaluate(() => document.getElementById('mutedv').remove());
       const want = await pg.evaluate(() => { const m = ChatterMusic._m; return m.q[(m.i + 1) % m.q.length].id; });
-      await pg.click('#mu-mini [data-act="mini-next"]'); await pg.waitForTimeout(150);
+      await pg.click('#mu-mini [data-act="mini-next"]'); await pg.waitForFunction(w => document.getElementById('mu-audio').getAttribute('src').includes('/' + w + '/stream'), want, { timeout: 4000 }).catch(() => {});
       ok((await st()).src.includes('/' + want + '/stream'), '迷你条上点下一首');
       await pg.evaluate(() => ChatterMusic._play(ChatterMusic._m.q, 3));
       await pg.click('#mu-mini .mu-tx'); await pg.waitForSelector('.mu-v.on[data-v="now"]');
@@ -176,9 +177,9 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     await pg.waitForSelector('.mu-v.on[data-v="list"] .mu-row');
     await shot('4-搜索结果');
     if (L) {
-      ok((await pg.$$eval('.mu-v.on .mu-row', a => a.length)) === 20 && await pg.$eval('[data-r="ltitle"]', e => e.textContent) === '搜「piano」', '搜歌：列出 20 首');
-      await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on .mu-row').length === 40);
-      ok(reqs.some(r => /search\?app_name=Chatter&query=piano&limit=30&offset=20/.test(r)), '加载更多：接着往后取（offset）');
+      ok((await pg.$$eval('.mu-v.on .mu-row', a => a.length)) === 30 && await pg.$eval('[data-r="ltitle"]', e => e.textContent) === '搜「piano」', '搜歌：一次列出 30 首');
+      await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on .mu-row').length === 60);
+      ok(reqs.some(r => /search\?app_name=Chatter&query=piano&limit=30&offset=30/.test(r)), '加载更多：接着往后取（offset）');
       await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => /没有更多了/.test(document.querySelector('[data-r="list"]').textContent));
       ok(true, '没有了：写“没有更多了”');
       await pg.click('.mu-v.on .mu-row [data-act="row-more"] >> nth=0');
@@ -205,6 +206,24 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.evaluate(() => ChatterMusic._play([{ id: 'bad1', t: '坏的 1', a: '' }, { id: 'bad2', t: '坏的 2', a: '' }, { id: 'bad3', t: '坏的 3', a: '' }, { id: 't5', t: '好的', a: '' }], 0));
       await pg.waitForFunction(() => __log.filter(x => x.toast && /放不出来/.test(x.toast)).length >= 3, null, { timeout: 8000 }).catch(() => {});
       const tt = (await toasts()).filter(x => /放不出来/.test(x));
+      // GPT 11-20 挑出来的 4 个问题（复测）
+      const T200 = await pg.evaluate(() => Array.from({ length: 205 }, (_, i) => ({ id: 'q' + i, t: '第 ' + (i + 1) + ' 首', a: '' })));
+      await pg.evaluate(L => ChatterMusic._play(L, 200), T200); await pg.waitForTimeout(100);
+      ok(await pg.evaluate(() => ChatterMusic.now() && ChatterMusic.now().t) === '第 201 首', '【GPT 挑的③】在 205 首的列表里点第 201 首：放的就是第 201 首（以前显示“还没有在放的歌”）');
+      await pg.evaluate(L => ChatterMusic._play(L, 204), T200); await pg.waitForTimeout(100);
+      ok(await pg.evaluate(() => ChatterMusic.now().t) === '第 205 首', '点最后一首也对');
+      const e0 = errs.length;
+      const nx = await pg.evaluate(() => { const m = ChatterMusic._m, t = m.q[0], before = m.q[m.i].id; try { ChatterMusic._next(t); } catch (e) { return 'ERR ' + e.message; } return [m.q[m.i].id === before, m.q[m.i + 1].id === t.id, m.q.filter(x => x.id === t.id).length].join(); });
+      ok(nx === 'true,true,1' && errs.length === e0, '【GPT 挑的②】放最后一首时给第一首点“下一首播放”：不出错，排到正在放的后面，列表里不重复 → ' + nx);
+      await pg.evaluate(() => ChatterMusic._next(ChatterMusic._m.q[ChatterMusic._m.i]));
+      ok((await toasts()).slice(-1)[0] === '正在放的就是这首', '给正在放的这首点“下一首播放”：提示一下，不乱排');
+      await pg.fill('.mu-v.on input[type="search"]', '少量'); await pg.press('.mu-v.on input[type="search"]', 'Enter');
+      await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length >= 12, null, { timeout: 5000 }).catch(() => {});
+      const fewN = await pg.$$eval('.mu-v.on .mu-row', a => a.length);
+      ok(fewN === 12 && await pg.$('[data-act="more-res"]'), '【GPT 挑的④】一页 30 条里只有 12 首能播：“加载更多”还在（以前按能播的条数判断，以为到底了）');
+      await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length === 24, null, { timeout: 5000 }).catch(() => {});
+      ok(reqs.some(r => /query=%E5%B0%91%E9%87%8F&limit=30&offset=30/.test(r)) && await pg.$$eval('.mu-v.on .mu-row', a => a.length) === 24, '加载更多：按 Audius 给过的条数往后取（offset=30，不是 12），不跳过、不重复');
+      await pg.goBack(); await pg.waitForTimeout(150);
       ok(tt[0] === '“坏的 1”放不出来，换下一首' && tt[1] === '“坏的 2”放不出来，换下一首' && /可能是网络不好/.test(tt[2]) && !(await st()).src.includes('t5'), '放不出来：说一声换下一首；连续 3 首不行就停下说原因（不一直转）→ ' + tt.join(' / '));
     }
     await pg.close();
@@ -221,9 +240,14 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg2.waitForFunction(() => { const a = document.getElementById('mu-audio'); return !a.paused && a.currentTime >= 0.9; }, null, { timeout: 6000 }).catch(() => {});
       const at = await pg2.evaluate(() => document.getElementById('mu-audio').currentTime);
       ok(at >= 0.9, '点播放：从上次听到的地方接着放 → ' + at.toFixed(2) + ' 秒');
+      await pg2.evaluate(() => ChatterMusic.open()); await pg2.waitForSelector('.mu-v.on[data-v="home"]');
+      await pg2.fill('.mu-v.on input[type="search"]', '甲的秘密歌名'); await pg2.press('.mu-v.on input[type="search"]', 'Enter'); await pg2.waitForTimeout(300);
       await pg2.evaluate(() => ChatterMusic.resetAccount());
       const rs = await pg2.evaluate(() => ({ mini: !!document.getElementById('mu-mini'), paused: document.getElementById('mu-audio').paused }));
       ok(!rs.mini && rs.paused, '换账号 / 退出登录：音乐停掉，迷你条收起');
+      await pg2.evaluate(() => { window.__uid = 'u2'; ChatterMusic.open(); }); await pg2.waitForSelector('.mu-v.on[data-v="home"]');
+      ok(await pg2.$eval('.mu-v.on input[type="search"]', e => e.value === '') && !(await pg2.evaluate(() => document.body.textContent.includes('甲的秘密歌名'))), '【GPT 挑的①】换账号以后打开音乐：搜索框和页面里没有上一个人搜的词');
+      await pg2.evaluate(() => { ChatterMusic.closeNow(); window.__uid = 'u1'; });
       // 小屏
       await pg2.setViewportSize({ width: 320, height: 640 });
       await pg2.evaluate(() => { localStorage.setItem('ch2muNow:u1', JSON.stringify({ q: [{ id: 't6', t: '一个很长很长很长很长很长很长很长的歌名，看会不会把页面撑宽', a: '一个名字也很长很长很长的音乐人', d: 999 }], i: 0, mode: 'list', at: 0 })); ChatterMusic._m.restored = false; ChatterMusic.restore(); ChatterMusic.open('now'); });

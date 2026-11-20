@@ -1,9 +1,15 @@
-(() => {
+(async () => {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const layers = new Map();
   let returning = false;
   function bindLayer(name, dialog, show) {
+    if (typeof dialog.showModal !== 'function') {
+      dialog.classList.add('dialog-fallback');
+      if (!('open' in dialog)) Object.defineProperty(dialog, 'open', { get: () => dialog.hasAttribute('open') });
+      dialog.showModal = () => dialog.setAttribute('open', '');
+      dialog.close = () => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); };
+    }
     layers.set(name, { dialog, show });
     dialog.addEventListener('close', () => {
       if (!dialog.open && history.state?.chatterNavLayer === name && !returning) {
@@ -47,9 +53,40 @@
       if (value) document.documentElement.style.setProperty(key, value);
     document.body.style.fontFamily = bridge.font;
     $('sound-music').hidden = !bridge.beforeSound;
-    $('back').textContent = bridge.peer ? '返回聊天' : '返回应用';
+    $('back').textContent = bridge.peer && !bridge.fromApps ? '返回聊天' : '返回应用';
     $('back').hidden = false;
     $('back').onclick = () => bridge.close();
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const open = [...layers.values()].find(layer => layer.dialog.open);
+    if (open && !open.dialog.classList.contains('dialog-fallback')) return;
+    event.preventDefault();
+    if (open) open.dialog.close(); else bridge?.close();
+  });
+  // 所有服务在本次打开时确定，用户核对后才会发送查询或路线。
+  let services = {};
+  if (bridge?.getServices) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    try { services = await bridge.getServices(controller.signal) || {}; } catch { /* 使用内置地址。 */ }
+    finally { clearTimeout(timeout); }
+  }
+  function publicUrl(value) {
+    if (typeof value !== 'string' || value.length > 1600) return null;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password && !url.hash ? url : null;
+    } catch { return null; }
+  }
+  const searchService = publicUrl(services.searchUrl) || new URL('https://photon.komoot.io/api/');
+  const routerBase = publicUrl(services.routeBase) || new URL('https://routing.openstreetmap.de/');
+  routerBase.search = '';
+  if (!routerBase.pathname.endsWith('/')) routerBase.pathname += '/';
+  $('search-credit').textContent = '搜索词会发给 ' + searchService.host + '。';
+  if (routerBase.hostname !== 'routing.openstreetmap.de') {
+    $('router-credit').textContent = routerBase.host;
+    $('router-credit').href = routerBase.origin;
   }
   const systemTheme = matchMedia('(prefers-color-scheme: dark)');
   function applyTheme() {
@@ -96,8 +133,10 @@
     proposing = false,
     mapAnchor = null,
     lastPeerTime = 0;
+  let clock = null, entranceFix = null;
+  const serverNow = () => clock ? clock.server + performance.now() - clock.received : Date.now();
   const fresh = (f) =>
-    valid(f) && Number.isFinite(f.time) && Date.now() - f.time < 90000 && f.time <= Date.now() + 10000;
+    valid(f) && Number.isFinite(f.time) && serverNow() - f.time < 90000 && f.time <= serverNow() + 10000;
   function createMap() {
     if (map || !window.L) return;
     map = L.map('map', { minZoom: 2, maxZoom: 19, scrollWheelZoom: false, worldCopyJump: true });
@@ -133,10 +172,20 @@
         else labels.remove();
       });
     }
-    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 贡献者',
-      maxZoom: 19
-    });
+    let template = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const credit = document.createElement('a');
+    credit.href = 'https://www.openstreetmap.org/copyright';
+    credit.textContent = 'OpenStreetMap 贡献者';
+    credit.target = '_blank'; credit.rel = 'noopener noreferrer';
+    const custom = services.tiles;
+    if (typeof custom?.url === 'string' && ['{z}','{x}','{y}'].every(part => custom.url.includes(part)) &&
+        !/[{}]/.test(custom.url.replace(/\{[xyz]\}/g, '')) && publicUrl(custom.url) &&
+        publicUrl(custom.creditUrl) && typeof custom.credit === 'string' && custom.credit.trim()) {
+      template = custom.url;
+      credit.href = publicUrl(custom.creditUrl).href;
+      credit.textContent = custom.credit.slice(0, 120);
+    }
+    const tiles = L.tileLayer(template, { attribution: '© ' + credit.outerHTML, maxZoom: 19 });
     const key = (coords) => [coords.z, coords.x, coords.y].join('/');
     tiles.on('tileload', ({ coords }) => visibleStreetTiles.add(key(coords)));
     tiles.on('tileunload', ({ coords }) => visibleStreetTiles.delete(key(coords)));
@@ -465,8 +514,11 @@
               })
             : reject(new Error('请手填起点坐标。'))
         );
-        if (pos.coords.accuracy > 120) throw new Error('当前定位误差超过 120 米，请手填起点或在室外重试。');
+        const age = Date.now() - pos.timestamp;
+        if (!Number.isFinite(age) || age < -1000 || age >= 30000) throw new Error('起点定位已过期，请重新定位或手填起点。');
+        if (!Number.isFinite(pos.coords.accuracy) || pos.coords.accuracy < 0 || pos.coords.accuracy > 120) throw new Error('当前定位误差超过 120 米，请手填起点或在室外重试。');
         start = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        if (!valid(start)) throw new Error('起点坐标无效，请重新定位或手填起点。');
       }
       if (rev !== routeRevision || stopped) return;
       lastRouteAt = Date.now();
@@ -476,12 +528,12 @@
       const path = start.lon + ',' + start.lat + ';' + target.lon + ',' + target.lat;
       timer = setTimeout(() => ctl.abort(), 12000);
       const response = await fetch(
-        'https://routing.openstreetmap.de/' +
+        routerBase.href +
           profile +
           '/route/v1/driving/' +
           path +
           '?overview=full&geometries=geojson&steps=true',
-        { signal: ctl.signal, credentials: 'omit' }
+        { signal: ctl.signal, credentials: 'omit', referrerPolicy: 'no-referrer' }
       );
       const data = response.ok && (await response.json());
       if (rev !== routeRevision || stopped) return;
@@ -528,6 +580,7 @@
   };
   function invalidateSearch() {
     ++queryRevision;
+    entranceFix = null; $('gps-entrance').hidden = true;
     queryRequest?.abort();
     $('results').replaceChildren();
     $('search-status').textContent = '';
@@ -576,17 +629,40 @@
       (pos) => {
         if (stopped || rev !== queryRevision || (trip && !proposing)) return;
         mapAnchor = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        if (!valid(mapAnchor)) { $('nearby-status').textContent = '定位坐标无效，请重试。'; return; }
+        const age = Date.now() - pos.timestamp;
+        if (Number.isFinite(pos.coords.accuracy) && pos.coords.accuracy >= 0 && pos.coords.accuracy <= 30 && age >= -1000 && age < 30000) {
+          entranceFix = { ...mapAnchor, until: performance.now() + 30000 - Math.max(0, age) };
+          $('gps-entrance').hidden = false;
+        }
         choosing = true;
         draw(true);
         if (map) map.setView([mapAnchor.lat, mapAnchor.lon], 16);
         $('nearby-status').textContent = '定位精度约 ' + Math.round(pos.coords.accuracy) + ' 米。';
-        $('map').focus();
+        if (!entranceFix) $('nearby-status').textContent += ' 到入口后请重新定位，精度在 30 米以内可直接标记。';
+        if (entranceFix) $('gps-entrance').focus(); else $('map').focus();
       },
       () => {
         if (!stopped && rev === queryRevision) $('nearby-status').textContent = '未取得定位，可以搜索地点或输入坐标。';
       },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
+  };
+  $('gps-entrance').onclick = () => {
+    const fix = entranceFix;
+    invalidateSearch();
+    if (!fix || performance.now() >= fix.until || (trip && !proposing)) {
+      $('nearby-status').textContent = '这次定位已过期，请在入口重新定位。';
+      return;
+    }
+    if (!trip) clearSelection();
+    choosing = false;
+    $('manual').open = true;
+    $('place-name').value = '';
+    $('lat').value = fix.lat.toFixed(6); $('lon').value = fix.lon.toFixed(6);
+    $('nearby-status').textContent = '请写下你所在的入口或楼层，确认后才会选为目的地。';
+    $('place-name').focus();
+    draw();
   };
   $('search').onsubmit = async (e) => {
     e.preventDefault();
@@ -603,8 +679,8 @@
     const timer = setTimeout(() => ctl.abort(), 9000);
     $('search-status').textContent = '正在查找地点…';
     try {
-      const url = new URL('https://photon.komoot.io/api/');
-      url.search = new URLSearchParams({ q, limit: '8' }).toString();
+      const url = new URL(searchService);
+      url.searchParams.set('q', q); url.searchParams.set('limit', '8');
       const response = await fetch(url, {
         signal: ctl.signal,
         credentials: 'omit',
@@ -629,7 +705,7 @@
         })
         .filter(validPlace);
       $('search-status').textContent = places.length
-        ? '请选择正确的城市和入口（地点来源：OpenStreetMap / Photon）。'
+        ? '请选择正确的城市和入口。'
         : '没有匹配地点，请补充城市、门牌或入口。';
       for (const place of places) {
         const btn = document.createElement('button'),
@@ -689,6 +765,13 @@
     $('change').textContent = proposing ? '取消更换' : '提议更换会合点';
     if ($('destination-search').hidden) $('amap-search').hidden = true;
     $('meeting').hidden = !trip?.active;
+    const needsReply = trip?.renewBy && trip.renewBy !== bridge?.me;
+    $('renew').hidden = !trip?.canExtend || (!!trip.renewBy && !needsReply);
+    $('renew').disabled = busy;
+    $('renew').textContent = needsReply ? '同意延长 30 分钟' : '提议延长 30 分钟';
+    const minutes = trip && Math.ceil((Date.parse(trip.expires) - serverNow()) / 60000);
+    $('renew-status').textContent = trip?.renewBy ? (needsReply ? '好友想延长本次同行。' : '已提议续时，等待好友同意。')
+      : trip?.active && minutes <= 5 ? '同行将在 ' + Math.max(0, minutes) + ' 分钟后结束。' : '';
     $('wait-info').textContent = [
       trip?.myWait && '我等在：' + trip.myWait.name,
       trip?.peerWait && '好友等在：' + trip.peerWait.name
@@ -750,6 +833,9 @@
       $('gps').textContent = '';
     }
     trip = value;
+    bridge?.remember?.(value);
+    if (Number.isFinite(value?.serverTime))
+      clock = { server:clock ? Math.max(value.serverTime, serverNow()) : value.serverTime, received:performance.now() };
     peerFix = value?.peerFix || null;
     if (peerFix) lastPeerTime = peerFix.time;
     if (
@@ -827,9 +913,19 @@
   }
   $('invite').onclick = () => {
     if (dest) {
-      inviteId ||= crypto.randomUUID();
+      if (!inviteId) {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+        const hex = Array.from(bytes, n => n.toString(16).padStart(2, '0')).join('');
+        inviteId = [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+      }
       action('invite', inviteId, dest);
     }
+  };
+  $('renew').onclick = () => {
+    if (!trip?.canExtend) return;
+    if (trip.renewBy && trip.renewBy !== bridge.me) action('accept_more', trip.id, { key: trip.renewKey });
+    else if (!trip.renewBy) action('offer_more', trip.id);
   };
   $('accept').onclick = () => action('accept', trip?.id);
   $('end').onclick = () => {
@@ -864,7 +960,6 @@
       return;
     }
     const id = trip.id;
-    bridge.shareStarted(id);
     $('gps').textContent = '等待设备定位…';
     watch = navigator.geolocation.watchPosition(
       async (pos) => {
@@ -873,7 +968,7 @@
           lat: pos.coords.latitude,
           lon: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
-          time: pos.timestamp
+          time: serverNow() - (Date.now() - pos.timestamp)
         };
         if (!fresh(ownFix)) {
           ownFix = null;
@@ -905,7 +1000,7 @@
   };
   const timer = setInterval(() => {
     if (stopped) return;
-    if (trip && Date.parse(trip.expires) <= Date.now()) setTrip(null);
+    if (trip && Date.parse(trip.expires) <= serverNow()) setTrip(null);
     render();
     draw();
     poll();
@@ -933,6 +1028,14 @@
   }
   window.addEventListener('pagehide', dispose, { once: true });
   window.stopChatterNavigation = dispose;
+  window.pauseChatterNavigation = () => {
+    sound?.stop();
+    if (watch !== null) {
+      stopGPS();
+      $('gps').textContent = '来电已暂停定位，通话后可重新共享。';
+      render(); draw();
+    }
+  };
   function openSharedPlace() {
     if (trip || bridge?.peer) return;
     const hadLocation = !!(dest || mapAnchor);

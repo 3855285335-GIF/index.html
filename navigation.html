@@ -6,11 +6,11 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>导航 · Chatter</title>
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="navigation.css?v=20261120j" />
+  <link rel="stylesheet" href="navigation.css?v=20261120k" />
   <script defer src="vendor/leaflet/leaflet.js"></script>
   <script defer src="vendor/natural-earth-110m.js"></script>
-  <script defer src="navigation-sound.js?v=20261120j"></script>
-  <script defer src="navigation.js?v=20261120j"></script>
+  <script defer src="navigation-sound.js?v=20261120k"></script>
+  <script defer src="navigation.js?v=20261120k"></script>
 </head>
 <body>
   <header class="mast"><div class="mast-inner">
@@ -31,6 +31,7 @@
         <label for="query" class="sr">搜索目的地</label>
         <div class="search-box"><i class="icon search-icon" aria-hidden="true"></i><input id="query" type="search" placeholder="搜索城市、地名或入口" maxlength="150" required enterkeyhint="search" /><button class="solid">搜索</button></div>
       </form>
+      <small id="search-credit" class="credit">搜索词会发给 Photon。</small>
       <p id="search-status" role="status"></p><div id="results"></div>
       <a id="amap-search" hidden target="_blank" rel="noopener noreferrer">用高德搜索这个地名</a>
       <div class="entry-options">
@@ -44,6 +45,7 @@
           </form>
         </details>
       </div>
+      <button id="gps-entrance" type="button" hidden>我就在入口，用这次定位</button>
       <p id="nearby-status" role="status"></p>
       <div id="recents" hidden><div class="section-head"><h3>刚选过的地点</h3><button id="clear-recents" class="subtle">清除</button></div><div id="recent-places"></div></div>
     </section>
@@ -70,7 +72,7 @@
         <div id="from-fields" class="pair" hidden><label>起点纬度<input id="from-lat" type="number" min="-90" max="90" step="any" /></label>
         <label>起点经度<input id="from-lon" type="number" min="-180" max="180" step="any" /></label></div>
         <button id="plan-go" class="solid">计算步行路线</button><p id="plan-status" class="feedback" role="status"></p>
-        <small class="credit">算路时会把起终点发给 <a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">FOSSGIS</a>。地图数据 © OpenStreetMap 贡献者 · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">纠正地图数据</a></small>
+        <small class="credit">算路时会把起终点发给 <a id="router-credit" href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">FOSSGIS</a>。地图数据 © OpenStreetMap 贡献者 · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">纠正地图数据</a></small>
       </details>
       <div class="secondary"><button id="copy">复制地点链接</button><a id="route" target="_blank" rel="noopener noreferrer">在高德查看</a></div>
       <details id="coordinates"><summary>查看 GPS 坐标</summary><p id="dest-coords"></p></details>
@@ -85,6 +87,7 @@
         <div class="actions"><button id="wait-here">固定我的等候点</button><button id="change">提议更换会合点</button></div>
         <p id="wait-info"></p><p id="proposal"></p><button id="agree" hidden>同意更换会合点</button>
       </div>
+      <p id="renew-status" role="status"></p><button id="renew" hidden>提议延长 30 分钟</button>
       <p id="trip-notice" role="status"></p><button id="end" class="subtle" hidden>结束本次同行</button>
     </section>
     <p id="notice" role="status"></p>

@@ -43,7 +43,26 @@ try {
   assert.equal(await rpc('alice', 'read', id), null);
   await assert.rejects(rpc('bob', 'read', id));
   await identity('bob');
-  assert.equal((await rpc('alice', 'accept', id)).active, true);
+  await db.exec("reset role;update chatter_navigation_private.trips set expires=now()+interval '1 minute'");
+  await identity('bob');
+  const accepted = await rpc('alice', 'accept', id);
+  assert.equal(accepted.active, true);
+  assert.ok(Date.parse(accepted.expires)-accepted.serverTime > 1799000);
+  assert.equal((await rpc('alice', 'accept', id)).expires, accepted.expires);
+  await identity('alice');
+  const offer = await rpc('bob','offer_more',id);
+  assert.equal(offer.expires, accepted.expires);
+  await assert.rejects(rpc('bob','accept_more',id,{key:offer.renewKey}));
+  await identity('bob');
+  const longer = await rpc('alice','accept_more',id,{key:offer.renewKey});
+  assert.equal(Date.parse(longer.expires)-Date.parse(accepted.expires),1800000);
+  await assert.rejects(rpc('alice','accept_more',id,{key:offer.renewKey}));
+  for(let i=0;i<4;i++){
+    const pending=await rpc('alice','offer_more',id);
+    await identity('alice');await rpc('bob','accept_more',id,{key:pending.renewKey});await identity('bob');
+  }
+  assert.equal((await rpc('alice','read',id)).canExtend,false);
+  await assert.rejects(rpc('alice','offer_more',id));
   await rpc('alice', 'fix', id, fix);
   await rpc('alice', 'fix', id, { ...fix, lat: 0, time: fix.time - 1000 });
   await assert.rejects(rpc('alice', 'fix', id, { ...fix, time: Date.now() - 120000 }));

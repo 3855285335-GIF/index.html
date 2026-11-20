@@ -8,6 +8,16 @@ const root = path.resolve(__dirname, '..');
 (async () => {
   const server = http.createServer((req, res) => {
     const p = new URL(req.url, 'http://localhost').pathname.slice(1);
+    if (p === 'config-test') {
+      res.writeHead(200, {'content-type':'text/html; charset=utf-8'});
+      res.end(`<script>
+        window.getChatterNavigation=() => ({theme:{}, getServices:async () => ({
+          searchUrl:'https://places.example.invalid/search/', routeBase:'https://routes.example.invalid/profiles/',
+          tiles:{url:'https://tiles.example.invalid/{z}/{x}/{y}.png',credit:'测试图源',creditUrl:'https://tiles.example.invalid/terms'}
+        })});
+      </script><iframe title="导航" src="/navigation.html"></iframe>`);
+      return;
+    }
     if (
       !/^(navigation\.(html|js|css)|navigation-sound\.js|vendor\/(earth-relief-50m\.webp|navigation-cue\.wav)|vendor\/natural-earth-110m\.js|vendor\/leaflet\/(leaflet\.(js|css)|images\/[a-z0-9-]+\.png))$/.test(p)
     ) {
@@ -61,7 +71,12 @@ const root = path.resolve(__dirname, '..');
     });
     await page.exposeFunction('locationRequested', () => { ++geolocationRequests; });
     await page.addInitScript(() => Object.defineProperty(navigator, 'geolocation', { value: {
-      getCurrentPosition(_ok, fail) { window.locationRequested(); fail({ code: 1 }); }
+      getCurrentPosition(ok, fail) {
+        window.locationRequested();
+        if (window.entranceSample) ok({coords:{latitude:31.21014,longitude:121.45013,accuracy:window.entranceSample.accuracy},
+          timestamp:Date.now()-window.entranceSample.age});
+        else fail({code:1});
+      }
     }}));
     await page.addInitScript(() => {
       window.spoken = [];
@@ -237,6 +252,52 @@ const root = path.resolve(__dirname, '..');
     await page.fill('#place-name', '手选北门');
     await page.click('#coords button');
     assert.equal(await page.locator('#dest-name').innerText(), '手选北门');
+    await page.click('#replace');
+    await page.route('https://tile.openstreetmap.org/**', route => route.abort());
+    for (const sample of [{accuracy:90,age:0},{accuracy:8,age:60000},{accuracy:8,age:0}]) {
+      await page.evaluate(s => { window.entranceSample=s; }, sample);
+      await page.click('#nearby');
+      const gps = page.locator('#gps-entrance');
+      assert.equal(await gps.isVisible(), sample.accuracy === 8 && !sample.age);
+    }
+    await page.click('#gps-entrance');
+    assert.equal(await page.locator('#confirmed').isVisible(),false);
+    assert.equal(await page.locator('#lat').inputValue(),'31.210140');
+    await page.fill('#place-name','我所在的东门');
+    await page.click('#coords button');
+    assert.equal(await page.locator('#dest-name').innerText(),'我所在的东门');
+    await page.evaluate(()=>{window.entranceSample={accuracy:8,age:31000};});
+    await page.click('#plan-go');
+    await page.locator('#plan-status').filter({hasText:'起点定位已过期'}).waitFor();
+    await page.addInitScript(() => { HTMLDialogElement.prototype.showModal = undefined; });
+    await page.reload();
+    await page.click('#open-sound'); await page.locator('#sound-dialog[open]').waitFor();
+    await page.keyboard.press('Escape'); await page.locator('#sound-dialog').waitFor({state:'hidden'});
+    console.log('街道图块失败后可核对和命名本人所在的入口；精度差或已过期的读数被拒绝。旧浏览器弹层降级路径可关闭。');
+    await page.goto(new URL('/config-test',base).href);
+    const custom=page.frameLocator('iframe[title="导航"]');
+    await custom.locator('#search-credit').filter({hasText:'places.example.invalid'}).waitFor();
+    assert.equal(await custom.locator('#router-credit').textContent(),'routes.example.invalid');
+    let query;
+    await page.route('https://places.example.invalid/**',route=>{
+      query=new URL(route.request().url());
+      return route.fulfill({json:{features:[result('东门','示例城市',121.45,31.21)]}});
+    });
+    await page.route('https://tiles.example.invalid/**',route=>route.abort());
+    await custom.locator('#query').fill('东门');
+    await custom.locator('#search button').click();
+    await custom.locator('#results button').click();
+    assert.deepEqual([...query.searchParams.keys()].sort(),['limit','q']);
+    assert.equal(query.searchParams.get('q'),'东门');
+    await custom.locator('.leaflet-control-attribution a').filter({hasText:'测试图源'}).waitFor();
+    await custom.locator('#start-source').selectOption('manual');
+    await custom.locator('#from-lat').fill('31.211');
+    await custom.locator('#from-lon').fill('121.451');
+    const routed=page.waitForRequest(req=>req.url().startsWith('https://routes.example.invalid/'));
+    await page.route('https://routes.example.invalid/**',route=>route.fulfill({json:{code:'NoRoute'}}));
+    await custom.locator('#plan-go').click();
+    assert.equal(new URL((await routed).url()).pathname,'/profiles/routed-foot/route/v1/driving/121.451,31.211;121.45,31.21');
+    console.log('自定义服务的域名显示在提交前，搜地点只发送搜索词和条数；图源署名、算路域名和路径均匹配配置。');
     assert.deepEqual(errors, []);
     console.log(
       '双城市同名地点需要手选，旧回包、来源故障和无结果均不跳到旧路线；无底图保留已选坐标；超界拒绝、合法零值通过。'
