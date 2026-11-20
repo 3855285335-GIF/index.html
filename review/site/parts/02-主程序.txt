@@ -462,7 +462,7 @@ function hideSplash() {
   s.classList.add('done');
   setTimeout(function () { try { s.remove(); } catch (e) {} }, 700);
 }
-function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); hideSplash(); setTimeout(function () { preloadWS(); }, 5000); }
+function showApp() { $('auth-view').classList.remove('active'); $('app-view').classList.add('active'); hideSplash(); setTimeout(function () { preloadWS(); restoreMusicLater(); }, 5000); }
 function showAuth(msg) {
   $('app-view').classList.remove('active'); $('auth-view').classList.add('active');
   document.body.classList.remove('chat-open');
@@ -2094,6 +2094,8 @@ async function openConv(key, peer) {
   cancelMediaPreviews();
   olderCursor = null; S.loadingOlder = false;
   try { if (window.ChatterSearch && window.ChatterSearch.isOpen()) window.ChatterSearch.closeNow(); } catch (e) {}   // 在搜索里点了消息横幅：先收起搜索，不然聊天被盖在下面
+  try { if (window.ChatterMusic && window.ChatterMusic.isOpen()) window.ChatterMusic.closeNow(); } catch (e) {}
+  closeApps();
   recAbort();
   setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; S.editSince = new Date().toISOString(); clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
@@ -2392,6 +2394,7 @@ function recTick() {
 }
 function recStart(y) {
   if (rec.state !== 'idle' || !S.conv) return;
+  musicPause();   // 录语音：音乐先停，不然会录进去
   const pr = recProblem(); if (pr) { toast(pr); return; }
   const token = ++rec.token; rec.state = 'starting'; rec.y0 = y || 0; rec.cancel = false; rec.chunks = []; rec.len = 0; rec.mrChunks = []; rec.mime = ''; rec.mr = null;
   recUI(true, '手指上滑，取消发送');
@@ -2906,6 +2909,7 @@ function onPcState(call) {
 }
 async function startCall(video) {
   if (S.call || S.incoming || !S.peer) return;
+  musicPause();
   if (GC.on) { toast('你在群语音里，先退出再打单聊电话'); return; }
   if (isGroupKey(S.conv)) { gcStart(); return; }
   const pr = envProblem(); if (pr) { toast(pr); return; }
@@ -2938,6 +2942,7 @@ async function onInvite(p) {
   if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
   // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
+  musicPause();   // 来电：音乐先停（铃声和通话不跟音乐叠在一起）
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
@@ -3241,6 +3246,7 @@ async function gcTick() {
   } catch (e) { logErr('gcTick', e); }
 }
 async function gcStart() {
+  musicPause();
   if (!isGroupKey(S.conv)) return;
   if (GC.on) { gcShow(); return; }
   if (S.call || S.incoming) { toast('先结束当前通话，再进群语音'); return; }
@@ -3525,6 +3531,8 @@ function teardown() {
   MO.cursor = null; MO.loading = false; MO.sig = ''; MO.loadAt = 0;
   $('moment-list').textContent = ''; renderMomentNotices(); paintMomentBadge();
   if (window.ChatterSearch?.resetAccount) window.ChatterSearch.resetAccount();
+  if (window.ChatterMusic?.resetAccount) window.ChatterMusic.resetAccount();   // 换账号：停掉音乐、收起迷你条
+  closeApps();
   lastChat = null; S.loadingOlder = false; S.syncing = false; S.hist = false;
   S.atMe = null; bubbleColorCache = {}; editSeen.clear(); kickedOut = false;
   Object.values(PUSH.q).forEach(q => clearTimeout(q.t));
@@ -6827,7 +6835,8 @@ async function wsCall(body, ms) {
 window.__chWS = {
   call: wsCall, toast: toast, acts: openActs, form: openForm, copy: copyText, logErr: logErr,
   forward: function (text) { openForward({ type: 'text', body: String(text || '') }); },
-  sb: function () { return sb; }, uid: function () { return S.uid; }
+  sb: function () { return sb; }, uid: function () { return S.uid; },
+  link: function (u, t) { openLink(u, t); }
 };
 let wsLoading = false, wsThen = null;
 function openWS(then) {   // then：下载好以后做什么（默认打开搜索首页）
@@ -6844,6 +6853,74 @@ function openWS(then) {   // then：下载好以后做什么（默认打开搜�
   s.onerror = function () { clearTimeout(slow); wsLoading = false; wsThen = null; s.remove(); toast('网页浏览没加载出来，检查网络后再点一次'); };
   document.body.appendChild(s);
 }
+/* ---- 音乐：界面在 music.js 里，第一次打开音乐才下载 ---- */
+let muLoading = false, muThen = null;
+function openMusic(then) {   // then：下载好以后做什么（默认打开音乐首页）
+  const go = typeof then === 'function' ? then : function () { window.ChatterMusic.open(); };
+  if (window.ChatterMusic) { go(); return; }
+  muThen = go;
+  if (muLoading) return;
+  const generation = accountGeneration;
+  muLoading = true;
+  const quiet = typeof then === 'function' && then.quiet, slow = quiet ? 0 : setTimeout(function () { if (muLoading) toast('正在打开音乐…'); }, 500);
+  const s = document.createElement('script');
+  s.src = 'music.js?v=' + (APP_V || '0');
+  s.onload = function () { clearTimeout(slow); muLoading = false; const f = muThen; muThen = null; if (generation !== accountGeneration) return; if (window.ChatterMusic && f) f(); else if (!window.ChatterMusic && !quiet) toast('音乐没加载出来，再点一次试试'); };
+  s.onerror = function () { clearTimeout(slow); muLoading = false; muThen = null; s.remove(); if (!quiet) toast('音乐没加载出来，检查网络后再点一次'); };
+  document.body.appendChild(s);
+}
+function musicPause() { try { if (window.ChatterMusic) window.ChatterMusic.pause(); } catch (e) {} }
+function restoreMusicLater() {   // 上次听过歌：打开 App 一会儿后在空闲时加载音乐，底部恢复迷你播放条（不自动播放、先不连 Audius）
+  let has = false; try { has = !!localStorage.getItem('ch2muNow:' + S.uid); } catch (e) {}
+  if (!has || window.ChatterMusic || !S.uid) return;
+  const f = function () { if (window.ChatterMusic) window.ChatterMusic.restore(); }; f.quiet = true;
+  const go = function () { openMusic(f); };
+  if (window.requestIdleCallback) window.requestIdleCallback(go, { timeout: 6000 }); else go();
+}
+/* ---- 应用页（小组件 + 图标格子）：搜索、音乐都从这里进。以后加导航、今天去哪：在 APPS 里加一项，要小组件就在 appsWidgets 里加 ---- */
+const APPS = [
+  { id: 'search', name: '搜索', ic: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', open: function () { openWS(); } },
+  { id: 'music', name: '音乐', ic: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>', open: function () { openMusic(); } }
+];
+const APV = { on: false };
+function appsWidgets() {   // 小组件：音乐（在放的歌，能直接暂停 / 下一首）
+  const n = window.ChatterMusic && window.ChatterMusic.now();
+  const ic = function (d, w) { return '<svg class="ic" viewBox="0 0 24 24" width="' + (w || 22) + '" height="' + (w || 22) + '">' + d + '</svg>'; };
+  if (!n) return '<button type="button" class="apw apw-mu" data-app="music"><span class="apw-art">' + ic(APPS[1].ic, 26) + '</span><span class="apw-tx"><b>音乐</b><small>免费的独立音乐，点这里听歌</small></span></button>';
+  return '<div class="apw apw-mu" data-app="music-now" role="button">' + (n.art ? '<img class="apw-art" src="' + esc(n.art) + '" alt="" referrerpolicy="no-referrer">' : '<span class="apw-art">' + ic(APPS[1].ic, 26) + '</span>') +
+    '<span class="apw-tx"><b>' + esc(n.t) + '</b><small>' + esc(n.a || '正在播放') + '</small></span>' +
+    '<button type="button" class="apw-b" data-app="music-pp" aria-label="' + (n.playing ? '暂停' : '播放') + '">' + ic(n.playing ? '<rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"/>' : '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/>', 24) + '</button>' +
+    '<button type="button" class="apw-b" data-app="music-next" aria-label="下一首">' + ic('<path d="M6 5.5v13l9-6.5z" fill="currentColor" stroke="none"/><path d="M18 5.5v13"/>', 22) + '</button></div>';
+}
+function renderApps() {
+  const box = $('apps-body'); if (!box) return;
+  setHTML(box, '<div class="ap-sec">小组件</div>' + appsWidgets() + '<div class="ap-sec">应用</div><div class="ap-grid">' +
+    APPS.map(function (a) { return '<button type="button" class="ap-ic" data-app="' + a.id + '"><span><svg class="ic" viewBox="0 0 24 24">' + a.ic + '</svg></span>' + esc(a.name) + '</button>'; }).join('') + '</div>');
+}
+function openApps() {
+  let v = $('apps-view');
+  if (!v) {
+    v = document.createElement('div'); v.id = 'apps-view'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-label', '应用');
+    v.innerHTML = '<div class="ap-bar"><button type="button" class="ap-x" data-app="close" aria-label="返回"><svg class="ic" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><b>应用</b><span></span></div><div id="apps-body" class="ap-body"></div>';
+    (document.querySelector('.app-container') || document.body).appendChild(v);
+    v.addEventListener('click', function (e) {
+      const b = e.target.closest('[data-app]'); if (!b) return;
+      const id = b.dataset.app;
+      if (id === 'close') { history.state && history.state.apps ? history.back() : closeApps(); return; }
+      if (id === 'music-pp') { e.stopPropagation(); if (window.ChatterMusic) window.ChatterMusic.toggle(); return; }
+      if (id === 'music-next') { e.stopPropagation(); if (window.ChatterMusic) window.ChatterMusic.next(); return; }
+      if (id === 'music-now') { if (window.ChatterMusic) window.ChatterMusic.open('now'); return; }
+      const a = APPS.find(function (x) { return x.id === id; }); if (a) a.open();
+    });
+    window.addEventListener('chatter-music', function () { if (APV.on) renderApps(); });
+  }
+  renderApps();
+  if (APV.on) return;
+  APV.on = true; v.classList.add('on');
+  try { history.pushState({ apps: 1 }, '', location.href); } catch (e) {}
+  preloadWS();
+}
+function closeApps() { APV.on = false; const v = $('apps-view'); if (v) v.classList.remove('on'); }
 let wsPre = false;
 function preloadWS() {   // 打开 App 一会儿以后趁空闲先把搜索界面下载到手机里（后台小助手会存下来）：第一次点放大镜、聊天里的链接都不用等下载
   if (wsPre || window.ChatterSearch || wsLoading || !S.uid || navigator.onLine === false) return;
@@ -7357,6 +7434,8 @@ function bindUI() {
   window.addEventListener('popstate', (e) => {
     if (S.call) { armGuard(); return; }   // 通话界面不让滑走
     if (window.ChatterSearch && window.ChatterSearch.onPop(e)) return;   // 搜索里：退一层（结果页 → 首页 → 关掉）
+    if (window.ChatterMusic && window.ChatterMusic.onPop(e)) return;     // 音乐里：退一层（正在播放 → 列表 → 首页 → 关掉）
+    if (APV.on) { closeApps(); return; }                                  // 应用页：关掉
     if (S.conv) { S.hist = false; closeChat(); return; }
     const st = (e && e.state) || history.state;
     // 关掉聊天后浏览器会留一条“前进”记录：从右边缘往左滑（前进）时，真的把刚才那个聊天打开，
@@ -7935,6 +8014,7 @@ $('btn-export').onclick = () => {
 };
 $('btn-msearch').onclick = searchMsgs;
 $('btn-web').onclick = function () { openWS(); };
+$('btn-apps').onclick = function () { openApps(); };
 $('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;
   $('multi-copy').onclick = multiCopy;

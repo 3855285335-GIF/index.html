@@ -91,6 +91,14 @@ npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   #
 
 Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/deno`。
 
+## 音乐（11-20）
+
+```bash
+node music-ui.js [截图目录]   # 真 Chromium：音乐 48 项（假的 Audius：热门、曲风、搜歌翻页、播放 / 暂停 / 上一首 / 下一首、放完自动下一首、单曲循环、随机、拖进度条、喜欢、最近播放、
+                              # 放不出来自动换下一首、别的声音开始时停、迷你播放条、重开恢复、换账号停、小屏、封面换备用服务器），浅色深色各截 4 张
+```
+`npm test` 里还有一组“应用页”：点“应用”才出来、点“音乐”才下载 music.js、返回一层层退、热门直接问 Audius。
+
 ## 朋友圈权限（11-19）
 
 ```bash

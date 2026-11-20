@@ -828,6 +828,41 @@ test('动态点赞：数据库返回错误时恢复计数，可重新提交', as
   } finally { env.close(); }
 });
 
+test('应用页：右上角“应用”打开小组件 + 图标格子；点“音乐”才下载 music.js；返回一层层退；音乐请求直接发给 Audius（不经过我们的服务器）', async () => {
+  const fs = require('fs'), t = Date.now(), env = makeEnv({ db: baseDb(t) });
+  try {
+    await env.login(); await sleep(200);
+    const w = env.w, H = w.history, d = w.document, calls = [];
+    const resp = j => ({ ok: true, status: 200, json: async () => j });
+    const TR = n => ({ id: 'tr' + n, title: '测试歌 ' + n, duration: 125 + n, permalink: '/u/song-' + n, access: { stream: true }, artwork: { '150x150': 'https://art.example/' + n + '/150.jpg', '480x480': 'https://art.example/' + n + '/480.jpg' }, user: { name: '歌手 ' + n, handle: 'u' + n } });
+    w.fetch = async u => {
+      u = String(u); calls.push(u);
+      if (u === 'https://api.audius.co/') return resp({ data: ['https://api.audius.co'] });
+      if (u.indexOf('https://api.audius.co/v1/tracks/trending') === 0) return resp({ data: [TR(1), TR(2), Object.assign(TR(3), { access: { stream: false } }), Object.assign(TR(4), { stream_conditions: { usdc_purchase: {} } })] });
+      return resp({ sent: 1 });
+    };
+    click(env, env.$('btn-apps')); await sleep(30);
+    const av = env.$('apps-view');
+    ok(av && av.classList.contains('on') && H.state && H.state.apps === 1, '点“应用”没打开应用页：' + JSON.stringify(H.state));
+    const names = Array.from(av.querySelectorAll('.ap-ic')).map(x => x.textContent.trim());
+    ok(names.join(',') === '搜索,音乐' && /音乐[\s\S]*点这里听歌/.test(av.querySelector('.apw').textContent), '应用页应该有音乐小组件和“搜索、音乐”两个图标：' + names.join(','));
+    ok(!Array.from(d.querySelectorAll('script')).some(x => /music\.js/.test(x.getAttribute('src') || '')), '还没点音乐就下载了 music.js');
+    click(env, av.querySelector('[data-app="music"]')); await sleep(30);
+    const sc = Array.from(d.querySelectorAll('script')).find(x => /music\.js\?v=/.test(x.getAttribute('src') || ''));
+    ok(sc && !w.ChatterMusic, '点“音乐”没有去下载 music.js');
+    w.eval(fs.readFileSync(path.join(ROOT, 'music.js'), 'utf8')); sc.onload(); await sleep(200);
+    const mu = env.$('mu');
+    ok(mu && mu.classList.contains('on') && H.state && H.state.mu === 1, '音乐首页没打开：' + JSON.stringify(H.state));
+    const rows = Array.from(mu.querySelectorAll('.mu-row .mu-rt')).map(x => x.textContent);
+    ok(rows.join(',') === '测试歌 1,测试歌 2', '热门列表不对（不能直接播的两首要去掉）：' + rows.join(','));
+    ok(calls.some(u => /^https:\/\/api\.audius\.co\/v1\/tracks\/trending\?app_name=Chatter&time=week&limit=50$/.test(u)) && !calls.some(u => /functions\/v1/.test(u) && /audius/.test(u)), '热门应该直接问 Audius（带 app_name、本周、50 首）：' + calls.filter(u => /audius/.test(u)).join(' | '));
+    H.back(); await sleep(150);
+    ok(!mu.classList.contains('on') && av.classList.contains('on'), '音乐首页返回：应该回到应用页');
+    H.back(); await sleep(150);
+    ok(!av.classList.contains('on'), '应用页返回：应该关掉');
+    ok(d.querySelector('#app-view .app-nav') && !d.getElementById('mu-mini'), '没放过歌：不该出现迷你播放条');
+  } finally { env.close(); }
+});
 test('主题：系统画的部分（键盘、输入框、网页框底色、状态栏）跟着“我”里的主题，不跟手机系统（手机深色、App 浅色时不再先黑一下）', async () => {
   const t = Date.now(), env = makeEnv({ db: baseDb(t) });
   try {
@@ -1055,7 +1090,7 @@ async function lint() {
       }
     }]
   });
-  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js']);
+  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js', 'music.js']);
   const errs = [];
   res.forEach(r => r.messages.forEach(m => { if (m.severity === 2) errs.push(path.basename(r.filePath) + ' 第 ' + m.line + ' 行：' + m.message); }));
   return errs;
@@ -1064,7 +1099,7 @@ async function lint() {
 (async () => {
   let bad = 0;
   const t0 = Date.now();
-  process.stdout.write('代码检查（app.js、sw.js、search.js）… ');
+  process.stdout.write('代码检查（app.js、sw.js、search.js、music.js）… ');
   try { const errs = await lint(); if (errs.length) { bad++; console.log('❌'); errs.slice(0, 30).forEach(e => console.log('   ' + e)); } else console.log('✅'); }
   catch (e) { bad++; console.log('❌ 代码检查没跑起来：' + e.message); }
   for (const tc of tests) {

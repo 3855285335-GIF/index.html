@@ -54,7 +54,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261120g">
+<link rel="preload" as="script" href="app.js?v=20261120h">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -1123,11 +1123,33 @@
   #msg-banner .mb-av .avatar-wrapper{width:26px;height:26px}
   #msg-banner .mb-av .avatar{width:26px;height:26px;border-radius:9px;font-size:11px}
   #msg-banner .mb-av .online-dot{display:none}
+  /* 应用页：小组件 + 图标格子（跟随主题） */
+  #apps-view{position:fixed;inset:0;z-index:58;display:none;flex-direction:column;background:var(--bg);color:var(--ink)}
+  #apps-view.on{display:flex}
+  .ap-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;padding-top:calc(10px + env(safe-area-inset-top))}
+  .ap-bar b{font-size:16px;font-weight:600}
+  .ap-bar span,.ap-x{width:44px;height:44px}
+  .ap-x{padding:0;border-radius:14px;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center}
+  .ap-body{flex:1;min-height:0;overflow-y:auto;padding:0 14px calc(20px + env(safe-area-inset-bottom));width:100%;max-width:760px;margin:0 auto}
+  .ap-sec{font-size:13px;color:var(--muted);padding:14px 4px 8px}
+  .apw{display:flex;align-items:center;gap:12px;width:100%;padding:12px;border-radius:20px;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);text-align:left;cursor:pointer}
+  .apw:active{background:var(--surface2)}
+  .apw-art{width:52px;height:52px;border-radius:14px;object-fit:cover;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--accent)}
+  .apw-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .apw-tx b{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .apw-tx small{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .apw-b{width:44px;height:44px;padding:0;border-radius:14px;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .ap-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 8px}
+  .ap-ic{display:flex;flex-direction:column;align-items:center;gap:7px;background:transparent;padding:4px 0;color:var(--ink);font-size:12.5px}
+  .ap-ic span{width:58px;height:58px;border-radius:18px;background:var(--surface);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;color:var(--accent)}
+  .ap-ic span .ic{width:28px;height:28px}
+  .ap-ic:active span,.apw-b:active,.ap-x:active{opacity:.55}
 </style>
 <div id="msg-banner"></div>
     <header class="app-header">
       <div class="brand"><svg class="logo"><use href="#logo"/></svg><span>Chatter</span></div>
       <div class="me-info"><span id="me-name">加载中…</span><span id="me-acc"></span></div>
+      <button id="btn-apps" type="button" class="hd-find" aria-label="应用"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/></svg></button>
       <button id="btn-web" type="button" class="hd-find" aria-label="搜索网页"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
     </header>
     <main>
@@ -1448,6 +1470,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261120g" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261120g&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261120h" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261120h&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>
