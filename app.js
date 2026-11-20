@@ -4549,7 +4549,7 @@ function openGroupSettings(gid) {
       const tt = r && r.data; GL.link[gid] = tt;
       const lk = location.origin + location.pathname + '#g=' + gid + (tt ? ('&k=' + tt) : '');
       copyText(lk);
-      openForm('邀请链接', [{ ph: '邀请链接', val: lk, max: 400, hint: 'iPhone 如果提示复制失败，长按上面的链接手动复制' }], function () { return ''; }, '关闭');
+      openForm('邀请链接', [{ ph: '邀请链接', val: lk, max: 400, hint: '如果提示复制失败，长按上面的链接手动复制' }], function () { return ''; }, '关闭');
     }, function () { toast('生成链接失败，检查网络'); });
   } });
   if (!items.length) { toast('这里还没有可设置的'); return; }
@@ -5351,6 +5351,10 @@ function applyTheme() {
   try {
     if (t === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', t);
+    // 系统画的部分（键盘、输入框、网页框底色、状态栏）跟着 App 的主题走，不跟手机系统（index.html 开头也做了一样的事）
+    const tc = document.querySelectorAll('meta[name="theme-color"]');
+    tc.forEach((m, i) => m.setAttribute('content', t === 'dark' ? '#12101c' : t === 'light' ? '#f6f3ee' : (i ? '#12101c' : '#f6f3ee')));
+    const cs = document.querySelector('meta[name="color-scheme"]'); if (cs) cs.setAttribute('content', t === 'auto' ? 'light dark' : t);
     const b = $('btn-theme');
     if (b) b.textContent = '🎨 主题：' + (t === 'auto' ? '跟随系统' : (t === 'dark' ? '深色' : '浅色'));
   } catch (e) {}

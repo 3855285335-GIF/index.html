@@ -13,7 +13,14 @@
   try {
     var v = localStorage.getItem('ch2theme');
     if (v) { try { v = JSON.parse(v); } catch (e) {} }
-    if (v === 'light' || v === 'dark') document.documentElement.setAttribute('data-theme', v);
+    if (v === 'light' || v === 'dark') {
+      document.documentElement.setAttribute('data-theme', v);
+      /* 系统画的部分（键盘、输入框、网页框的底色、状态栏）也跟着 App 的主题，不跟手机系统：
+         手机是深色、App 选了浅色时，以前这些地方会先按深色画一下（看起来“先黑再白”） */
+      var tc = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; i < tc.length; i++) tc[i].setAttribute('content', v === 'dark' ? '#12101c' : '#f6f3ee');
+      var cs = document.querySelector('meta[name="color-scheme"]'); if (cs) cs.setAttribute('content', v);
+    }
     var b = localStorage.getItem('ch2bubble');
     if (b) { try { b = JSON.parse(b); } catch (e) {} }
     var map = {
@@ -47,7 +54,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261120e">
+<link rel="preload" as="script" href="app.js?v=20261120f">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -76,11 +83,13 @@
   }
   /* 手动主题：未设置=跟随系统，light/dark=强制 */
   html[data-theme="light"] {
+    color-scheme: light;
     --bg: #f6f3ee; --surface: #ffffff; --surface2: #efebe4; --ink: #1d1b2e; --muted: #8a8799; --line: rgba(29,27,46,.08);
     --them: #ffffff; --glass: rgba(255,255,255,.8); --accent: #6c5ce7;
     --shadow: 0 1px 2px rgba(29,27,46,.06), 0 8px 22px rgba(29,27,46,.07);
   }
   html[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #12101c; --surface: #1c1a2b; --surface2: #272439; --ink: #f1eefb; --muted: #8f8ba6; --line: rgba(255,255,255,.08);
     --them: #272439; --glass: rgba(28,26,43,.8); --accent: #8b7cf6;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
@@ -1439,6 +1448,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261120e" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261120e&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261120f" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261120f&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>

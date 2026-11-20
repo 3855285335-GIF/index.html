@@ -1,4 +1,4 @@
-/* Chatter 搜索：搜索首页、结果页（网页 / 图片 / 视频 / 新闻 / 深挖）、简洁阅读（含存档和历史版本）、搜索规则。
+/* Chatter 搜索：搜索首页、结果页（网页 / 图片 / 视频 / 新闻 / 深挖）、阅读模式（含存档和历史版本）、搜索规则。
    点顶部的放大镜才下载这个文件，不用搜索的人不多花流量。
    颜色、字体全部用 App 的主题变量（--bg、--accent、--font……），跟着“我”里的主题和字体设置走。
    搜索结果由服务器函数 chatter-search 返回（Exa、Tavily 和几个免费数据库）；排序和过滤在手机上按你的规则做，改规则不花搜索次数。 */
@@ -51,7 +51,7 @@ const monoChar = h => { const s = h.replace(/^(m|mobile|zh|en|news|blog)\./, '')
 const CFG = {
   farms: ['baijiahao.baidu.com', 'mbd.baidu.com', 'jingyan.baidu.com', 'zhidao.baidu.com', 'wenku.baidu.com', 'toutiao.com', 'sohu.com/a/', '163.com/dy/', '360doc.com', 'docin.com', 'doc88.com', 'book118.com'],
   clean: ['wikipedia.org', 'github.com', 'stackoverflow.com', 'stackexchange.com', 'developer.mozilla.org', 'arxiv.org', 'britannica.com', 'nature.com', '.gov', '.edu', '.gov.cn', '.edu.cn'],
-  // 视频网站：点了直接打开原网站（Safari 窗口），不变成文字
+  // 视频网站：能用官方播放器的直接在 App 里播；不让别的 App 播放的，给“在浏览器打开”，不变成文字
   video: ['iqiyi.com', 'youku.com', 'v.qq.com', 'douyin.com', 'ixigua.com', 'kuaishou.com', 'mgtv.com', 'acfun.cn', 'tiktok.com', 'vimeo.com', 'twitch.tv', 'dailymotion.com', 'nicovideo.jp', 'huya.com', 'douyu.com', 'haokan.baidu.com', 'tv.sohu.com', 'le.com', 'miguvideo.com', 'yangshipin.cn', 'weibo.com/tv', 'youtube.com', 'youtu.be', 'bilibili.com', 'b23.tv'],
   direct: ['x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'reddit.com', 'pinterest.com', 'quora.com', 'tiktok.com', 'weibo.com', 'weibo.cn', 'xiaohongshu.com', 'douyin.com', 'zhihu.com'],
   // 知名网站：输入的网址和它们只差几个字母时，提醒可能是仿冒的（例如 blilblil.com 不是 B 站）
@@ -161,7 +161,7 @@ const CSS = `
 .ws{position:fixed;inset:0;z-index:60;display:none;background:var(--bg);color:var(--ink);font-family:var(--font)}
 .ws.on{display:block}
 .ws-v{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg)}
-.ws-v.on{display:flex;animation:fadein .16s ease}
+.ws-v.on{display:flex}
 .ws-in{width:100%;max-width:760px;margin:0 auto}
 .ws-bar{display:flex;align-items:center;gap:6px;padding:10px 12px 8px;padding-top:calc(10px + env(safe-area-inset-top));flex-shrink:0}
 .ws-ib{width:44px;height:44px;border-radius:14px;padding:0;background:transparent;color:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -254,7 +254,9 @@ const CSS = `
 .ws-wbar{gap:0}
 .ws-web{flex:1;min-height:0;position:relative;background:var(--bg);display:flex;flex-direction:column}
 .ws-web>.ws-sc{flex:1}
-.ws-web iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+.ws-web iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff;transform-origin:0 0}
+.ws-web.wide{overflow:auto;-webkit-overflow-scrolling:touch}
+.ws-web.wide iframe{width:980px;right:auto}
 .ws-wload{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:14px;background:var(--bg);padding:0 24px;text-align:center}
 .ws-wload .sp{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:wsspin .8s linear infinite}
 @keyframes wsspin{to{transform:rotate(360deg)}}
@@ -282,20 +284,19 @@ const CSS = `
 .ws-lead{width:100%;border-radius:18px;margin:0 0 18px;display:block;background:var(--surface2)}
 .ws-from{font-size:12.5px;color:var(--muted);margin-top:24px}
 .ws-from a{color:var(--muted)}
-.ws-tool{display:grid;grid-template-columns:repeat(7,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
-.ws-tool button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;white-space:nowrap;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
+.ws-tool{display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.ws-tool button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;white-space:nowrap;color:var(--ink);background:transparent;min-height:48px;justify-content:center;border-radius:12px;padding:4px}
 .ws-tool button.on{color:var(--accent)}
-.ws-v.dk{background:#0b0a10;color:#f1eefb}
-.ws-v.dk .ws-ib{color:#f1eefb}
-.ws-v.dk .ws-site{color:rgba(241,238,251,.7)}
+.ws-tool button[hidden]{display:none}
 .ws-big{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}
 .ws-big img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
-.ws-big p{color:rgba(241,238,251,.7);font-size:14px}
+.ws-big p{color:var(--muted);font-size:14px}
 .ws-dkb{display:flex;gap:10px;padding:10px 16px calc(12px + env(safe-area-inset-bottom))}
-.ws-dkb button{flex:1;height:44px;border-radius:14px;background:rgba(255,255,255,.12);color:#f1eefb;font-size:14px}
-.ws-dkt{padding:0 16px 6px;font-size:14px;line-height:1.5;color:rgba(241,238,251,.86)}
-.ws-dkt small{display:block;color:rgba(241,238,251,.55);font-size:12px;margin-top:2px}
+.ws-dkb button{flex:1;height:44px;border-radius:14px;background:var(--surface);color:var(--ink);font-size:14px;box-shadow:var(--shadow)}
+.ws-dkt{padding:0 16px 6px;font-size:14px;line-height:1.5;color:var(--ink)}
+.ws-dkt small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .ws-player{width:100%;aspect-ratio:16/9;background:#000;border:0;display:block}
+.ws-player.tall{aspect-ratio:9/16;width:min(100%,calc(68vh * 9 / 16));margin:0 auto}
 .ws-sw{width:50px;height:30px;border-radius:15px;padding:0;background:var(--surface2);position:relative;flex-shrink:0;transition:background .15s}
 .ws-sw::after{content:"";position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
 .ws-sw[aria-checked="true"]{background:var(--accent)}
@@ -330,6 +331,7 @@ const CSS = `
 .ws-qen button{background:transparent;padding:0 2px;color:var(--accent);font-size:13px}
 /* 收藏、浏览记录、输入联想、页内查找、朗读、手机里保存的文章 */
 .ws-quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.ws-quick+.ws-grid{margin-top:18px}
 .ws-quick button{display:flex;align-items:center;gap:8px;height:48px;padding:0 14px;border-radius:16px;background:var(--surface);box-shadow:var(--shadow);color:var(--ink);font-size:15px;min-width:0}
 .ws-quick button svg{color:var(--accent);flex-shrink:0}
 .ws-quick b{margin-left:auto;font-weight:500;color:var(--muted);font-size:13px}
@@ -382,19 +384,20 @@ function build() {
   root.innerHTML =
     '<section class="ws-v" data-v="home">' + bar('home', '搜索，或者粘贴网址', rulesBtn) + '<div class="ws-sug" data-r="sug-home" hidden></div><div class="ws-chips ws-in" data-r="types"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="home"></div></div></section>' +
     '<section class="ws-v" data-v="res">' + bar('res', '搜索', rulesBtn) + '<div class="ws-sug" data-r="sug-res" hidden></div><div class="ws-tabs ws-in" data-r="tabs"></div><div class="ws-sc" data-r="rsc"><div class="ws-in"><div class="ws-chips" data-r="filters" style="padding:10px 12px 6px"></div><div data-r="res"></div></div></div></section>' +
-    '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div>' +
+    '<section class="ws-v" data-v="read"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="rsite"></span><button type="button" class="ws-chip" data-act="rd-orig" data-r="rorig" style="height:34px;font-size:13px;margin-right:6px">原网页</button></div>' +
       '<div class="ws-find ws-in" data-r="find" hidden><input type="search" enterkeyhint="search" autocomplete="off" placeholder="在这篇文章里找" aria-label="在这篇文章里找"><span data-r="fcount"></span><button type="button" data-act="find-prev" aria-label="上一个">' + ico(I.up, 20) + '</button><button type="button" data-act="find-next" aria-label="下一个">' + ico(I.down, 20) + '</button><button type="button" data-act="find-x" aria-label="关掉查找">' + ico(I.x, 18) + '</button></div>' +
       '<div class="ws-sc" data-r="rdsc"><div class="ws-in" data-r="read"></div></div>' +
-      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-find">' + ico(I.find) + '查找</button><button type="button" data-act="rd-say">' + ico(I.speak) + '朗读</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-vers">' + ico(I.clock) + '历史版本</button><button type="button" data-act="rd-copy">' + ico(I.link) + '复制链接</button><button type="button" data-act="rd-send">' + ico(I.send) + '发给好友</button></div></section>' +
-    '<section class="ws-v" data-v="web"><div class="ws-bar ws-in ws-wbar"><button type="button" class="ws-ib" data-act="web-close" aria-label="关闭网页">' + ico(I.x) + '</button><button type="button" class="ws-ib" data-act="back" aria-label="后退">' + ico(I.back) + '</button><button type="button" class="ws-site ws-urlb" data-r="wsite" data-act="web-url" aria-label="网址"></button><button type="button" class="ws-ib" data-act="web-sheet" aria-label="用 Safari 窗口打开">' + ico(I.out) + '</button><button type="button" class="ws-ib" data-act="web-more" aria-label="更多">' + ico(I.more) + '</button></div>' +
+      '<div class="ws-tool" data-r="rtool"><button type="button" data-act="rd-fs">' + ico(I.size) + '字号</button><button type="button" data-act="rd-find">' + ico(I.find) + '查找</button><button type="button" data-act="rd-say" hidden>' + ico(I.stop) + '停止</button><button type="button" data-act="rd-fav">' + ico(I.mark) + '收藏</button><button type="button" data-act="rd-more">' + ico(I.more) + '更多</button></div></section>' +
+    '<section class="ws-v" data-v="web"><div class="ws-bar ws-in ws-wbar"><button type="button" class="ws-ib" data-act="web-close" aria-label="关闭网页">' + ico(I.x) + '</button><button type="button" class="ws-ib" data-act="back" aria-label="后退">' + ico(I.back) + '</button><button type="button" class="ws-site ws-urlb" data-r="wsite" data-act="web-url" aria-label="网址"></button><button type="button" class="ws-ib" data-act="web-more" aria-label="更多">' + ico(I.more) + '</button></div>' +
       '<div class="ws-web" data-r="wbox"></div><div class="ws-wtip" data-r="wtip" hidden></div></section>' +
     '<section class="ws-v" data-v="favs"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site ws-ttl">收藏</span><span style="width:50px"></span></div><div class="ws-fl ws-in"><input type="search" data-filter="favs" enterkeyhint="search" autocomplete="off" placeholder="在收藏里找" aria-label="在收藏里找"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="favs"></div></div></section>' +
     '<section class="ws-v" data-v="hist"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site ws-ttl">浏览记录</span><button type="button" class="ws-barb" data-act="seen-wipe">清空</button></div><div class="ws-fl ws-in"><input type="search" data-filter="hist" enterkeyhint="search" autocomplete="off" placeholder="在浏览记录里找" aria-label="在浏览记录里找"></div><div class="ws-sc"><div class="ws-pad ws-in" data-r="hist"></div></div></section>' +
     '<section class="ws-v" data-v="rules"><div class="ws-bar ws-in"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" style="color:var(--ink);font-size:16px;font-weight:600">搜索规则</span><span style="width:50px"></span></div><div class="ws-sc"><div class="ws-pad ws-in ws-rules" data-r="rules"></div></div></section>' +
-    '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">用 Safari 窗口看原图</button></div></section>' +
-    '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在原网站打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
+    '<section class="ws-v dk" data-v="img"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="isite"></span><span style="width:50px"></span></div><div class="ws-big" data-r="ibig"></div><div class="ws-dkt" data-r="itxt"></div><div class="ws-dkb"><button type="button" data-act="img-page">打开来源网页</button><button type="button" data-act="img-raw">在浏览器看原图</button></div></section>' +
+    '<section class="ws-v dk" data-v="vid"><div class="ws-bar"><button type="button" class="ws-ib" data-act="back" aria-label="返回">' + ico(I.back) + '</button><span class="ws-site" data-r="vsite"></span><span style="width:50px"></span></div><div class="ws-big" style="align-items:flex-start;padding:0" data-r="vbox"></div><div class="ws-dkb"><button type="button" data-act="vid-out">在浏览器打开</button><button type="button" data-act="vid-send">发给好友</button></div></section>';
   (document.querySelector('.app-container') || document.body).appendChild(root);
   root.addEventListener('click', onClick);
+  window.addEventListener('resize', () => { if (W.on) fitDesk(); });
   root.addEventListener('submit', e => { e.preventDefault(); const f = e.target; const inp = f.querySelector('input'); try { inp.blur(); } catch (x) {} sugHide(); search(inp.value, W.type); });
   root.addEventListener('input', e => {
     const f = e.target.closest && e.target.closest('.ws-field'); if (f) { f.classList.toggle('has', !!e.target.value); sugShow(f.dataset.form, e.target.value); }
@@ -494,31 +497,11 @@ function renderHome() {
   R('types').innerHTML = TYPES.map(t => '<button type="button" class="ws-chip' + (W.type === t[0] ? ' act' : '') + '" data-act="type" data-t="' + t[0] + '">' + t[1] + '</button>').join('');
   const nf = (P.fav || []).length, ns = seen().length;
   let h = '<div class="ws-quick"><button type="button" data-act="favs">' + ico(I.mark, 19) + '收藏<b>' + (nf || '') + '</b></button><button type="button" data-act="hist">' + ico(I.clock, 19) + '浏览记录<b>' + (P.noHist ? '不记' : (ns || '')) + '</b></button></div>';
-  h += '<div class="ws-sec">置顶网站</div><div class="ws-grid">';
-  (P.pin || []).slice(0, 14).forEach(d => {
-    const hs = d.split('/')[0];
-    h += '<button type="button" class="ws-tile" data-act="pin-go" data-d="' + esc(d) + '"><span class="ws-mono" style="color:' + monoColor(hs) + '">' + esc(monoChar(hs)) + '</span><span>' + esc(hs.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>';
-  });
-  h += '<button type="button" class="ws-tile" data-act="pin-add"><span class="ws-mono add">' + ico(I.plus, 20) + '</span><span style="color:var(--muted)">添加</span></button></div>';
-  if (!(P.pin || []).length) h += '<div class="ws-hint">置顶的网站排在结果最前面；点一下只搜这个网站。</div>';
-  const often = oftenSites();
-  if (often.length) {
-    h += '<div class="ws-sec">常去的网站</div><div class="ws-grid">';
-    often.forEach(x => { h += '<button type="button" class="ws-tile" data-act="often-go" data-d="' + esc(x.h) + '"><span class="ws-mono" style="color:' + monoColor(x.h) + '">' + esc(monoChar(x.h)) + '</span><span>' + esc(x.h.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>'; });
-    h += '</div>';
-  }
-  const fav = (P.fav || []).slice(0, 3);
-  if (fav.length) {
-    h += '<div class="ws-sec">收藏的文章' + '<button type="button" data-act="favs">全部 ' + P.fav.length + ' 个</button>' + '</div><div class="ws-card">';
-    fav.forEach((f, i) => { h += '<div class="ws-row" data-act="fav-go" data-i="' + i + '">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || f.u) + '<span class="ws-sub">' + esc(f.s || host(f.u)) + '</span></span></div>'; });
-    h += '</div>';
-  }
-  const sn = seen().slice(0, 5);
-  if (sn.length) {
-    h += '<div class="ws-sec">最近看过<span class="ws-secb"><button type="button" data-act="hist">全部记录</button><button type="button" data-act="seen-clear">清空</button></span></div><div class="ws-card">';
-    sn.forEach((x, i) => { h += '<div class="ws-row" data-act="seen-go" data-i="' + i + '" style="cursor:pointer">' + ico(x.m === 'web' ? I.globe : I.read, 16) + '<span class="ws-tx">' + esc(x.t || host(x.u) || x.u) + '<span class="ws-sub">' + esc(entrySub(x)) + '</span></span></div>'; });
-    h += '</div>';
-  }
+  // 网站：置顶的在前（点了只搜这个网站），常去的在后（点了直接打开），一共最多 8 个
+  const pins = (P.pin || []).slice(0, 8);
+  const often = oftenSites().filter(x => !pins.some(d => hit('https://' + x.h + '/', [d]))).slice(0, Math.max(0, 8 - pins.length));
+  const tile = (act, d, hs) => '<button type="button" class="ws-tile" data-act="' + act + '" data-d="' + esc(d) + '"><span class="ws-mono" style="color:' + monoColor(hs) + '">' + esc(monoChar(hs)) + '</span><span>' + esc(hs.replace(/\.(com|org|net|cn|io)$/, '')) + '</span></button>';
+  if (pins.length || often.length) h += '<div class="ws-grid">' + pins.map(d => tile('pin-go', d, d.split('/')[0])).join('') + often.map(x => tile('often-go', x.h, x.h)).join('') + '</div>';
   const hs = hist().slice(0, 8);
   if (hs.length) {
     h += '<div class="ws-sec">最近搜过<button type="button" data-act="hist-clear">清空</button></div><div class="ws-card">';
@@ -705,7 +688,7 @@ function renderDeep(c) {   // 深挖：几个大数据库的结果按来源分�
     g.items.forEach(it => {
       W.view.push(it); const i = W.view.length - 1;
       const foot = (it.f ? esc(it.f) : '') + (it.c ? (it.f ? ' · ' : '') + '<button type="button" class="ws-lnk" data-act="hn-c" data-i="' + i + '">看讨论</button>' : '');
-      const body = '<div class="ws-rt"><span class="h">' + esc(host(it.u)) + '</span>' + (it.ext ? '<span class="ws-tag" style="background:var(--surface2);color:var(--muted)">用浏览器打开</span>' : '') +
+      const body = '<div class="ws-rt"><span class="h">' + esc(host(it.u)) + '</span>' + '' +
         '<button type="button" class="ws-more" data-act="r-more" data-i="' + i + '" aria-label="更多">' + ico(I.more, 18) + '</button></div>' +
         '<a class="t" href="' + esc(it.u) + '">' + esc(tx(it, 't') || it.u) + '</a>' + (it.s ? '<div class="s">' + esc(tx(it, 's')) + '</div>' : '') + (foot ? '<div class="f">' + foot + '</div>' : '');
       h += it.img ? '<div class="ws-r nw" data-act="r-go" data-i="' + i + '"><div class="c">' + body + '</div><img src="' + esc(it.img) + '" alt="" referrerpolicy="no-referrer" loading="lazy"></div>'
@@ -719,34 +702,49 @@ function renderDeep(c) {   // 深挖：几个大数据库的结果按来源分�
 }
 
 /* ---------- 打开结果 ---------- */
+/* 视频：认得出视频编号的，用这个网站自己的官方嵌入播放器在 App 里播（YouTube、B 站、优酷、腾讯视频、TikTok、Vimeo、Dailymotion、AcFun、niconico）。
+   格式：YouTube、B 站、TikTok、Vimeo、Dailymotion、niconico 有官方说明；优酷、腾讯视频按公开资料；AcFun 没核实——放不出来时下面有“在浏览器打开”。 */
 function vidOf(u) {
-  let m = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/.exec(u || '');
-  if (m) return { src: 'https://www.youtube-nocookie.com/embed/' + m[1] + '?autoplay=1&playsinline=1&rel=0' };
-  m = /bilibili\.com\/video\/(BV[0-9A-Za-z]{10})/.exec(u || '');
+  u = String(u || '');
+  let m = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{11})/.exec(u);
+  if (m) return { src: 'https://www.youtube-nocookie.com/embed/' + m[1] + '?autoplay=1&playsinline=1&rel=0', tall: /\/shorts\//.test(u) };
+  m = /bilibili\.com\/video\/(BV[0-9A-Za-z]{10})/.exec(u);
   if (m) return { src: 'https://player.bilibili.com/player.html?bvid=' + m[1] + '&autoplay=1&high_quality=1&danmaku=0' };
+  m = /v\.youku\.com\/v_show\/id_([0-9A-Za-z=]+?)(?:\.html|[?#]|$)/.exec(u);
+  if (m) return { src: 'https://player.youku.com/embed/' + m[1] };
+  m = /v\.qq\.com\/x\/(?:cover\/[0-9a-z]+|page)\/([0-9a-z]{11})\.html/i.exec(u) || /v\.qq\.com\/.*[?&]vid=([0-9a-z]{11})/i.exec(u);
+  if (m) return { src: 'https://v.qq.com/txp/iframe/player.html?vid=' + m[1] + '&autoplay=1' };
+  m = /tiktok\.com\/(?:@[\w.-]+\/video|player\/v1|embed(?:\/v2)?)\/(\d{8,25})/.exec(u);
+  if (m) return { src: 'https://www.tiktok.com/player/v1/' + m[1] + '?autoplay=1', tall: true };
+  m = /vimeo\.com\/(?:video\/)?(\d{5,12})(?:[/?#]|$)/.exec(u);
+  if (m) return { src: 'https://player.vimeo.com/video/' + m[1] + '?autoplay=1' };
+  m = /(?:dailymotion\.com\/(?:embed\/)?video|dai\.ly)\/([0-9a-zA-Z]{5,12})/.exec(u);
+  if (m) return { src: 'https://www.dailymotion.com/embed/video/' + m[1] + '?autoplay=1' };
+  m = /acfun\.cn\/v\/(ac\d{3,12})/.exec(u);
+  if (m) return { src: 'https://www.acfun.cn/player/' + m[1] };
+  m = /nicovideo\.jp\/watch\/((?:sm|so|nm)\d{1,12})/.exec(u);
+  if (m) return { src: 'https://embed.nicovideo.jp/watch/' + m[1] + '?autoplay=1' };
   return null;
 }
-/* 用 iPhone 自带的 Safari 窗口打开：从主屏幕打开的 Chatter 里，点到别的网站会在 App 里弹出 Safari 窗口（点“完成”回到 Chatter，不会切到 Safari App）。
-   什么网站都能打开（不受“禁止嵌入”限制），电脑版网页也会自动缩放，视频照常播。在 Safari 浏览器里用 Chatter 时，就开一个新标签页。 */
+/* 在浏览器打开：只有用户自己点了“在浏览器打开”才用，从来不自动跳出去。
+   从桌面图标打开的 Chatter 里，iPhone 会在 App 里弹出系统的浏览器窗口，安卓会用系统浏览器的页面，电脑上开新标签页。 */
 const standalone = () => { try { return navigator.standalone === true || !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); } catch (e) { return false; } };
 function ext(u) {
   if (!u) return;
   if (standalone()) { try { const a = document.createElement('a'); a.href = u; a.rel = 'noreferrer'; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); return; } catch (e) { /* 换下面的办法 */ } }
   try { window.open(u, '_blank', 'noopener'); } catch (e) {}
 }
-function openSheet(u, t) { addVisit({ u: u, t: t || '', s: host(u), m: 'web' }); ext(u); }
+function openBrowser(u, t) { addVisit({ u: u, t: t || '', s: host(u), m: 'web' }); ext(u); }
+/* 打开一个结果：一律先在 Chatter 里打开——
+   视频（认得出编号）→ 官方播放器；能嵌入的网页 → 原网页（电脑版网页自动缩小到整页能看全）；
+   网站不让别的 App 显示原网页的 → 服务器取来它的内容，在 App 里看（文字、图片、链接都在）；视频网站不让播的 → 给“在浏览器打开”，不变成文字。 */
 function openUrl(u, t) {
   const vid = vidOf(u);
   if (vid) { go('vid', { u: u, t: t, vid: vid }); return; }
-  if (lookAlike(u) || (P.open === 'read' && !hit(u, CFG.direct) && !hit(u, CFG.video))) { go('read', { u: u, t: t }); return; }   // 像仿冒网站（简洁阅读那边有红色提醒），或者自己设了“先用简洁阅读”
-  if (hit(u, CFG.video) || P.open === 'sheet') { openSheet(u, t); return; }   // 视频网站、设了“总是用 Safari 窗口”：直接打开原网站
+  if (lookAlike(u)) { go('read', { u: u, t: t }); return; }   // 像仿冒网站：阅读模式那边有红色提醒
   go('web', { u: u, t: t });
 }
-function openOrig(u, t, extra) {   // “原网页”：先在 App 里显示；已经知道这个网站不让嵌，就直接用系统浏览器
-  const f = W.frm.get(u);
-  if (f && f.frame === false) { ext(f.url || u); return; }
-  go('web', Object.assign({ u: u, t: t }, extra || {}));
-}
+function noFrame(u) { const f = W.frm.get(u); return !!(f && f.frame === false); }
 function openPage(u, t) {   // 聊天里点的链接也在这里打开（不跳出 App）
   build(); loadPrefs(); loadCfg();
   if (!W.on) { W.on = true; root.classList.add('on'); document.body.classList.add('ws-open'); }
@@ -755,10 +753,10 @@ function openPage(u, t) {   // 聊天里点的链接也在这里打开（不跳�
 
 /* ---------- App 里的网页（原网页） ----------
    网页由手机直接打开、嵌在 App 里，不经过我们的服务器、不转发内容（这不是代理，也不是 VPN）。
-   很多大网站（谷歌、知乎、B 站、推特……）自己设了“不许别的网站嵌入”，嵌进来会是一片空白，
-   所以先让服务器看一眼对方的响应头：不让嵌就换简洁阅读，并说清原因。
+   很多大网站（谷歌、知乎、推特……）自己设了“不许别的网站嵌入”，嵌进来会是一片空白，
+   所以先让服务器看一眼对方的响应头：不让嵌的，换成服务器取来的内容（还在 App 里），并说清原因。
    网页里点过的链接会留在浏览器历史里：返回键、左上角“‹”先在网页里后退，退到头再回上一层；“×”直接关掉。 */
-const WHY = { xfo: '这个网站不允许在别的 App 里显示原网页', csp: '这个网站不允许在别的 App 里显示原网页', http: '这个网站没有加密（http），App 里不能直接显示', pdf: '这是 PDF 文件', file: '这是文件，不是网页' };
+const WHY = { xfo: '这个网站不让别的 App 显示它的原网页', csp: '这个网站不让别的 App 显示它的原网页', http: '这个网站没有加密（http），App 里不能直接显示原网页', pdf: '这是 PDF 文件', file: '这是文件，不是网页' };
 function renderPage(t) {   // 原网页这一层
   const d = t.d, box = R('wbox');
   R('wsite').textContent = host(d.src || d.u);
@@ -786,13 +784,17 @@ async function probeWeb(t) {
     if (account !== accountRevision || top() !== t) return;
     if (saved?.art?.ok) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }
   }
-  if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：简洁阅读那边有按原因的提示和按钮（看存档、去真的网站）
-  if (f.frame === false || !src || f.mobile === false) {   // 嵌不进 App、电脑版网页（没做手机适配）：用 Safari 窗口打开原网站，不变成文字
-    const why = f.mobile === false && src && f.frame !== false ? '这是电脑版网页，没做手机适配' : (WHY[f.why] || (src ? '这个网站不允许在别的 App 里显示原网页' : '这个网址不能在 App 里打开'));
+  if (f.frame === null && /^(nohost|gone|bad)$/.test(f.code)) { replaceTop(t, 'read', { u: d.u, t: d.t }); return; }   // 找不到网站、被删了：阅读模式那边有按原因的提示和按钮（看存档、去真的网站）
+  if (f.frame === false || !src) {   // 嵌不进 App：不跳出去
+    const why = WHY[f.why] || (src ? '这个网站不让别的 App 显示它的原网页' : '这个网址不能在 App 里显示原网页');
     const url = f.url || d.u;
-    if (!d.fromRead && standalone()) { addVisit({ u: d.u, t: d.t, s: host(url), m: 'web' }); leaveWeb(() => { show(); ext(url); }); return; }   // 主屏幕版：退回上一页，同时弹出 Safari 窗口
-    d.fail = { why: why, url: url }; show(); return;   // 在 Safari 浏览器里：要点一下才能开新标签页（不然会被拦）
+    addVisit({ u: d.u, t: d.t, s: host(url), m: 'web' });
+    // 视频网站、文件、从阅读模式点过来的：给按钮（在浏览器打开），不变成文字
+    if (d.fromRead || hit(url, CFG.video) || hit(d.u, CFG.video) || f.why === 'pdf' || f.why === 'file') { d.fail = { why: why, url: url, vid: hit(url, CFG.video) || hit(d.u, CFG.video) }; show(); return; }
+    replaceTop(t, 'read', { u: d.u, t: d.t, noFrame: true, note: why + '，下面是 Chatter 取来的内容' });   // 其余：服务器取来内容，在 App 里看
+    return;
   }
+  d.desk = f.mobile === false;   // 电脑版网页（没做手机适配）：按电脑的宽度排版，再缩小到整页能看全
   d.src = src; d.unsure = f.frame === null;
   addVisit({ u: d.u, t: d.t, s: host(src), m: 'web' });
   show();
@@ -811,31 +813,42 @@ function mountWeb(t) {
   fr.setAttribute('title', d.t || host(d.src));
   fr.addEventListener('load', () => {
     d.loads = (d.loads || 0) + 1; ld.remove();
-    if (d.loads === 1 && !d.tipped) { d.tipped = true; webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000); }
+    if (d.loads === 1 && !d.tipped) { d.tipped = true; if (d.desk) webTip(t, '电脑版网页，已缩小到整页能看全。', 8000, 'zoom'); else webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000); }
   });
   box.appendChild(ld); box.appendChild(fr);
+  fitDesk();
   fr.src = d.src;
   clearTimeout(W.webT); W.webT = setTimeout(() => { if (top() === t && !d.loads) webTip(t, '打开得有点慢。', 0); }, 9000);
-  if (foreign(d.t || '') && !d.trTip) { d.trTip = true; webTip(t, '外文网页。', 0, true); }
+  if (foreign(d.t || '') && !d.trTip) { d.trTip = true; webTip(t, '外文网页。', 0, 'tr'); }
 }
 function unmountWeb() {
   if (!root) return;
-  const box = R('wbox'); if (box) { box.innerHTML = ''; box.dataset.src = ''; }
+  const box = R('wbox'); if (box) { box.innerHTML = ''; box.dataset.src = ''; box.classList.remove('wide'); }
   const tip = R('wtip'); if (tip) tip.hidden = true;
   clearTimeout(W.webT); clearTimeout(W.tipT);
 }
-function webTip(t, msg, hideMs, tr) {   // 网页下面的小提示：看不到内容就用 Safari 窗口打开
+function fitDesk() {   // 电脑版网页：按 980 像素宽排版，再整体缩小到屏幕宽（手机浏览器打开电脑版网页也是这样）；“放大”以后按原大小显示，可以左右拖
+  if (!root) return;
+  const t = top(), d = t && t.v === 'web' ? t.d : null, box = R('wbox'), fr = box && box.querySelector('iframe');
+  if (!fr) return;
+  const desk = !!(d && d.desk), zoom = desk && !!d.zoom;
+  box.classList.toggle('wide', zoom);
+  const w = box.clientWidth, h = box.clientHeight, sc = desk && !zoom && w > 0 && w < 980 ? w / 980 : 1;
+  if (sc < 1) { fr.style.width = (w / sc) + 'px'; fr.style.height = (h / sc) + 'px'; fr.style.transform = 'scale(' + sc + ')'; }
+  else { fr.style.width = ''; fr.style.height = ''; fr.style.transform = ''; }
+}
+function webTip(t, msg, hideMs, kind) {   // 网页下面的小提示。kind：'tr' 外文（翻成中文看）、'zoom' 电脑版网页（放大），其余：看不到内容就换阅读模式
   const tip = R('wtip'); if (!tip || top() !== t) return;
-  tip.innerHTML = '<span>' + esc(msg + (tr ? '' : '看不到内容？')) + '</span><button type="button" class="ws-chip" data-act="' + (tr ? 'web-read' : 'web-sheet') + '">' + (tr ? '翻成中文看' : '用 Safari 窗口打开') + '</button><button type="button" class="ws-x" data-act="web-tipx" aria-label="关掉提示">' + ico(I.x, 14) + '</button>';
+  const btn = kind === 'tr' ? ['web-read', '翻成中文看'] : kind === 'zoom' ? ['web-zoom', t.d.zoom ? '缩小到整页' : '放大'] : ['web-read', '用阅读模式看'];
+  tip.innerHTML = '<span>' + esc(msg + (kind ? '' : '看不到内容？')) + '</span><button type="button" class="ws-chip" data-act="' + btn[0] + '">' + btn[1] + '</button><button type="button" class="ws-x" data-act="web-tipx" aria-label="关掉提示">' + ico(I.x, 14) + '</button>';
   tip.hidden = false;
   clearTimeout(W.tipT); if (hideMs) W.tipT = setTimeout(() => { if (top() === t) tip.hidden = true; }, hideMs);
 }
-function webFail(d) {
-  const login = hit(d.u, CFG.direct);
+function webFail(d) {   // 原网页显示不了、又不适合换成文字（视频网站、文件、从阅读模式点过来的）：只给按钮，用户自己选
   const b = (act, label, pri) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '">' + esc(label) + '</button>';
-  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p><small>' +
-    esc(login ? '这类网站要登录才能看：在 Safari 窗口里打开，登录一次就行。' : '点下面的按钮，用 iPhone 自带的 Safari 窗口打开原网站（在 Chatter 里弹出，点“完成”回来）。') + '</small>' +
-    b('web-ext', '用 Safari 窗口打开', true) + (d.fromRead ? b('back', '返回简洁阅读', false) : b('web-read', '试试简洁阅读', false)) + '</div></div></div>';
+  const sub = d.fail.vid ? '这个视频网站不让别的 App 播放它的视频。' : hit(d.u, CFG.direct) ? '这类网站要登录才能看，在浏览器里能用你的登录。' : '';
+  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p>' + (sub ? '<small>' + esc(sub) + '</small>' : '') +
+    b('web-ext', '在浏览器打开', true) + (d.fail.vid && d.t && !/^https?:/i.test(d.t) ? b('web-vsearch', '找能直接播放的', false) : '') + (d.fromRead ? b('back', '返回', false) : '') + '</div></div></div>';
 }
 function leaveWeb(next) {   // 退出网页那一层：网页里点过的链接在浏览器历史里留下了记录，一步步退回进来之前那一层；next：退完以后要去的页面
   const depth = W.stack.length; let n = 0;
@@ -858,7 +871,7 @@ function itemActs(it) {
   items.push({ label: '不看 ' + h + ' 的结果', fn: () => { P.block = [h].concat((P.block || []).filter(d => d !== h)); savePrefs(); renderTop(); B.toast('以后不显示 ' + h + '，可以在搜索规则里改回来'); } });
   const fv = isFav(it.u, '');
   items.push({ label: fv ? '取消收藏' : '收藏', fn: () => { const on = toggleFav({ u: it.u, t: it.t, s: h }); renderTop(); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } });
-  items.push({ label: '用 Safari 窗口打开', fn: () => openSheet(it.u, it.t) });
+  items.push({ label: '在浏览器打开', fn: () => openBrowser(it.u, it.t) });
   items.push({ label: '看互联网档案馆的存档', fn: () => go('read', { u: it.u, t: it.t, at: 'latest' }) });
   items.push({ label: '复制链接', fn: () => B.copy(it.u) });
   items.push({ label: '发给好友', fn: () => B.forward((it.t ? it.t + '\n' : '') + it.u) });
@@ -866,7 +879,7 @@ function itemActs(it) {
   B.acts(h, items);
 }
 
-/* ---------- 简洁阅读 ---------- */
+/* ---------- 阅读模式 ---------- */
 const OK_TAG = /^(p|br|h2|h3|h4|h5|h6|ul|ol|li|blockquote|pre|code|em|strong|b|i|u|s|sub|sup|a|img|figure|figcaption|table|thead|tbody|tr|th|td|hr|div)$/;
 const BAD_TAG = /^(script|style|iframe|frame|object|embed|svg|math|template|noscript|form|input|button|textarea|select|link|meta|base|video|audio|source)$/;
 function sanitize(html) {   // 服务器已经洗过一遍；这里再按白名单重建一遍，只留文字、图片和链接
@@ -894,7 +907,7 @@ const tsDay = ts => String(ts || '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1-$2-
 const tsCn = ts => { const m = /^(\d{4})(\d{2})(\d{2})/.exec(String(ts || '')); return m ? m[1] + ' 年 ' + (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : String(ts || ''); };
 const archUrl = d => d.art && d.art.arch ? 'https://web.archive.org/web/' + d.art.arch + '/' + (d.art.u || d.u) : (d.art && d.art.u) || d.u;
 function seen() { return LSg(uidKey('ch2wsSeen'), []); }
-function addSeen(d) {   // 最近看过：简洁阅读打开成功的文章记下来，结果列表变了也能找回
+function addSeen(d) {   // 最近看过：阅读模式打开成功的文章记下来，结果列表变了也能找回
   const a = d.art; if (!a) return;
   addVisit({ u: d.u, t: a.title, s: a.site, at: a.arch || '', m: 'read' });
 }
@@ -905,20 +918,21 @@ function banners(d, final) {   // 阅读页顶部的提醒：仿冒网址、跳�
     '<button type="button" data-act="rd-goto" data-u="https://' + esc(lk.d) + '/">去真的' + esc(lk.n) + '（' + esc(lk.d) + '）</button></div>';
   const j = final ? jumped(d.u, final) : '';
   if (j) h += '<div class="ws-jump">这个网址自动跳转到了另一个网站：<b>' + esc(j) + '</b></div>';
-  if (d.note) h += '<div class="ws-jump">' + esc(d.note) + '　<button type="button" class="ws-lnk" data-act="rd-ext">用 Safari 窗口打开原网页</button></div>';
+  if (d.note && !d.err) h += '<div class="ws-jump">' + esc(d.note) + '</div>';   // 右上角的按钮已经是“在浏览器打开”
   return h;
 }
 function rdErr(d) {   // 打不开时按原因给按钮：被删了先给存档，要登录先给浏览器，限流先给重试，找不到网站先给搜索
   const e = d.err || {}, look = lookAlike(d.u), q = (d.t && !/^https?:/i.test(d.t) && d.t.length < 80) ? d.t : mainLabel(host(d.u));
   const b = (act, label, pri, extra) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '"' + (extra || '') + '>' + esc(label) + '</button>';
-  const arch = pri => d.at ? '' : b('rd-arch', '看互联网档案馆的存档', pri), orig = pri => b('rd-orig', d.at ? '打开这一版存档' : (look ? '仍然打开原网页（小心）' : e.code === 'login' ? '用 Safari 窗口打开（在里面登录）' : '打开原网页'), pri && !look, e.code === 'login' || d.noFrame ? ' data-ext="1"' : '');   // 疑似仿冒的网站：不把“打开原网页”放第一个
+  const toBr = e.code === 'login' || d.noFrame;   // 原网页在 App 里显示不了：按钮直说“在浏览器打开”
+  const arch = pri => d.at ? '' : b('rd-arch', '看互联网档案馆的存档', pri), orig = pri => b('rd-orig', d.at ? '打开这一版存档' : (look ? '仍然打开原网页（小心）' : toBr ? '在浏览器打开' + (e.code === 'login' ? '（能用你的登录）' : '') : '打开原网页'), pri && !look, toBr ? ' data-ext="1"' : '');   // 疑似仿冒的网站：不把“打开原网页”当主按钮
   const srch = (label, pri) => q ? b('rd-search', label || '搜索「' + q + '」', pri, ' data-q="' + esc(q) + '"') : '';
   let tip = '', btns = '';
   switch (e.code) {
     case 'nohost': tip = '网址可能打错了，或者这个网站已经关了';
       btns = (look ? b('rd-goto', '你要找的是' + look.n + '吗？去 ' + look.d, true, ' data-u="https://' + esc(look.d) + '/"') : '') + srch('', !look) + arch(false); break;
     case 'gone': tip = '原网页被删了，互联网档案馆里可能还留着以前的版本'; btns = arch(true) + srch(d.t ? '搜这个标题，看别处有没有转载' : '', false) + orig(false); break;
-    case 'login': tip = '要登录才能看的网站：用 Safari 窗口打开，在里面登录一次'; btns = orig(true) + (d.noFrame ? '' : b('rd-orig', '在 App 里打开原网页', false)) + arch(false); break;
+    case 'login': tip = '要登录才能看的网站'; btns = orig(true) + arch(false); break;
     case 'busy': tip = d.at ? '互联网档案馆经常这样，已经自动重试过一次；通常等一两分钟再点重试就好' : '对方网站暂时不让频繁访问，等一会儿再试，或者用浏览器打开';
       btns = b('rd-retry', '重试', true) + orig(false) + arch(false); break;
     case 'timeout': tip = d.at ? '互联网档案馆比较慢，再试一次通常就好' : '对方网站反应太慢，再试一次，或者看存档'; btns = b('rd-retry', '重试', true) + arch(false) + orig(false); break;
@@ -937,6 +951,7 @@ function renderRead(t) {
   const d = t.d;
   R('rsite').textContent = host(d.u) + (d.at ? ' · 存档' : '');
   R('rtool').style.display = d.art ? '' : 'none';
+  const nf = !d.at && (d.noFrame || noFrame(d.u)); R('rorig').textContent = nf ? '在浏览器打开' : '原网页';
   const favd = (P.fav || []).some(f => f.u === d.u && (f.at || '') === ((d.art && d.art.arch) || ''));
   const fb = R('rtool').querySelector('[data-act="rd-fav"]'); fb.classList.toggle('on', favd); fb.lastChild.nodeValue = favd ? '已收藏' : '收藏';
   paintTts();
@@ -1172,7 +1187,7 @@ function renderImg(t) {
   const box = R('ibig'); box.innerHTML = '';
   const im = new Image(); im.alt = it.t || ''; im.referrerPolicy = 'no-referrer';
   let tried = 0;
-  im.onerror = () => { if (!tried && it.th && im.src !== it.th) { tried = 1; im.src = it.th; return; } box.innerHTML = '<p>图片加载不出来，可以点下面用 Safari 窗口看原图</p>'; };
+  im.onerror = () => { if (!tried && it.th && im.src !== it.th) { tried = 1; im.src = it.th; return; } box.innerHTML = '<p>图片加载不出来，可以点下面“在浏览器看原图”</p>'; };
   im.src = it.img || it.th; box.appendChild(im);
   V('img').querySelector('[data-act="img-page"]').style.display = it.u ? '' : 'none';
 }
@@ -1182,8 +1197,8 @@ function renderVid(t) {
   const box = R('vbox');
   if (box.dataset.src === d.vid.src && box.firstChild) return;
   box.dataset.src = d.vid.src;
-  box.innerHTML = '<div style="width:100%"><iframe class="ws-player" src="' + esc(d.vid.src) + '" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="视频"></iframe>' +
-    '<div class="ws-dkt" style="padding-top:14px">' + esc(d.t || '') + '<small>' + esc(host(d.u)) + ' · 放不出来的话点“在原网站打开”</small></div></div>';
+  box.innerHTML = '<div style="width:100%"><iframe class="ws-player' + (d.vid.tall ? ' tall' : '') + '" src="' + esc(d.vid.src) + '" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="视频"></iframe>' +
+    '<div class="ws-dkt" style="padding-top:14px">' + esc(d.t || '') + '<small>' + esc(host(d.u)) + ' · 放不出来的话点下面“在浏览器打开”</small></div></div>';
 }
 
 /* ---------- 搜索规则 ---------- */
@@ -1195,9 +1210,7 @@ function renderRules() {
       '<button type="button" class="ws-row" data-act="rule-add" data-k="' + k + '" style="color:var(--accent)">' + ico(I.plus, 18) + '<span class="ws-tx">添加网站</span></button>';
   };
   const use = s => (W.keys && W.keys[s] === false) ? '还没填密钥' : (W.used[s] != null ? '用了 ' + W.used[s] + ' / ' + (W.free[s] || '?') + ' 次' : '…');
-  const h = '<div class="ws-sec" style="margin-top:10px">打开网页</div><div class="ws-card">' +
-    '<div class="ws-row" data-act="pref-open" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">打开网页的方式<span class="ws-sub" style="white-space:normal">自动：能放进 Chatter、又做了手机适配的网页直接显示；其余（大网站、电脑版网页、视频网站）用 iPhone 自带的 Safari 窗口打开原网站，点“完成”回来。简洁阅读随时在“⋯”里</span></span><span class="ws-val">' + ({ sheet: 'Safari 窗口', read: '简洁阅读' }[P.open] || '自动') + '</span>' + ico(I.chev, 16) + '</div></div>' +
-    '<div class="ws-sec">排序和过滤</div><div class="ws-card">' +
+  const h = '<div class="ws-sec" style="margin-top:10px">排序和过滤</div><div class="ws-card">' +
     sw('tgl-clean', P.clean, '干净页面优先', '维基百科、GitHub、政府和学校网站往前排') +
     sw('tgl-farm', P.hideFarms, '不看营销号', '百家号、搜狐号、360doc 这类不显示') +
     '<div class="ws-row" data-act="pref-src" style="cursor:pointer"><span class="ws-tx">网页先用哪家搜<span class="ws-sub">这家用完了会自动换另一家</span></span><span class="ws-val">' + SRCN[P.src === 'tavily' ? 'tavily' : 'exa'] + '</span>' + ico(I.chev, 16) + '</div></div>' +
@@ -1213,13 +1226,13 @@ function renderRules() {
     '<div class="ws-sec">浏览记录和手机里的文章</div><div class="ws-card">' +
       sw('tgl-nohist', !!P.noHist, '不记浏览记录', '打开以后不记看过的网页和搜过的词；已经记下的去“浏览记录”里删') +
       '<div class="ws-row" data-act="hist" style="cursor:pointer"><span class="ws-tx">浏览记录<span class="ws-sub">只存在这台手机里，退出登录会清掉</span></span><span class="ws-val">' + seen().length + ' 条</span>' + ico(I.chev, 16) + '</div>' +
-      '<div class="ws-row" data-act="art-wipe" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">清空手机里保存的文章<span class="ws-sub" style="white-space:normal">用简洁阅读看过的文章会在手机里存一份：收藏的没网也能看，再打开不用等</span></span><span class="ws-val" data-r="artn">…</span></div></div>' +
+      '<div class="ws-row" data-act="art-wipe" style="cursor:pointer"><span class="ws-tx" style="white-space:normal">清空手机里保存的文章<span class="ws-sub" style="white-space:normal">用阅读模式看过的文章会在手机里存一份：收藏的没网也能看</span></span><span class="ws-val" data-r="artn">…</span></div></div>' +
     '<div class="ws-sec">置顶网站</div><div class="ws-card">' + list('pin', '还没有') + '</div>' +
     '<div class="ws-sec">不看的网站</div><div class="ws-card">' + list('block', '还没有') + '</div>' +
     '<div class="ws-sec">默认名单</div><div class="ws-card">' +
       '<details><summary>营销号（' + CFG.farms.length + ' 个）</summary><p>' + esc(CFG.farms.join('、')) + '</p></details>' +
       '<details><summary>干净网站（' + CFG.clean.length + ' 个）</summary><p>' + esc(CFG.clean.join('、')) + '</p></details>' +
-      '<details><summary>要登录的网站（' + CFG.direct.length + ' 个）</summary><p>这些网站不让在 App 里显示时，直接用 Safari 窗口打开（在里面登录一次）。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
+      '<details><summary>要登录的网站（' + CFG.direct.length + ' 个）</summary><p>这些网站要登录才能看；打不开时点“在浏览器打开”，能用你的登录。' + esc(CFG.direct.join('、')) + '</p></details></div>' +
     '<div class="ws-hint">你的规则存在账号里，换手机也在。默认名单在数据库里，改了不用更新 App。</div>';
   R('rules').innerHTML = h;
   const countLabel = R('artn');
@@ -1236,13 +1249,13 @@ function addSite(k) {
 
 /* ---------- 浏览记录（只存在这台手机，按账号分开；打开“不记浏览记录”就什么都不记） ---------- */
 const HIST_MAX = 300;
-function addVisit(v) {   // v：{ u 网址, t 标题, s 网站, at 存档时间, m 'web' 原网页 / 'read' 简洁阅读 }
+function addVisit(v) {   // v：{ u 网址, t 标题, s 网站, at 存档时间, m 'web' 原网页 / 'read' 阅读模式 }
   if (!v || !v.u || (P && P.noHist)) return;
   const at = v.at || '', all = seen(), old = all.find(x => x.u === v.u && (x.at || '') === at), list = all.filter(x => x !== old);
   list.unshift({ u: v.u, t: v.t || (old && old.t) || '', s: v.s || host(v.u), at: at, m: v.m || 'read', tm: Date.now(), c: ((old && old.c) || 1) + (old ? 1 : 0) });
   LSs(uidKey('ch2wsSeen'), list.slice(0, HIST_MAX));
 }
-function openEntry(x) {   // 记录、收藏、联想里点一条：存档回存档，原网页回原网页，简洁阅读回简洁阅读
+function openEntry(x) {   // 记录、收藏、联想里点一条：存档回存档，原网页回原网页，阅读模式回阅读模式
   if (!x || !x.u) return;
   if (x.at) go('read', { u: x.u, t: x.t, at: x.at });
   else if (x.m === 'web') openUrl(x.u, x.t);
@@ -1257,7 +1270,7 @@ function dayLabel(tm) {
   return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日' + (d.getFullYear() !== new Date().getFullYear() ? '（' + d.getFullYear() + ' 年）' : '');
 }
 function whenCn(tm) { const l = dayLabel(tm); return l === '今天' || l === '昨天' ? l + ' ' + hm(tm) : l; }
-function entrySub(x, full) { return [x.s || host(x.u), x.at ? tsDay(x.at) + ' 存档' : '', full && x.tm ? hm(x.tm) : '', full ? (x.m === 'web' ? '原网页' : '简洁阅读') : ''].filter(Boolean).join(' · '); }
+function entrySub(x, full) { return [x.s || host(x.u), x.at ? tsDay(x.at) + ' 存档' : '', full && x.tm ? hm(x.tm) : '', full ? (x.m === 'web' ? '原网页' : '阅读模式') : ''].filter(Boolean).join(' · '); }
 function oftenSites() {   // 常去的网站：浏览记录里去过 2 次以上的网站，置顶过的不重复放
   const n = {}, first = {};
   seen().forEach((x, i) => { const h = bare(host(x.u)); if (!h) return; n[h] = (n[h] || 0) + (x.c || 1); if (!(h in first)) first[h] = i; });
@@ -1301,7 +1314,7 @@ function renderFavs() {
   else h = '<div class="ws-card" style="margin-top:8px">' + list.map(p => { const f = p[0], i = p[1];
     return '<div class="ws-row" data-act="fav-go" data-i="' + i + '" style="cursor:pointer">' + ico(I.mark, 17) + '<span class="ws-tx">' + esc(f.t || host(f.u) || f.u) + '<span class="ws-sub">' + esc([f.s || host(f.u), f.tm ? whenCn(f.tm) + ' 收藏' : ''].filter(Boolean).join(' · ')) + '</span></span>' +
       '<button type="button" class="ws-x" data-act="fav-del" data-i="' + i + '" aria-label="取消收藏">' + ico(I.x, 15) + '</button></div>'; }).join('') + '</div>' +
-    '<div class="ws-hint">收藏存在账号里，换手机也在。在简洁阅读里收藏的文章，手机里还存了一份，没网也能看。</div>';
+    '<div class="ws-hint">收藏存在账号里，换手机也在。在阅读模式里收藏的文章，手机里还存了一份，没网也能看。</div>';
   R('favs').innerHTML = h;
 }
 
@@ -1335,7 +1348,7 @@ function sugShow(form, q) {
 }
 function sugHide() { if (!root) return; ['home', 'res'].forEach(f => { const b = R('sug-' + f); if (b && !b.hidden) { b.hidden = true; b.innerHTML = ''; } }); }
 
-/* ---------- 简洁阅读里查找 ---------- */
+/* ---------- 阅读模式里查找 ---------- */
 function findOpen() {
   const bar = R('find'); if (!bar) return;
   bar.hidden = false;
@@ -1392,7 +1405,7 @@ const TTS = { on: false, q: [], i: 0, t: null };
 const ttsOk = () => typeof window.speechSynthesis !== 'undefined' && typeof window.SpeechSynthesisUtterance !== 'undefined';
 function paintTts() {
   const tool = root && R('rtool'), b = tool && tool.querySelector('[data-act="rd-say"]'); if (!b) return;
-  b.classList.toggle('on', TTS.on); b.innerHTML = ico(TTS.on ? I.stop : I.speak) + (TTS.on ? '停止' : '朗读');
+  b.hidden = !TTS.on; b.classList.toggle('on', TTS.on);   // 朗读在“更多”里开始；读着的时候这里出现“停止”
 }
 function ttsStop() {
   if (!TTS.on) return;
@@ -1577,7 +1590,7 @@ function onClick(e) {
     case 'pin-go': { const inp = V('home').querySelector('input'); inp.value = 'site:' + el.dataset.d + ' '; inp.closest('.ws-field').classList.add('has'); inp.focus(); break; }
     case 'fav-go': { const f = (P.fav || [])[+el.dataset.i]; if (f) { if (f.at || navigator.onLine === false) go('read', { u: f.u, t: f.t, at: f.at || '' }); else openUrl(f.u, f.t); } break; }
     case 'fav-all': W.flt.favs = ''; go('favs'); break;
-    case 'r-go': if (it && it.u) { if (it.ext) openSheet(it.u, it.t); else openUrl(it.u, it.t); } break;
+    case 'r-go': if (it && it.u) openUrl(it.u, it.t); break;
     case 'r-more': e.stopPropagation(); if (it) itemActs(it); break;
     case 'hn-c': e.stopPropagation(); if (it && it.c) openUrl(it.c, it.t); break;
     case 'retry': if (c) { c.err = null; c.done = false; fetchRes(); } break;
@@ -1594,33 +1607,48 @@ function onClick(e) {
     case 'img-go': if (it) go('img', { it: it }); break;
     case 'img-page': { const x = t && t.d.it; if (x && x.u) openUrl(x.u, x.t); break; }
     case 'img-raw': { const x = t && t.d.it; if (x) ext(x.img || x.th); break; }
-    case 'vid-go': if (it && it.u) { const vid = vidOf(it.u); if (vid) go('vid', { u: it.u, t: it.t, vid: vid }); else openSheet(it.u, it.t); } break;
-    case 'vid-out': if (t && t.d.u) openSheet(t.d.u, t.d.t); break;
+    case 'vid-go': if (it && it.u) { const vid = vidOf(it.u); if (vid) go('vid', { u: it.u, t: it.t, vid: vid }); else openUrl(it.u, it.t); } break;
+    case 'vid-out': if (t && t.d.u) openBrowser(t.d.u, t.d.t); break;
     case 'vid-send': if (t && t.d.u) B.forward((t.d.t ? t.d.t + '\n' : '') + t.d.u); break;
-    case 'rd-orig': if (t && t.d.u) { if (t.d.noFrame || el.dataset.ext) ext(archUrl(t.d)); else openOrig(archUrl(t.d), (t.d.art && t.d.art.title) || t.d.t, { fromRead: true }); } break;
-    case 'rd-ext': if (t && t.d.u) ext(archUrl(t.d)); break;
+    case 'rd-orig': if (t && t.d.u) {   // 原网页能在 App 里显示就在 App 里；显示不了的，按钮上写的就是“在浏览器打开”
+      const u = archUrl(t.d), ti = (t.d.art && t.d.art.title) || t.d.t;
+      if (!t.d.at && (t.d.noFrame || el.dataset.ext || noFrame(t.d.u))) openBrowser(u, ti); else go('web', { u: u, t: ti, fromRead: true });
+    } break;
+    case 'rd-ext': if (t && t.d.u) openBrowser(archUrl(t.d), t.d.t); break;
     case 'web-close': leaveWeb(); break;
     case 'web-tipx': R('wtip').hidden = true; break;
-    case 'web-ext': if (t && t.d.u) openSheet((t.d.fail && t.d.fail.url) || t.d.src || t.d.u, t.d.t); break;
-    case 'web-sheet': if (t && t.v === 'web') { const d = t.d, u = (d.fail && d.fail.url) || d.src || d.u; addVisit({ u: d.u, t: d.t, s: host(u), m: 'web' }); if (standalone()) leaveWeb(() => { show(); ext(u); }); else ext(u); } break;
+    case 'web-ext': if (t && t.d.u) openBrowser((t.d.fail && t.d.fail.url) || t.d.src || t.d.u, t.d.t); break;
+    case 'web-vsearch': if (t && t.d.t) search(t.d.t, 'videos'); break;
+    case 'web-zoom': if (t && t.v === 'web' && t.d.desk) { t.d.zoom = !t.d.zoom; fitDesk(); webTip(t, t.d.zoom ? '原大小，可以上下左右拖。' : '已缩小到整页。', 6000, 'zoom'); } break;
     case 'web-read': if (t && t.v === 'web') { const d = t.d; leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })); } break;
     case 'web-more': if (t && t.v === 'web') {
       const d = t.d, u = d.src || d.u;
       B.acts(host(u), [
-        { label: '简洁阅读（能翻译、调字号）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
+        { label: '阅读模式（能翻译、调字号）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
+        d.desk ? { label: d.zoom ? '缩小到整页' : '放大（原大小）', fn: () => { d.zoom = !d.zoom; fitDesk(); } } : null,
         { label: isFav(d.u, '') ? '取消收藏' : '收藏这个网页', fn: () => { const on = toggleFav({ u: d.u, t: d.t || host(u), s: host(u) }); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } },
         { label: '重新加载', fn: () => { if (d.src) { R('wbox').dataset.src = ''; d.loads = 0; show(); } } },
         { label: '复制链接', fn: () => B.copy(u) },
         { label: '发给好友', fn: () => B.forward((d.t ? d.t + '\n' : '') + u) },
-        { label: '用 Safari 窗口打开', fn: () => leaveWeb(() => { show(); openSheet(u, d.t); }) },
+        { label: '在浏览器打开', fn: () => openBrowser(u, d.t) },
         { label: '取消', fn: null }
-      ]);
+      ].filter(Boolean));
     } break;
-    case 'pref-open': B.acts('打开网页的方式', [['', '自动（推荐）：能放进 Chatter 的直接显示，其余用 Safari 窗口'], ['sheet', '总是用 Safari 窗口'], ['read', '先用简洁阅读（能翻译、省流量）']].map(x => ({ label: x[1] + ((P.open || '') === x[0] ? ' ✓' : ''), fn: () => { P.open = x[0]; savePrefs(); renderTop(); } })).concat([{ label: '取消', fn: null }])); break;
     case 'rd-retry': if (t) { t.d.err = null; t.d.dirty = true; renderRead(t); } break;
     case 'rd-arch': if (t) go('read', { u: t.d.u, t: t.d.t, at: 'latest' }); break;
     case 'rd-now': if (t) openUrl(t.d.u, t.d.art && t.d.art.title); break;
     case 'rd-vers': if (t) showVersions(t.d); break;
+    case 'rd-more': if (t && t.v === 'read') {   // 阅读模式下面的“更多”：不常用的都放这里，工具栏只留字号、查找、收藏
+      const d = t.d, u = archUrl(d);
+      B.acts(host(d.u), [
+        { label: TTS.on ? '停止朗读' : '朗读', fn: () => { if (TTS.on) ttsStop(); else if (top() === t) ttsStart(t); } },
+        { label: '历史版本（互联网档案馆）', fn: () => showVersions(d) },
+        { label: '复制链接', fn: () => B.copy(u) },
+        { label: '发给好友', fn: () => B.forward(((d.art && d.art.title) ? d.art.title + '\n' : '') + u) },
+        { label: '在浏览器打开', fn: () => openBrowser(u, (d.art && d.art.title) || d.t) },
+        { label: '取消', fn: null }
+      ]);
+    } break;
     case 'rd-fs': {
       W.fs = SIZES[(SIZES.indexOf(W.fs) + 1) % SIZES.length] || 18; LSs('ch2wsFs', W.fs);
       const a = R('read').querySelector('.ws-art'); if (a) a.style.fontSize = W.fs + 'px';
