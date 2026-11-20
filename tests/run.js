@@ -704,6 +704,32 @@ test('快速关闭并重开同一聊天：旧请求、旧媒体预览不能覆�
   } finally { env.close(); }
 });
 
+test('删除一条消息（仅自己）：删的是最后一句时，消息页不再显示它，改成上一句；撤销删除又回来；全删光就空着', async () => {
+  const t = Date.now();
+  const db = baseDb(t);
+  serverInsert(db, msg(901, 'bob', 'bob::me', '第一句话', t - 9000));
+  serverInsert(db, msg(902, ME, 'bob::me', '要删掉的那句', t - 3000));
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await sleep(300); await env.T.openConv('bob::me', 'bob'); await sleep(500);
+    const pv = () => { const el = Array.from(env.$('conv-list').querySelectorAll('.conv-item')).find(e => e.dataset.key === 'bob::me'); return el ? el.querySelector('.preview').textContent : '(没有这个会话)'; };
+    ok(/要删掉的那句/.test(pv()), '（准备）消息页预览是最后一句：' + pv());
+    env.T.menuAct(uid(902), 'del'); await sleep(150);
+    ok(!/要删掉的那句/.test(pv()) && /第一句话/.test(pv()), '删掉最后一句以后，消息页预览改成上一句：' + pv());
+    const undo = env.w.document.querySelector('.toast-act button');
+    ok(!!undo, '删除后有“撤销”'); click(env, undo); await sleep(150); ok(/要删掉的那句/.test(pv()), '撤销删除：预览又回来：' + pv());
+    env.T.menuAct(uid(902), 'del'); await sleep(150);
+    env.T.S.conv = null; env.T.S.msgs = []; env.T.msgCacheClear(); env.T.renderList();   // 像 App 刚重开：聊天记录还没读进来
+    ok(!/要删掉的那句/.test(pv()) && /第一句话/.test(pv()), 'App 重开、聊天记录还没读进来时：也不显示删掉的那句：' + pv());
+    const c0 = conv(env, 'bob::me'); c0.last_ts = iso(Date.now() + 5000); c0.last_body = '后来的新消息'; env.T.renderList();
+    ok(/后来的新消息/.test(pv()), '之后对方发来新消息：预览照常显示新消息：' + pv());
+    c0.last_ts = iso(t - 3000); c0.last_body = '要删掉的那句';
+    await env.T.openConv('bob::me', 'bob'); await sleep(400);
+    env.T.menuAct(uid(901), 'del'); await sleep(150);
+    ok(!/要删掉的那句|第一句话/.test(pv()), '两句都删了：预览空着，不显示删掉的话：' + pv());
+  } finally { env.close(); }
+});
+
 test('清空聊天记录：服务器上会话时间比最后一条消息晚一点，同步以后旧的那句话也不会再冒出来', async () => {
   const t = Date.now();
   const env = makeEnv({ db: baseDb(t) });

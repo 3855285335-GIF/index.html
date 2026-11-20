@@ -498,7 +498,29 @@ function renderMe() {
 }
 function renderAll() { try { grpLoad(); grpInvitesLoad(); } catch (e) {} renderMe(); renderList(); renderContacts(); renderRequests(); updateTitle(); }
 /* 会话预览：数据库的预览是空的（但其实有过消息）时，用本机缓存的最后一条消息算，绝不显示“开始聊天吧” */
+function hiddenLastPreview(c) {   // 服务器记的最后一句，我在这边删掉了：预览改成我这边还看得到的最后一句（都删光就空着）
+  if (!hidden.size || !c) return null;
+  const list = c.convKey === S.conv ? S.msgs : ((MSG.mem.get(msgKey(c.convKey))) || (LS.get(mk(S.uid, c.convKey), []) || []));
+  if (!list || !list.length) return null;
+  const last = list[list.length - 1], lt = Date.parse(c.last_ts || 0) || 0;
+  if (!last || !hidden.has(last.id) || (Date.parse(last.created_at) || 0) + 3000 < lt) return null;   // 最新一条没删、或者本机记录比服务器旧：照旧显示
+  for (let i = list.length - 2; i >= 0; i--) { const m = list[i]; if (m && !isHidden(m)) { const p = previewOf(m); if (p) return p; } }
+  return '';
+}
+let pvh = null, pvhUid = null;   // 删了最后一句的会话：预览该显示什么（存在手机里，App 重开、聊天记录还没读进来时也不会冒出被删的话）
+function pvhMap() { if (pvhUid !== S.uid) { pvh = LS.get('ch2pvh:' + (S.uid || ''), {}) || {}; pvhUid = S.uid; } return pvh; }
+function notePreview(conv) {
+  if (!conv || conv !== S.conv) return;
+  const map = pvhMap(), last = S.msgs[S.msgs.length - 1];
+  if (last && hidden.has(last.id)) {
+    let p = ''; for (let i = S.msgs.length - 2; i >= 0; i--) { const m = S.msgs[i]; if (m && !isHidden(m)) { p = previewOf(m) || ''; if (p) break; } }
+    map[conv] = { t: Date.parse(last.created_at) || 0, p: p };
+  } else delete map[conv];
+  LS.set('ch2pvh:' + (S.uid || ''), map);
+}
 function convPreview(c) {
+  const hp = hiddenLastPreview(c); if (hp !== null) return hp;
+  const ov = pvhMap()[c.convKey]; if (ov && (Date.parse(c.last_ts || 0) || 0) <= ov.t + 3000) return ov.p;   // 之后来了新消息就不再用
   let t = parseQ(c.last_body).text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '[群链接]');
   if (/^t:[a-z0-9]{1,8}$/.test(t)) { const st = TMAP[t.slice(2)]; return st ? ('[表情] ' + st[1]) : '[表情]'; }
   if (/^e:[^\s]{1,16}$/u.test(t)) return '[表情]';
@@ -2017,8 +2039,9 @@ function menuAction(kind) {
     hidden.add(id); saveHidden(); S.out.delete(id);
     const el = msgElOf(id); if (el) el.remove();
     if (!$('chat-messages').querySelector('.msg')) chatRender(true);
+    notePreview(S.conv); sched('list');   // 消息页的预览跟着变（删的是最后一句时不再显示它）
     toastUndo('已删除（仅在你这边）', '撤销', function () {
-      hidden.delete(id); saveHidden(); chatRender(true); toast('已恢复');
+      hidden.delete(id); saveHidden(); chatRender(true); notePreview(S.conv); sched('list'); toast('已恢复');
     });
   }
 }
@@ -5277,6 +5300,7 @@ function multiDel() {
   });
   saveHidden(); exitMulti();
   if (!$('chat-messages').querySelector('.msg')) chatRender(true);
+  notePreview(S.conv); sched('list');
   toast('已删除 ' + n + ' 条（仅在你这边）');
 }
 function multiCopy() {
@@ -8163,7 +8187,7 @@ function boot() {
   try { verBoot(); } catch (e) {}
   window.__chBooted = true;   // 告诉页面里的白屏保护：程序已经正常启动
 }
-if (window.__TEST__) window.__T = { get sb() { return sb; }, clearConv, renderList, momentsLoad, openVisPicker, applyVis, loadRemarks, setMomentPerm, openMomentPerm, postMoment, openMomentCompose, momentVisText, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
+if (window.__TEST__) window.__T = { get sb() { return sb; }, clearConv, renderList, msgCacheClear, menuAct: (id, k) => { menuId = id; menuAction(k); }, momentsLoad, openVisPicker, applyVis, loadRemarks, setMomentPerm, openMomentPerm, postMoment, openMomentCompose, momentVisText, showA2HS, a2hsEnv, kickOthers, checkKick, firePushRetry, toggleMute, goLink, pushSync, firePush, PUSH, togglePlay, S, onAuth, onFastRecall, loadOlder, sendImage, sendFiles, declineRequest, openConv, sendText, onFastMsg, onSig, startCall, acceptCall, endCall, recStart, recEnd, recMove, encodeWav, msgHTML, closeChat, onIncoming, upsertMsg, bcast, deliver, runSearch, toggleMomentLike, MO, addLocal, newMsg, getSb: () => sb, getReady: () => ready, LOG, GRP, grpLoad, grpPoll, grpCreate, grpNew, grpInfo, grpLeave, grpName, isGroupKey, grpInvitesLoad, grpInviteAccept, grpInviteDecline, grpOpenMeta, grpMembers, msgCacheGet, msgCacheSave, MSG, compressImage, TEXT_MAX, grpInvite, grpKick, rec, pickVoiceMime, exportChat, isExporting: () => exporting, openProfile, GC, gcStart, gcEnd, gcTick, gcToggleMute, gcTipPoll, loadMyCover, applyMomentCover, forceCover: () => { myCoverAt = 0; loadMyCover(); }, refreshMomentReact, momentReactHTML, momentNotifyCheck, spkLevel, gcMarkSpeaking, getAudio: () => audioEl, getPlaying: () => playingId, IE, pullRefresh };
 window.addEventListener('offline', function () { try { showBanner('当前离线，显示的是本地缓存'); } catch (e) {} });window.addEventListener('online', function () { try { showBanner(''); if (S.conv) pollConv(S.conv); retryBadImgs(); } catch (e) {} });
 document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { retryBadImgs(); } catch (e) {} } });
 // 表情面板：点面板外面任何地方都收起（以前只有点输入框/发送才关，点空白点不掉）
