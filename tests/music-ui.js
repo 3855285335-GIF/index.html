@@ -25,7 +25,10 @@ const TREND = Array.from({ length: 12 }, (_, i) => TR(i)).concat([TR(90, { acces
 const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${CSS}</style></head>
 <body><div class="app-container"><div id="app-view" class="active" style="display:flex;flex-direction:column;height:100%"><header class="app-header"><div class="brand"><span>Chatter</span></div></header><main><p style="padding:20px">消息列表</p><audio id="voice" src="/voice.wav"></audio></main><nav class="app-nav"><button>消息</button><button>我</button></nav></div></div><script>
 window.__log = [];
-window.__chWS = { toast: m => __log.push({ toast: m }), acts: (t, items) => { window.__acts = items; }, forward: t => __log.push({ fwd: t }), uid: () => window.__uid || 'u1', link: (u, t) => __log.push({ link: u }) };
+window.__bili = [];
+window.__chWS = { call: async (b) => { __bili.push(b); await new Promise(r => setTimeout(r, 60)); if (b.q === 'B站坏了') return { ok: false, code: 'upstream', msg: 'B 站暂时连不上' };
+    const n = b.page || 1; return { ok: true, pages: 2, list: Array.from({ length: n === 1 ? 3 : 2 }, (_, i) => ({ bv: 'BV1test' + n + i + 'ab', t: b.q + ' 第' + n + '页 ' + i, a: 'UP主' + i, d: 270 + i, p: 3551119, pic: 'https://i0.hdslb.com/bfs/archive/c' + n + i + '.jpg', ty: '音乐综合' })) }; },
+  toast: m => __log.push({ toast: m }), acts: (t, items) => { window.__acts = items; }, forward: t => __log.push({ fwd: t }), uid: () => window.__uid || 'u1', link: (u, t) => __log.push({ link: u }) };
 addEventListener('popstate', e => window.ChatterMusic && ChatterMusic.onPop(e));
 </script><script src="/music.js"></script></body></html>`;
 const srv = http.createServer((q, r) => {
@@ -196,10 +199,10 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(await pg.evaluate(() => ChatterMusic._m.q[ChatterMusic._m.i + 1].t) === 'piano 第 1 首', '下一首播放：插到正在放的这首后面');
       await pg.fill('.mu-v.on input[type="search"]', '没有').catch(() => {});
       await pg.goBack(); await pg.waitForTimeout(120);
-      await pg.fill('.mu-v.on input[type="search"]', '没有'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.waitForSelector('.mu-v.on .mu-msg');
+      await pg.fill('.mu-v.on input[type="search"]', '没有'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.click('[data-act="src"][data-s="au"]'); await pg.waitForSelector('.mu-v.on .mu-msg');
       ok(/没找到能直接听的歌[\s\S]*英文搜/.test(await pg.$eval('.mu-v.on .mu-msg', e => e.textContent)), '搜不到：说清楚（Audius 是独立音乐人的曲库），建议用英文搜');
       await pg.goBack(); await pg.waitForTimeout(120);
-      await pg.fill('.mu-v.on input[type="search"]', '坏了'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.waitForSelector('.mu-v.on .mu-msg .mu-btn');
+      await pg.fill('.mu-v.on input[type="search"]', '坏了'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.click('[data-act="src"][data-s="au"]'); await pg.waitForSelector('.mu-v.on .mu-msg .mu-btn');
       ok(/Audius 出错了（500）/.test(await pg.$eval('.mu-v.on .mu-msg', e => e.textContent)), 'Audius 出错：说中文原因，给“重试”');
       await pg.goBack(); await pg.waitForTimeout(120);
       // 我喜欢、最近播放
@@ -224,7 +227,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(nx === 'true,true,1' && errs.length === e0, '【GPT 挑的②】放最后一首时给第一首点“下一首播放”：不出错，排到正在放的后面，列表里不重复 → ' + nx);
       await pg.evaluate(() => ChatterMusic._next(ChatterMusic._m.q[ChatterMusic._m.i]));
       ok((await toasts()).slice(-1)[0] === '正在放的就是这首', '给正在放的这首点“下一首播放”：提示一下，不乱排');
-      await pg.fill('.mu-v.on input[type="search"]', '少量'); await pg.press('.mu-v.on input[type="search"]', 'Enter');
+      await pg.fill('.mu-v.on input[type="search"]', '少量'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.click('[data-act="src"][data-s="au"]');
       await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length >= 12, null, { timeout: 5000 }).catch(() => {});
       const fewN = await pg.$$eval('.mu-v.on .mu-row', a => a.length);
       ok(fewN === 12 && await pg.$('[data-act="more-res"]'), '【GPT 挑的④】一页 30 条里只有 12 首能播：“加载更多”还在（以前按能播的条数判断，以为到底了）');
@@ -248,12 +251,50 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(await pg.evaluate(() => ChatterMusic._m.q[ChatterMusic._m.i].id === window.__nu && !ChatterMusic._m.nextUp), '单曲循环时点了“下一首播放”：这首放完先放点的那首（只一次）');
       await pg.evaluate(() => { ChatterMusic._m.mode = 'list'; });
       await pg.evaluate(() => ChatterMusic.open()); await pg.waitForSelector('.mu-v.on[data-v="home"]');
-      await pg.fill('.mu-v.on input[type="search"]', '后面才有'); await pg.press('.mu-v.on input[type="search"]', 'Enter');
+      await pg.fill('.mu-v.on input[type="search"]', '后面才有'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.click('[data-act="src"][data-s="au"]');
       await pg.waitForFunction(() => /继续往后找/.test((document.querySelector('.mu-v.on[data-v="list"]') || {}).textContent || ''), null, { timeout: 6000 }).catch(() => {});
       ok(/前面 120 首都不能直接听/.test(await pg.$eval('.mu-v.on[data-v="list"]', e => e.textContent)) && await pg.$('[data-act="more-res"]'), '【GPT 第二轮②】前 4 页全不能播：不说“没找到”，写清前面 120 首都不能直接听，给“继续往后找”');
       await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length > 0, null, { timeout: 5000 }).catch(() => {});
       ok(await pg.$$eval('.mu-v.on .mu-row', a => a.length) === 30 && reqs.some(r => /offset=120/.test(r)), '点“继续往后找”：取到第 5 页能听的 30 首');
       await pg.goBack(); await pg.waitForTimeout(150); await pg.evaluate(() => ChatterMusic.closeNow());
+      // B 站（中文歌）
+      await pg.evaluate(() => ChatterMusic.open()); await pg.waitForSelector('.mu-v.on[data-v="home"]');
+      await pg.fill('.mu-v.on input[type="search"]', '晴天'); await pg.press('.mu-v.on input[type="search"]', 'Enter');
+      await pg.waitForSelector('.mu-v.on [data-act="brow"]', { timeout: 5000 }).catch(() => {});
+      const bl = await pg.evaluate(() => ({ tab: (document.querySelector('.mu-src .on') || {}).textContent, n: document.querySelectorAll('.mu-v.on [data-act="brow"]').length, img: (document.querySelector('.mu-v.on [data-act="brow"] img') || {}).getAttribute && document.querySelector('.mu-v.on [data-act="brow"] img').getAttribute('src'), rp: document.querySelector('.mu-v.on [data-act="brow"] img') && document.querySelector('.mu-v.on [data-act="brow"] img').getAttribute('referrerpolicy'), rs: (document.querySelector('.mu-v.on [data-act="brow"] .mu-rs') || {}).textContent, call: window.__bili.slice(-1)[0] }));
+      ok(/B 站/.test(bl.tab) && bl.n === 3 && bl.call.op === 'bili' && bl.call.q === '晴天' && bl.call.page === 1, '搜中文“晴天”：默认先看 B 站（服务器替手机搜），列出结果 → ' + JSON.stringify(bl).slice(0, 160));
+      ok(/@160w_100h_1c\.jpg$/.test(bl.img) && bl.rp === 'no-referrer' && /UP主0 · 4:30 · 355 万次播放/.test(bl.rs), 'B 站结果：用小封面（省流量、不带来源网址才显示得出来）、UP 主 · 时长 · 播放量');
+      await pg.click('.mu-v.on [data-act="bmore"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on [data-act="brow"]').length === 5, null, { timeout: 4000 }).catch(() => {});
+      ok(await pg.$$eval('.mu-v.on [data-act="brow"]', a => a.length) === 5 && /没有更多了/.test(await pg.$eval('.mu-v.on[data-v="list"]', e => e.textContent)), 'B 站“加载更多”：取第 2 页，到最后一页说“没有更多了”');
+      await pg.click('[data-act="src"][data-s="au"]'); await pg.waitForSelector('.mu-v.on [data-act="row"]', { timeout: 5000 }).catch(() => {});
+      ok(await pg.$('.mu-v.on [data-act="row"]') && /Audius/.test(await pg.$eval('.mu-src .on', e => e.textContent)), '换到 Audius 那栏：显示 Audius 的结果');
+      await pg.click('[data-act="src"][data-s="bili"]'); await pg.waitForSelector('.mu-v.on [data-act="brow"]');
+      // 先放一首 Audius 的，再点 B 站的：Audius 的停
+      await pg.evaluate(() => ChatterMusic._play(ChatterMusic._m.lists['trend:'].items, 0)); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused, null, { timeout: 5000 }).catch(() => {});
+      await pg.click('.mu-v.on [data-act="brow"][data-i="0"]'); await pg.waitForSelector('.mu-v.on[data-v="bili"]'); await pg.waitForTimeout(250);
+      const bv = await pg.evaluate(() => { const h = document.getElementById('mu-bili'), f = h && h.querySelector('iframe'), s = document.querySelector('[data-r="slot"]').getBoundingClientRect(), r = h.getBoundingClientRect(); return { src: f && f.getAttribute('src'), over: Math.abs(r.left - s.left) < 2 && Math.abs(r.top - s.top) < 2 && Math.abs(r.width - s.width) < 2, paused: document.getElementById('mu-audio').paused }; });
+      ok(/^https:\/\/player\.bilibili\.com\/player\.html\?bvid=BV1test10ab&autoplay=1/.test(bv.src) && bv.over, '点 B 站的歌：在 App 里用 B 站官方播放器放，播放器正好盖在页面的黑框上 → ' + bv.src);
+      ok(bv.paused, '开始放 B 站的：Audius 的歌先停，不叠在一起');
+      await pg.click('.mu-v.on [data-act="bnext"]'); await pg.waitForTimeout(150);
+      ok(/bvid=BV1test11ab/.test(await pg.$eval('#mu-bili iframe', e => e.src)), 'B 站页“下一个”：放这次搜到的下一个');
+      await pg.click('.mu-v.on[data-v="bili"] [data-act="back"]'); await pg.waitForTimeout(200); await pg.evaluate(() => ChatterMusic.closeNow()); await pg.waitForTimeout(150);
+      const bm = await pg.evaluate(() => { const h = document.getElementById('mu-bili'), m = document.getElementById('mu-mini'); return { off: h.getBoundingClientRect().left < -5000, ifr: !!h.querySelector('iframe'), mini: m.classList.contains('on') && /B 站/.test(m.textContent), stop: !!m.querySelector('[data-act="mini-stop"]'), now: ChatterMusic.now() }; });
+      ok(bm.off && bm.ifr && bm.mini && bm.stop && bm.now.bili, '离开音乐页：B 站的播放器挪到屏幕外接着放（不重新加载），迷你条显示“B 站”和停止按钮');
+      await pg.click('#mu-mini'); await pg.waitForSelector('.mu-v.on[data-v="bili"]'); await pg.waitForTimeout(200);
+      ok(await pg.evaluate(() => document.getElementById('mu-bili').getBoundingClientRect().left > -10), '点迷你条：回到 B 站这一页，播放器又盖回黑框上');
+      await pg.evaluate(() => ChatterMusic.closeNow()); await pg.waitForTimeout(100);
+      await pg.click('#mu-mini [data-act="mini-stop"]'); await pg.waitForTimeout(100);
+      ok(await pg.evaluate(() => !document.querySelector('#mu-bili iframe') && !ChatterMusic.now().bili), '迷你条上点“停止”：B 站的播放器拿掉（没法暂停，只能停）');
+      await pg.evaluate(() => ChatterMusic._bili([{ bv: 'BV1zzzzzzzz9', t: '测试', a: 'x', d: 10, p: 1, pic: '' }], 0)); await pg.waitForTimeout(80);
+      await pg.evaluate(() => ChatterMusic.pause());
+      ok(await pg.evaluate(() => !document.querySelector('#mu-bili iframe')), '来电、打电话、录语音（App 叫“先停音乐”）：B 站的也停');
+      await pg.evaluate(() => ChatterMusic.open()); await pg.waitForSelector('.mu-v.on[data-v="home"]');
+      await pg.fill('.mu-v.on input[type="search"]', 'B站坏了'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.waitForSelector('.mu-v.on [data-act="bretry"]', { timeout: 4000 }).catch(() => {});
+      ok(/B 站暂时连不上/.test(await pg.$eval('.mu-v.on[data-v="list"]', e => e.textContent)) && await pg.$('.mu-v.on [data-act="bretry"]'), 'B 站搜不了：说清楚，给“重试”');
+      await pg.goBack(); await pg.waitForSelector('.mu-v.on[data-v="home"]');
+      await pg.fill('.mu-v.on input[type="search"]', 'lofi'); await pg.press('.mu-v.on input[type="search"]', 'Enter'); await pg.waitForTimeout(200);
+      ok(/Audius/.test(await pg.$eval('.mu-src .on', e => e.textContent)), '搜英文：默认看 Audius 那栏');
+      await pg.evaluate(() => ChatterMusic.closeNow());
       ok(tt[0] === '“坏的 1”放不出来，换下一首' && tt[1] === '“坏的 2”放不出来，换下一首' && /可能是网络不好/.test(tt[2]) && !(await st()).src.includes('t5'), '放不出来：说一声换下一首；连续 3 首不行就停下说原因（不一直转）→ ' + tt.join(' / '));
     }
     await pg.close();

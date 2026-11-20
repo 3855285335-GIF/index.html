@@ -127,10 +127,13 @@ SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查
 cd tests && deno run -A --node-modules-dir=none fn-backup-test.ts   # 23 项：只有私有仓库主分支上的“每日备份”任务能拿到数据库连接；别的仓库、分支、任务、过期、伪造签名一律拒绝
 ```
 
-## 导航和整站复查
 
-沿用上述测试依赖。执行 `node navigation-standalone.cjs` 检查不同城市的同名地点、步行/骑行路线终点偏离和浏览器离线失败反馈；`node sw-cache-failure.cjs` 检查缓存不可用时的联网加载和通知目标；`node sql-navigation-test.mjs` 使用独立 PGlite 验证同行迁移、授权、时间边界、解除好友与回滚。配置好隔离 Auth、PostgREST、Realtime 和本次导航迁移后，可运行 `CHATTER_NAV_PREVIEW=http://127.0.0.1:58780 node navigation-browser.cjs`。该脚本只接受环回预览地址，使用三个独立测试账号和浏览器提供的测试坐标。
+## 导航（11-21 重写）
 
-导航声音与音乐交叉验收沿用上述两套 Chromium 脚本。单人脚本加载实际提示音文件，使用语音替身检查静音、按需试听、本机普通话缺失回退和逐段预览。三账号脚本检查自动播报不会因定位轮询重复，并验证共用的「应用」格子。运行隔离预览时还需提供 navigation-sound.js、vendor/navigation-cue.wav 和 vendor/earth-relief-50m.webp。真机音色、锁屏和耳机表现需要单独试听。
+```bash
+node navigation-ui.cjs [截图目录]   # 真 Chromium：导航 50 多项（假的天地图、Esri、Photon、路线服务，模拟定位）
+node sql-navigation-test.mjs        # 一起导航的数据库接口（PGlite）：好友、坐标、双方同意、过期、解除好友、撤销
+node sw-cache-failure.cjs           # 手机缓存不可用时照样联网加载
+```
 
-20261120k 的 `navigation-standalone.cjs` 还检查无图块时的 GPS 采样、服务域名及旧浏览器弹层。`navigation-browser.cjs` 使用隔离后端三账号，覆盖手机快 6 分钟、续时、返回应用、全屏时来电和离线点击结束后重连。`sql-navigation-test.mjs` 验证延迟接受、重复请求、双方同意及续时上限。运行方式沿用上文。
+`navigation-ui.cjs` 检查：天地图街道 / 卫星图两层都加载；天地图不给图（模拟“权限类型错误”）时自动换 Esri 卫星图 + 道路 + 地名，检查页说清原因并能显示天地图原文；搜地点先问天地图、问不通换 Photon；长按地图选点并查地址；路线（驾车 / 骑行 / 步行）、中文每一步；开始导航后转向提示、语音（开始、前方 300 米、100 米、到路口）、走错 3 次自动重算、到达自动结束；地图把我放在正中；从私聊打开时发位置、邀请一起去、对方接受、互相看到位置、结束；好友邀请我时接受；打开好友发来的位置；没有定位权限的提示；深色主题和 320 宽小屏；全程不打开新窗口、没有高德链接。真机要试：天地图在国内手机上能不能出图、手机定位精度、语音在 iPhone / 安卓上的声音、导航时屏幕常亮。

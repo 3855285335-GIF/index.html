@@ -16,6 +16,7 @@ const cache = new Map<string, Any>(), counts = new Map<string, number>();
 let lastFrameUA = '';
 let rpcMissing = false, siteCalls: string[] = [], exaBodies: Any[] = [], tavBodies: Any[] = [];
 const calls: Record<string, number> = {};
+let biliMode = 'ok';
 let exaMode = 'ok', tavMode = 'ok', deepDown = '', glmMode = 'ok', flakyOnce = false;
 const trBodies: Any[] = [];
 const hitc = (k: string) => { calls[k] = (calls[k] || 0) + 1; };
@@ -36,6 +37,17 @@ const J = (o: Any, st = 200, h: Record<string, string> = {}) => new Response(JSO
 globalThis.fetch = async (input: Any, init: Any = {}) => {
   const u = new URL(typeof input === 'string' ? input : input.url), m = (init.method || 'GET').toUpperCase();
   const H = new Headers(init.headers || {});
+  if (u.host === 'www.bilibili.com') { hitc('bili-home'); return new Response('<html></html>', { status: 200, headers: [['content-type', 'text/html'], ['set-cookie', 'buvid3=TEST-' + calls['bili-home'] + 'infoc; path=/; domain=.bilibili.com'], ['set-cookie', 'b_nut=1700000000; path=/'], ['set-cookie', 'other=1; path=/']] }); }
+  if (u.host === 'api.bilibili.com') {
+    hitc('bili-api');
+    if (!/buvid3=TEST-/.test(H.get('cookie') || '')) return J({ code: -412, message: 'request was banned' });
+    if (biliMode === '412once') { biliMode = 'ok'; return J({ code: -412, message: 'request was banned' }); }
+    if (biliMode === 'down') return J({ code: -500, message: 'boom' });
+    return J({ code: 0, data: { numPages: 3, result: [
+      { bvid: 'BV1BZbSzZEGT', title: '【Hi-Res】<em class="keyword">晴天</em> - 周杰伦 &amp; 朋友', author: 'VV音乐局', duration: '4:30', play: 3551119, pic: '//i0.hdslb.com/bfs/archive/x.jpg', typename: '音乐综合' },
+      { bvid: 'bad', title: '坏的编号' },
+      { bvid: 'BV1d4411N7zD', title: 'MV', author: 'a', duration: '1:02:03', play: '17737897', pic: 'http://i1.hdslb.com/y.jpg', typename: 'MV' }] } });
+  }
   if (u.host === 'proj.supabase.co') {
     if (u.pathname === '/auth/v1/user' || u.pathname === '/rest/v1/rpc/session_alive') {
       if (H.get('apikey') !== 'sb_publishable_test') return J({ msg: 'auth 要用公开密钥' }, 401);
@@ -530,5 +542,31 @@ const fv = __test.frameVerdict;
 ok(fv(new Headers({ 'x-frame-options': 'deny' }), '').frame === false && fv(new Headers({ 'content-security-policy': "frame-ancestors 'none' https://3855285335-gif.github.io" }), '').frame === false, "'none' 和别的写在一起也算不让");
 ok(fv(new Headers({ 'content-security-policy': 'frame-ancestors https:' }), 'https://a.github.io').frame === true && fv(new Headers({ 'content-security-policy': 'frame-ancestors http://3855285335-gif.github.io' }), '').frame === false, '写 https: 的允许；协议不对的不允许');
 ok(fv(new Headers({ 'content-security-policy-report-only': "frame-ancestors 'none'" }), '').frame === true, '只报告不拦（Report-Only）的不算');
+// B 站（音乐里的中文歌）
+let bili: Any = await call({ op: 'bili', q: '晴天' }, null);
+ok(bili.st === 401, 'B 站搜索也要登录');
+calls['bili-home'] = 0; calls['bili-api'] = 0;
+bili = await call({ op: 'bili', q: '晴天', page: 1 });
+const b0 = (bili.j.list || [])[0] || {}, b1 = (bili.j.list || [])[1] || {};
+ok(bili.j.ok && bili.j.list.length === 2 && b0.bv === 'BV1BZbSzZEGT' && b0.t === '【Hi-Res】晴天 - 周杰伦 & 朋友' && b0.a === 'VV音乐局' && b0.d === 270 && b0.p === 3551119 && b0.pic === 'https://i0.hdslb.com/bfs/archive/x.jpg'
+  && b1.d === 3723 && b1.p === 17737897 && b1.pic === 'https://i1.hdslb.com/y.jpg' && bili.j.pages === 3, 'B 站搜索：先拿访客身份，只回编号、标题（去掉高亮标签）、作者、秒数、播放量、https 封面；坏编号去掉 → ' + JSON.stringify(bili.j).slice(0, 200));
+ok(calls['bili-home'] === 1 && calls['bili-api'] === 1, '第一次：取一次访客身份、搜一次');
+bili = await call({ op: 'bili', q: ' 晴天 ', page: 1 });
+ok(bili.j.cached === true && calls['bili-api'] === 1, '同一个词再搜：用缓存（6 小时），不再问 B 站');
+await call({ op: 'bili', q: '晴天', page: 2 });
+ok(calls['bili-api'] === 2 && calls['bili-home'] === 1, '翻页：访客身份记着，不重复取');
+biliMode = '412once';
+bili = await call({ op: 'bili', q: '稻香' });
+ok(bili.j.ok && calls['bili-home'] === 2 && calls['bili-api'] === 4, '被 B 站拦一次（-412）：换个访客身份再搜一次');
+biliMode = 'down';
+bili = await call({ op: 'bili', q: '七里香' });
+ok(!bili.j.ok && bili.j.code === 'upstream' && /B 站/.test(bili.j.msg), 'B 站出错：说清楚是 B 站的问题');
+biliMode = 'ok';
+bili = await call({ op: 'bili', q: '   ' });
+ok(!bili.j.ok && bili.j.code === 'bad', '空的不搜');
+ok(__test.secs('4:30') === 270 && __test.secs('1:02:03') === 3723 && __test.unHtml('<em>a</em> &amp; b') === 'a & b', '时长、标题清理');
+const pb = await call({ op: 'ping', probe: 'bili' }, null), pb2 = await call({ op: 'ping', probe: 'bili' }, null);
+ok(pb.j.bili && pb.j.bili.n === 2 && pb.j.bili.first.bv === 'BV1BZbSzZEGT' && JSON.stringify(pb2.j.bili) === JSON.stringify(pb.j.bili), '自检 probe:bili：不用登录，只回条数和第一条编号；10 分钟内不重复搜');
+
 console.log(bad ? `\n有 ${bad} 项没通过` : '\n全部通过');
 Deno.exit(bad ? 1 : 0);

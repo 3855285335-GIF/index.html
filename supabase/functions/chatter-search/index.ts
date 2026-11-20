@@ -14,7 +14,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261121-1';
+const VER = '20261121-2';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -831,6 +831,50 @@ async function doTranslate(uid: string, b: Any, c: Any) {
   return json({ ok: true, cached: false, items: out, failed: bad.length, why });
 }
 
+/* ---------- B 站搜视频（音乐里的中文歌）：B 站的接口不让手机直接跨域问，由服务器问；只回名字、作者、时长、封面，结果缓存 6 小时 ---------- */
+const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+let BILI_CK = '', BILI_CK_AT = 0, BILIP: Any = null, BILIP_AT = 0;
+async function biliCookie(fresh = false) {   // 访客身份（buvid3）：B 站不带它搜索会被拦，记 6 小时
+  if (!fresh && BILI_CK && Date.now() - BILI_CK_AT < 6 * 3600000) return BILI_CK;
+  const r = await tfetch('https://www.bilibili.com/', { headers: { 'User-Agent': BILI_UA }, redirect: 'follow' }, 8000);
+  const all: string[] = (r.headers as Any).getSetCookie ? (r.headers as Any).getSetCookie() : [r.headers.get('set-cookie') || ''];
+  await r.body?.cancel().catch(() => {});
+  const parts = all.map(c => String(c).split(';')[0]).filter(c => /^(buvid3|b_nut|buvid4)=/.test(c));
+  if (!parts.some(c => c.startsWith('buvid3='))) throw new Oops('upstream', 'B 站暂时连不上');
+  BILI_CK = parts.join('; '); BILI_CK_AT = Date.now();
+  return BILI_CK;
+}
+const unHtml = (x: string) => String(x || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+const secs = (d: string) => String(d || '').split(':').reduce((n, x) => n * 60 + (Number(x) || 0), 0);
+async function biliSearch(q: string, page: number) {
+  for (let i = 0; i < 2; i++) {
+    const ck = await biliCookie(i > 0);
+    const u = 'https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=' + encodeURIComponent(q) + '&page=' + page;
+    const r = await tfetch(u, { headers: { 'User-Agent': BILI_UA, Cookie: ck, Referer: 'https://www.bilibili.com/', Accept: 'application/json' } }, 9000);
+    const d: Any = await r.json().catch(() => null);
+    if (d && d.code === 0) {
+      const list = ((d.data && d.data.result) || []).filter((x: Any) => x && typeof x.bvid === 'string' && /^BV[0-9A-Za-z]{8,12}$/.test(x.bvid)).map((x: Any) => ({
+        bv: x.bvid, t: unHtml(x.title).slice(0, 120), a: unHtml(x.author).slice(0, 40), d: secs(x.duration), p: Number(x.play) || 0,
+        pic: typeof x.pic === 'string' ? (x.pic.startsWith('//') ? 'https:' + x.pic : x.pic.replace(/^http:/, 'https:')) : '', ty: unHtml(x.typename).slice(0, 12)
+      }));
+      return { list, pages: Math.min(Number(d.data && d.data.numPages) || 1, 20) };
+    }
+    if (!(d && (d.code === -412 || d.code === -352))) throw new Oops('upstream', 'B 站搜索出错（' + (d ? d.code : r.status) + '）');
+  }
+  throw new Oops('upstream', 'B 站暂时不让搜，过一会儿再试');
+}
+async function doBili(uid: string, b: Any, c: Any) {
+  const q = String(b.q || '').trim().slice(0, 60), page = Math.max(1, Math.min(20, Math.floor(Number(b.page) || 1)));
+  if (!q) return fail('bad', '要搜什么？');
+  const k = 'b' + await sha(q.toLowerCase() + '|' + page);
+  const hit = (await cgetMany([k]))[k];
+  if (hit && Date.now() - hit.at <= 6 * 3600000 && hit.v && Array.isArray(hit.v.list)) return json({ ok: true, cached: true, ...hit.v });
+  if (await bump(uid, 'b', Number(c.bili_per_user_day) || 400) < 0) return fail('limit', '今天搜得太多了，明天再来');
+  const v = await biliSearch(q, page);
+  bg(cput(k, v));
+  return json({ ok: true, cached: false, ...v });
+}
+
 /* ---------- 自检：天地图（只读，返回状态码和前几百个字，密钥打码；10 分钟内只真查一次） ---------- */
 let MAPP: Any = null, MAPP_AT = 0;
 async function probeMap() {
@@ -882,6 +926,10 @@ export async function handle(req: Request): Promise<Response> {
       try { const rd = (Deno as Any).resolveDns; out.dnsApi = typeof rd !== 'function' ? 'missing' : (await rd('example.com', 'A')).length ? 'works' : 'empty'; } catch (e) { out.dnsApi = 'error:' + String((e as Any)?.name || e).slice(0, 60); }   // 自测：连一个按规定永远不存在的 .invalid 域名，确认“找不到网站”认得出来（固定地址，不接受外部传入）
       try { await grab(new URL('https://chatter-probe-' + Date.now() + '.invalid/'), 5000); out.dns = 'resolved?'; } catch (e) { out.dns = e instanceof Oops ? e.code : 'error'; out.dnsMsg = String((e as Any)?.message || e).slice(0, 120); }
     }
+    if (b.probe === 'bili') {   // 自检：服务器上能不能搜 B 站（10 分钟内只真搜一次）
+      if (!BILIP || Date.now() - BILIP_AT > 600000) { try { const v = await biliSearch('晴天 周杰伦', 1); BILIP = { n: v.list.length, pages: v.pages, first: v.list[0] ? { bv: v.list[0].bv, d: v.list[0].d, pic: !!v.list[0].pic } : null }; } catch (e) { BILIP = { err: String((e as Any)?.message || e).slice(0, 120) }; } BILIP_AT = Date.now(); }
+      out.bili = BILIP;
+    }
     if (b.probe === 'map') { try { out.map = await probeMap(); } catch (e) { out.map = { err: String((e as Any)?.message || e).slice(0, 160) }; } }
     return json(out);
   }
@@ -897,6 +945,7 @@ export async function handle(req: Request): Promise<Response> {
     if (b.op === 'frames') return await doFrames(uid, b, c, req.headers.get('origin') || String(b.origin || ''));
     if (b.op === 'versions') return await doVersions(uid, b, c);
     if (b.op === 'translate') return await doTranslate(uid, b, c);
+    if (b.op === 'bili') return await doBili(uid, b, c);
     if (b.op === 'usage') return json({ ok: true, used: await usage(), free: { exa: c.exa_free, tavily: c.tavily_free }, keys: { exa: !!KEY.exa(), tavily: !!KEY.tavily(), glm: !!sec('ZHIPU_API_KEY'), groq: !!sec('GROQ_API_KEY') } });
     return fail('bad', '不认识的操作');
   } catch (e) {
@@ -905,5 +954,5 @@ export async function handle(req: Request): Promise<Response> {
     return fail('server', '服务器出错了，请稍后重试');
   }
 }
-export const __test = { tidy, dropTitle, frameVerdict, mobileReady, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; } };
+export const __test = { tidy, dropTitle, frameVerdict, mobileReady, unHtml, secs, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; BILI_CK = ''; BILI_CK_AT = 0; } };
 if (!env('CHATTER_TEST')) Deno.serve(handle);

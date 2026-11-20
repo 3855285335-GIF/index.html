@@ -1,1086 +1,832 @@
+/* Chatter 导航（11-21 重写）：全屏地图、搜地点、路线、跟着走的导航（语音、走错自动重算、到达提醒）、和好友一起去。
+   全部在 App 里完成，不跳到别的软件。
+   - 地图：天地图（街道 / 卫星 + 中文注记，地址和密钥在数据库 app_config.navigation）。天地图出不来时自动换成 Esri 卫星图 + 道路 + 地名，不会一片空白，
+     并且能在“地图服务检查”里看到天地图返回的原因（天地图只让国内的网络访问，服务器替不了手机检查）。
+   - 搜地点：天地图搜索（手机直接问）；问不通时换成 Photon（开源地图数据）。
+   - 路线：routing.openstreetmap.de（驾车 / 骑行 / 步行，开源地图数据，允许手机直接问）。
+   - 坐标：手机定位、天地图、开源地图都是 WGS84（天地图的 CGCS2000 和它差不到 1 米），不用换算。 */
 (async () => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const layers = new Map();
-  let returning = false;
-  function bindLayer(name, dialog, show) {
-    if (typeof dialog.showModal !== 'function') {
-      dialog.classList.add('dialog-fallback');
-      if (!('open' in dialog)) Object.defineProperty(dialog, 'open', { get: () => dialog.hasAttribute('open') });
-      dialog.showModal = () => dialog.setAttribute('open', '');
-      dialog.close = () => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); };
-    }
-    layers.set(name, { dialog, show });
-    dialog.addEventListener('close', () => {
-      if (!dialog.open && history.state?.chatterNavLayer === name && !returning) {
-        returning = true;
-        history.back();
-      }
-    });
-    return () => {
-      if (returning || dialog.open) return;
-      if (history.state?.chatterNavLayer !== name) {
-        try { history.pushState({ ...history.state, chatterNavLayer: name }, ''); }
-        catch { /* 系统限制历史记录时仍可用页面按钮关闭。 */ }
-      }
-      show();
-    };
-  }
-  window.addEventListener('popstate', (event) => {
-    returning = false;
-    const selected = event.state?.chatterNavLayer;
-    for (const [name, layer] of layers) {
-      if (name !== selected && layer.dialog.open) layer.dialog.close();
-    }
-    const target = layers.get(selected);
-    if (target && !target.dialog.open) target.show();
-  });
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const LSget = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
+  const LSset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 存不下就算了 */ } };
+
+  /* ---------- 和 Chatter 的连接（在 App 里打开时才有） ---------- */
   let bridge = null;
-  const sound = window.createNavigationSound?.(() => bridge?.beforeSound?.() !== false, bindLayer);
-  if (!sound) {
-    $('open-sound').hidden = true;
-    $('hear-route').hidden = true;
-  }
-  const recents = [];
-  let routeSpeech = '';
-  try {
-    if (parent !== window) bridge = parent.getChatterNavigation?.(window);
-  } catch {
-    /* 可独立打开的地点卡。 */
-  }
-  if (bridge) {
-    for (const [key, value] of Object.entries(bridge.theme))
-      if (value) document.documentElement.style.setProperty(key, value);
-    document.body.style.fontFamily = bridge.font;
-    $('sound-music').hidden = !bridge.beforeSound;
-    $('back').textContent = bridge.peer && !bridge.fromApps ? '返回聊天' : '返回应用';
-    $('back').hidden = false;
-    $('back').onclick = () => bridge.close();
-  }
-  document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const open = [...layers.values()].find(layer => layer.dialog.open);
-    if (open && !open.dialog.classList.contains('dialog-fallback')) return;
-    event.preventDefault();
-    if (open) open.dialog.close(); else bridge?.close();
-  });
-  // 所有服务在本次打开时确定，用户核对后才会发送查询或路线。
-  let services = {}, saved = null;
-  try { saved = JSON.parse(localStorage.getItem('ch2navSvc') || 'null'); } catch { saved = null; }
-  if (bridge?.getServices) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), saved ? 1200 : 4000);   // 手机里有上次的配置就少等一会儿
-    try {
-      const got = await bridge.getServices(controller.signal);
-      if (got && typeof got === 'object') { services = got; try { localStorage.setItem('ch2navSvc', JSON.stringify(got)); } catch { /* 存不下就算了 */ } }
-      else if (saved && typeof saved === 'object') services = saved;
-    } catch { if (saved && typeof saved === 'object') services = saved; /* 读不到：用上次记下的，没有就用内置地址 */ }
-    finally { clearTimeout(timeout); }
-  }
-  function publicUrl(value) {
-    if (typeof value !== 'string' || value.length > 1600) return null;
-    try {
-      const url = new URL(value);
-      return url.protocol === 'https:' && !url.username && !url.password && !url.hash ? url : null;
-    } catch { return null; }
-  }
-  const searchService = publicUrl(services.searchUrl) || new URL('https://photon.komoot.io/api/');
-  const routerBase = publicUrl(services.routeBase) || new URL('https://routing.openstreetmap.de/');
-  routerBase.search = '';
-  if (!routerBase.pathname.endsWith('/')) routerBase.pathname += '/';
-  $('search-credit').textContent = '搜索词会发给 ' + searchService.host + '。';
-  if (routerBase.hostname !== 'routing.openstreetmap.de') {
-    $('router-credit').textContent = routerBase.host;
-    $('router-credit').href = routerBase.origin;
-  }
-  const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+  try { if (parent !== window) bridge = parent.getChatterNavigation?.(window) || null; } catch { bridge = null; }
+  const ME = (bridge && bridge.me) || 'local';
+  const UID = (bridge && bridge.uid) || 'local';   // 手机里记的“最近去过”“地图停在哪”按账号分开，退出登录时 Chatter 会删掉
+  const PEER = (bridge && bridge.peer) || null;
+  const PEER_NAME = (bridge && bridge.peerLabel) || '好友';
   function applyTheme() {
-    const dark = bridge?.appearance ? bridge.appearance === 'dark' : systemTheme.matches;
+    const dark = bridge && bridge.appearance ? bridge.appearance === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.toggleAttribute('data-dark', dark);
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    if (bridge && bridge.theme) for (const [k, v] of Object.entries(bridge.theme)) if (v && String(v).trim()) document.documentElement.style.setProperty(k, String(v).trim());
+    if (bridge && bridge.font) document.body.style.fontFamily = bridge.font;
   }
   applyTheme();
-  systemTheme.addEventListener?.('change', applyTheme);
-  const valid = (p) =>
-    p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
-  const validPlace = (p) => valid(p) && typeof p.name === 'string' && p.name.trim() && p.name.length <= 120;
-  const coordText = (p) => '纬度 ' + p.lat.toFixed(6) + '，经度 ' + p.lon.toFixed(6) + '（WGS84）';
-  const say = (text) => {
-    const notice = bridge?.peer ? $('trip-notice') : $('notice');
-    notice.textContent = text;
+  if (bridge) {
+    $('back').hidden = false;
+    $('back').setAttribute('aria-label', PEER && !bridge.fromApps ? '返回聊天' : '返回应用');
+    $('back').onclick = () => bridge.close();
+  }
+
+  /* ---------- 服务地址（数据库里的配置；读不到用手机里上次存的） ---------- */
+  let services = {};
+  const saved = LSget('ch2navSvc', null);
+  if (bridge && bridge.getServices) {
+    const ac = new AbortController(), timer = setTimeout(() => ac.abort(), saved ? 1200 : 4000);
+    try {
+      const got = await bridge.getServices(ac.signal);
+      if (got && typeof got === 'object') { services = got; LSset('ch2navSvc', got); } else if (saved && typeof saved === 'object') services = saved;
+    } catch { if (saved && typeof saved === 'object') services = saved; } finally { clearTimeout(timer); }
+  } else if (saved && typeof saved === 'object') services = saved;
+  function httpsUrl(v) {
+    if (typeof v !== 'string' || v.length > 1600) return null;
+    try { const u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password && !u.hash ? u : null; } catch { return null; }
+  }
+  const tileOk = (t) => t && typeof t.url === 'string' && ['{z}', '{x}', '{y}'].every((p) => t.url.includes(p)) &&
+    !/[{}]/.test(t.url.replace(/\{[xyzs]\}/g, '')) && !!httpsUrl(t.url.replace(/\{s\}/g, '0'));
+  const layerList = (v) => { const a = (Array.isArray(v) ? v : v ? [v] : []).slice(0, 4); return a.length && a.every(tileOk) ? a : null; };
+  const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  const BACKUP = [
+    { url: ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', maxNativeZoom: 18, credit: 'Esri、Maxar、Earthstar Geographics', creditUrl: 'https://www.esri.com/' },
+    { url: ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', maxNativeZoom: 18 },
+    { url: ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', maxNativeZoom: 18 }
+  ];
+  const SETS = {
+    street: layerList(services.tiles),
+    sat: layerList(services.sat),
+    backup: layerList(services.fallback) || BACKUP
   };
-  let dest = null,
-    queryRequest,
-    queryRevision = 0,
-    map,
-    pins,
-    didFit = false,
-    lastPins = null,
-    lastLine = null;
-  const visibleStreetTiles = new Set();
-  let routeLine = null,
-    routeRevision = 0,
-    routerRequest = null,
-    lastRouteAt = 0;
-  let trip = null,
-    peerFix = null,
-    ownFix = null,
-    watch = null,
-    generation = 0,
-    stopped = false,
-    busy = false,
-    pollBusy = false,
-    lastUpload = 0,
-    inviteId = null;
-  let pendingEnd = null;
-  let requested = bridge?.invitation || null,
-    choosing = false,
-    proposing = false,
-    mapAnchor = null,
-    lastPeerTime = 0;
-  let clock = null, entranceFix = null;
-  const serverNow = () => clock ? clock.server + performance.now() - clock.received : Date.now();
-  const fresh = (f) =>
-    valid(f) && Number.isFinite(f.time) && serverNow() - f.time < 90000 && f.time <= serverNow() + 10000;
-  function createMap() {
-    if (map || !window.L) return;
-    map = L.map('map', { minZoom: 2, maxZoom: 19, scrollWheelZoom: false, worldCopyJump: true });
-    map.zoomControl.setPosition('topright');
-    L.control.scale({ position: 'bottomright', imperial: false, maxWidth: 70 }).addTo(map);
-    map.attributionControl.setPrefix(false);
-    map.zoomControl.getContainer().querySelectorAll('a').forEach((el, i) => {
-      el.title = i === 0 ? '放大地图' : '缩小地图';
-      el.setAttribute('aria-label', el.title);
-    });
-    const overview = L.layerGroup();
-    const [land, rivers] = window.chatterOverview || [];
-    const polarLimit = 85.05112878;
-    map.createPane('terrain').style.zIndex = 350;
-    const relief = L.imageOverlay('vendor/earth-relief-50m.webp', [[-polarLimit, -180], [polarLimit, 180]], {
-      pane: 'terrain', className: 'earth-relief', interactive: false
-    }).addTo(overview);
-    relief.on('load', () => $('map').classList.add('relief'));
-    if (land && rivers) {
-      L.geoJSON(land, { interactive: false, style: { className: 'overview-land', weight: 1, fillOpacity: 1 } }).addTo(overview);
-      L.geoJSON(rivers, { interactive: false, style: { className: 'overview-river', weight: 1.2, opacity: 0.85 } }).addTo(overview);
-      const cities = [
-        ['北京', 39.90, 116.41], ['上海', 31.23, 121.47], ['广州', 23.13, 113.26],
-        ['成都', 30.66, 104.07], ['武汉', 30.59, 114.30], ['西安', 34.34, 108.94],
-        ['昆明', 25.04, 102.71], ['哈尔滨', 45.80, 126.53], ['乌鲁木齐', 43.83, 87.62],
-        ['拉萨', 29.65, 91.12], ['台北', 25.03, 121.57], ['东京', 35.68, 139.69]
-      ];
-      const labels = L.layerGroup(cities.map(([name, lat, lon]) => L.marker([lat, lon], {
-        interactive: false, keyboard: false, icon: L.divIcon({ className: 'city-label', html: name, iconSize: [68, 18], iconAnchor: [2, 9] })
-      })));
-      map.on('zoomend', () => {
-        if (map.getZoom() >= 4 && map.getZoom() <= 5) labels.addTo(map);
-        else labels.remove();
+  const TDT = typeof services.tdt === 'string' && /^[0-9a-f]{32}$/i.test(services.tdt) ? services.tdt
+    : ((/[?&]tk=([0-9a-f]{32})/i.exec((SETS.street && SETS.street[0].url) || '') || [])[1] || '');
+  const ROUTER = (() => { const u = httpsUrl(services.routeBase) || new URL('https://routing.openstreetmap.de/'); u.search = ''; if (!u.pathname.endsWith('/')) u.pathname += '/'; return u.href; })();
+  const PHOTON = (httpsUrl(services.searchUrl) || new URL('https://photon.komoot.io/api/')).href;
+  const PHOTON_REV = PHOTON.replace(/\/api\/?$/, '/reverse');
+
+  /* ---------- 小工具 ---------- */
+  const R = 6371008.8, rad = (d) => d * Math.PI / 180;
+  function dist(a, b) {   // 两点距离（米）
+    const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  function bearing(a, b) {
+    const y = Math.sin(rad(b.lon - a.lon)) * Math.cos(rad(b.lat));
+    const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lon - a.lon));
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+  function fmtDist(m) {
+    if (!Number.isFinite(m)) return '';
+    if (m < 1000) { const r = m < 100 ? Math.max(5, Math.round(m / 5) * 5) : Math.round(m / 10) * 10; return r + ' 米'; }
+    return (m < 10000 ? (Math.round(m / 100) / 10).toFixed(1) : Math.round(m / 1000)) + ' 公里';
+  }
+  function sayDist(m) { return m < 1000 ? (m < 100 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50) + '米' : (Math.round(m / 100) / 10) + '公里'; }
+  function fmtTime(s) {
+    if (!Number.isFinite(s)) return '';
+    const m = Math.max(1, Math.round(s / 60));
+    return m < 60 ? m + ' 分钟' : Math.floor(m / 60) + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分钟' : '');
+  }
+  const clock = (t) => { const d = new Date(t); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  async function fetchT(url, ms, init) {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), ms || 9000);
+    try { return await fetch(url, Object.assign({ signal: ac.signal, credentials: 'omit', referrerPolicy: 'strict-origin-when-cross-origin' }, init || {})); } finally { clearTimeout(t); }
+  }
+  let toastTimer = 0;
+  function banner(html, keep) {
+    const b = $('banner');
+    clearTimeout(toastTimer);
+    if (!html) { b.hidden = true; b.innerHTML = ''; return; }
+    b.innerHTML = html; b.hidden = false;
+    if (!keep) toastTimer = setTimeout(() => { b.hidden = true; }, 3500);
+  }
+  const validPlace = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+
+  /* ---------- 地图 ---------- */
+  const map = L.map('map', { zoomControl: false, minZoom: 3, maxZoom: 19, worldCopyJump: true });
+  map.attributionControl.setPrefix(false);
+  const VKEY = 'ch2navView:' + UID, view0 = LSget(VKEY, null);
+  if (view0 && Number.isFinite(view0[0]) && Number.isFinite(view0[1]) && Number.isFinite(view0[2])) map.setView([view0[0], view0[1]], view0[2]);
+  else map.setView([35.0, 105.0], 4);
+  map.on('moveend', () => { const c = map.getCenter(); LSset(VKEY, [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]); });
+
+  function makeSet(defs, name) {
+    if (!defs) return null;
+    const set = { name, ok: 0, bad: 0, failed: false, firstBad: '', layers: [], url: defs[0].url, sub: typeof defs[0].subdomains === 'string' && /^[0-9a-z]{1,8}$/i.test(defs[0].subdomains) ? defs[0].subdomains : 'abc' };
+    defs.forEach((t, i) => {
+      const lay = L.tileLayer(t.url, {
+        maxZoom: 19,
+        maxNativeZoom: Math.min(19, Math.max(1, Math.round(Number(t.maxNativeZoom) || 18))),
+        subdomains: typeof t.subdomains === 'string' && /^[0-9a-z]{1,8}$/i.test(t.subdomains) ? t.subdomains : 'abc',
+        attribution: i === 0 && t.credit ? '© <a href="' + esc((httpsUrl(t.creditUrl) || {}).href || '#') + '" target="_blank" rel="noopener">' + esc(String(t.credit).slice(0, 80)) + '</a>' : '',
+        keepBuffer: 3
       });
-    }
-    let template = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-    const credit = document.createElement('a');
-    credit.href = 'https://www.openstreetmap.org/copyright';
-    credit.textContent = 'OpenStreetMap 贡献者';
-    credit.target = '_blank'; credit.rel = 'noopener noreferrer';
-    // app_config.navigation.tiles：一层（对象）或几层（数组，第一层是底图、后面叠上去，比如天地图的中文地名）。网址里只认 {z}{x}{y} 和子域名 {s}
-    const tileOk = (t) => t && typeof t.url === 'string' && ['{z}','{x}','{y}'].every(part => t.url.includes(part)) &&
-      !/[{}]/.test(t.url.replace(/\{[xyzs]\}/g, '')) && !!publicUrl(t.url.replace(/\{s\}/g, '0'));
-    const tileOpt = (t) => ({
-      maxZoom: 19,
-      maxNativeZoom: Math.min(19, Math.max(1, Math.round(Number(t.maxNativeZoom) || 19))),   // 天地图到 18 级，更大时放大 18 级的图
-      subdomains: typeof t.subdomains === 'string' && /^[0-9a-z]{1,8}$/i.test(t.subdomains) ? t.subdomains : 'abc'
-    });
-    const defs = (Array.isArray(services.tiles) ? services.tiles : services.tiles ? [services.tiles] : []).slice(0, 3);
-    const custom = defs[0];
-    const useCustom = tileOk(custom) && publicUrl(custom.creditUrl) && typeof custom.credit === 'string' && custom.credit.trim() && defs.every(tileOk);
-    if (useCustom) {
-      template = custom.url;
-      credit.href = publicUrl(custom.creditUrl).href;
-      credit.textContent = custom.credit.slice(0, 120);
-    }
-    const baseNative = useCustom ? tileOpt(custom).maxNativeZoom : 19;
-    const tiles = L.tileLayer(template, Object.assign(useCustom ? tileOpt(custom) : { maxZoom: 19 }, { attribution: '© ' + credit.outerHTML }));
-    const overlays = useCustom ? defs.slice(1).map(t => L.tileLayer(t.url, tileOpt(t))) : [];
-    const key = (coords) => [coords.z, coords.x, coords.y].join('/');
-    tiles.on('tileload', ({ coords }) => visibleStreetTiles.add(key(coords)));
-    tiles.on('tileunload', ({ coords }) => visibleStreetTiles.delete(key(coords)));
-    tiles.on('load', () => {
-      if (map.hasLayer(tiles) && map.getContainer().querySelector('.leaflet-tile:not(.leaflet-tile-loaded)') === null && visibleStreetTiles.size) {
-        $('map-status').textContent = '';
-        $('map-region').hidden = true;
+      if (i === 0) {   // 只看底图：注记层少一两块不算
+        lay.on('tileload', () => { set.ok++; });
+        lay.on('tileerror', (e) => { set.bad++; if (!set.firstBad && e && e.tile) set.firstBad = e.tile.src; if (set.bad >= 4 && set.ok === 0 && !set.failed) { set.failed = true; onSetFailed(set); } });
       }
+      set.layers.push(lay);
     });
-    tiles.on('tileerror', () => {
-      if (map.hasLayer(tiles)) {
-        $('map-status').textContent = '部分街道底图未加载。可看区域总览，或用高德核对入口。';
-        $('map-region').hidden = false;
-      }
-    });
-    const overviewCredit = '<a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a>';
-    map.on('zoomend', () => {
-      const street = map.getZoom() >= 6;
-      $('map').classList.toggle('street', street);
-      if (!street) $('map-region').hidden = true;
-      if (street && !map.hasLayer(tiles)) {
-        map.removeLayer(overview);
-        map.attributionControl.removeAttribution(overviewCredit);
-        tiles.addTo(map);
-        overlays.forEach(o => o.addTo(map));
-      } else if (!street && !map.hasLayer(overview)) {
-        tiles.remove();
-        overlays.forEach(o => o.remove());
-        visibleStreetTiles.clear();
-        overview.addTo(map);
-        map.attributionControl.addAttribution(overviewCredit);
-        $('map-status').textContent = land ? '' : '地理总览未加载，可搜索目的地。';
-      }
-    });
-    pins = L.layerGroup().addTo(map);
-    map.setView([33.7, 111.5], 4);
-    map.on('click', (e) => {
-      if (!choosing || (trip && !proposing)) return;
-      const latlng = e.latlng.wrap(), zoom = map.getZoom();
-      const nz = Math.min(zoom, baseNative);   // 超过底图最大级别时，看的是放大后的那一级图块
-      const tile = map.project(e.latlng, nz).divideBy(256).floor();
-      if (zoom < 16 || !visibleStreetTiles.has(key({ z: nz, x: tile.x, y: tile.y }))) {
-        $('map-status').textContent = zoom < 16 ? '请先放大到能看清街道和入口，再点具体位置。' : '这里的街道底图未加载，请搜索地点或输入已知坐标。';
-        return;
-      }
-      if ($('map-dialog').open) closeMap(true);
-      if (!trip) clearSelection();
-      $('manual').open = true;
-      $('place-name').value = '';
-      $('lat').value = latlng.lat.toFixed(6);
-      $('lon').value = latlng.lng.toFixed(6);
-      $('place-name').focus();
-      $('nearby-status').textContent = '写下这个入口的名称，再点「核对地点」。';
-      choosing = false;
-      draw();
-    });
+    return set;
   }
-  function draw(fit = false) {
-    const points = [];
-    if (dest) points.push([dest, '终', '目的地：' + dest.name, 'dest']);
-    if (fresh(ownFix)) points.push([ownFix, '我', '我的位置', 'me']);
-    if (fresh(peerFix)) points.push([peerFix, '友', '同行好友的位置', 'peer']);
-    if (trip?.myWait) points.push([trip.myWait, '等', '我等在：' + trip.myWait.name, 'me']);
-    if (trip?.peerWait) points.push([trip.peerWait, '等', '好友等在：' + trip.peerWait.name, 'peer']);
-    if (!points.length && mapAnchor) points.push([mapAnchor, '附', '选点参考位置', 'me']);
-    $('pick').hidden = !!trip && !proposing;
-    $('pick').textContent = choosing ? '取消地图选点' : '在图上选点';
-    $('pick').setAttribute('aria-pressed', String(choosing));
-    $('recenter').hidden = !points.length;
-    $('map-title').textContent = trip ? '会合地图' : dest ? '目的地地图' : mapAnchor ? '附近地图' : '地图总览';
-    $('map-caption').textContent = choosing ? '放大到具体入口，然后轻点地图。'
-      : routeLine ? '已绘制所选路线。' : dest ? dest.name : '放大地图可查看街道。';
-    createMap();
-    if (!map) {
-      $('map-status').textContent = '地图组件暂不可用，仍可使用上方已核对的地点。';
-      return;
-    }
-    map.invalidateSize();
-    const signature = JSON.stringify(points);
-    if (signature !== lastPins || lastLine !== routeLine) {
-      lastPins = signature;
-      lastLine = routeLine;
-      pins.clearLayers();
-      for (const [p, label, title, style] of points) {
-        const tip = document.createElement('span');
-        tip.textContent = title;
-        const coords = [p.lat, p.lon];
-        if (Number.isFinite(p.accuracy))
-          L.circle(coords, { radius: p.accuracy, weight: 1, fillOpacity: 0.07 }).addTo(pins);
-        L.marker(coords, {
-          title,
-          icon: L.divIcon({ className: 'nav-pin ' + style, html: label, iconSize: [27, 27] })
-        })
-          .addTo(pins)
-          .bindPopup(tip);
-      }
-      if (routeLine) L.polyline(routeLine, { color: '#6652b7', weight: 5 }).addTo(pins);
-    }
-    if (points.length && (fit || !didFit)) {
-      if (routeLine) {
-        map.fitBounds(routeLine, { padding: [22, 22], maxZoom: 17 });
-        didFit = true;
-        return;
-      }
-      if (points.length === 1) map.setView([points[0][0].lat, points[0][0].lon], 16);
-      else
-        map.fitBounds(
-          points.map(([p]) => [p.lat, p.lon]),
-          { padding: [32, 32], maxZoom: 17 }
-        );
-      didFit = true;
-    }
+  const sets = { street: makeSet(SETS.street, 'street'), sat: makeSet(SETS.sat, 'sat'), backup: makeSet(SETS.backup, 'backup') };
+  let kind = LSget('ch2navLayer', 'street') === 'sat' ? 'sat' : 'street', shown = null;
+  function pickSet(k) {
+    const s = sets[k];
+    if (s && !s.failed) return s;
+    const other = sets[k === 'sat' ? 'street' : 'sat'];
+    if (k === 'street' && other && !other.failed && !sets.street) return other;
+    return sets.backup;
   }
-  const mapDialog = $('map-dialog');
-  const mapSlot = document.createComment('地图在页面中的位置');
-  $('map-section').before(mapSlot);
-  let focusPlaceName = false;
-  function closeMap(toName = false) {
-    focusPlaceName = toName;
-    mapDialog.close();
+  function showLayers() {
+    const s = pickSet(kind);
+    if (shown === s) return;
+    if (shown) shown.layers.forEach((l) => map.removeLayer(l));
+    shown = s;
+    s.layers.forEach((l) => l.addTo(map));
+    $('map').classList.toggle('street', s.name === 'street');
+    const tdtOk = (sets.street && !sets.street.failed) || (sets.sat && !sets.sat.failed);
+    $('layer').hidden = !(sets.street && sets.sat) || !tdtOk;
+    $('layer').setAttribute('aria-label', kind === 'sat' ? '换成街道图' : '换成卫星图');
   }
-  const openMap = bindLayer('map', mapDialog, () => {
-    mapDialog.append($('map-section'));
-    $('map-expand').textContent = '收起地图';
-    mapDialog.showModal();
-    map?.invalidateSize();
-    $('map-expand').focus();
+  function onSetFailed(set) {
+    ['street', 'sat'].forEach((k) => { const o = sets[k]; if (set.name !== 'backup' && o && o !== set && o.ok === 0) o.failed = true; });   // 天地图两种图用同一个密钥：一种不给，另一种多半也不给
+    if (set.name === 'backup') { banner('地图加载不出来：手机网络可能连不上地图服务器。<br><button data-act="check">检查原因</button>', true); return; }
+    showLayers();
+    banner('天地图没有给地图，先换成了卫星图（带道路和地名）。<br><button data-act="check">检查原因</button>', true);
+  }
+  $('layer').onclick = () => { kind = kind === 'sat' ? 'street' : 'sat'; LSset('ch2navLayer', kind); showLayers(); };
+  showLayers();
+
+  const pinIcon = (cls) => L.divIcon({ className: 'pin ' + cls, iconSize: [30, 40], iconAnchor: [15, 39], html: '<svg viewBox="0 0 30 40"><path d="M15 39s-12-12.4-12-22A12 12 0 0 1 27 17c0 9.6-12 22-12 22z"/><circle cx="15" cy="16" r="4.5" fill="#fff" stroke="none"/></svg>' });
+  const resLayer = L.layerGroup().addTo(map), selLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map), tripLayer = L.layerGroup().addTo(map);
+
+  /* ---------- 底部卡片 ---------- */
+  const VIEWS = ['home', 'list', 'place', 'route', 'nav'];
+  let viewNow = 'home';
+  const stack = [];
+  function show(v, push = true) {
+    if (push && viewNow !== v && viewNow !== 'nav') stack.push(viewNow);
+    viewNow = v;
+    VIEWS.forEach((x) => { $('v-' + x).hidden = x !== v; });
+    document.body.classList.toggle('navigating', v === 'nav');
+    $('guide').hidden = v !== 'nav';
+    if (v === 'home') { stack.length = 0; resLayer.clearLayers(); selLayer.clearLayers(); results = []; $('q').value = ''; $('q-clear').hidden = true; renderHome(); }
+    requestAnimationFrame(sheetSize);
+  }
+  function back() {
+    const v = stack.pop() || 'home';
+    if (viewNow === 'route') clearRoute();
+    if (v === 'home' || v === 'list') { selLayer.clearLayers(); }
+    if (v === 'home') { resLayer.clearLayers(); results = []; }
+    show(v, false);
+  }
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-back]'); if (t) { back(); return; }
+    const a = e.target.closest('[data-act]'); if (a && a.dataset.act === 'check') { e.preventDefault(); openCheck(); }
   });
-  $('map-expand').onclick = () => mapDialog.open ? closeMap() : openMap();
-  mapDialog.addEventListener('close', () => {
-    mapSlot.after($('map-section'));
-    $('map-expand').textContent = '全屏地图';
-    map?.invalidateSize();
-    (focusPlaceName ? $('place-name') : $('map-expand')).focus();
-    focusPlaceName = false;
-  });
-  $('map-region').onclick = () => {
-    if (map) map.setView(map.getCenter(), 5);
+  function sheetSize() {
+    const h = $('sheet').getBoundingClientRect().height;
+    document.documentElement.style.setProperty('--sheet-h', Math.round(h) + 'px');
+  }
+  if (window.ResizeObserver) new ResizeObserver(sheetSize).observe($('sheet'));
+  addEventListener('resize', sheetSize);
+
+  /* 首页：一起导航、附近、最近去过 */
+  const CHIPS = ['美食', '咖啡', '超市', '加油站', '停车场', '地铁站', '公交站', '酒店', '医院', '药店', '银行', '厕所'];
+  $('chips').innerHTML = CHIPS.map((c) => '<button data-chip="' + esc(c) + '">' + esc(c) + '</button>').join('');
+  $('chips').onclick = (e) => { const b = e.target.closest('[data-chip]'); if (b) runSearch(b.dataset.chip, true); };
+  const RKEY = 'ch2navRecent:' + UID;
+  const recentGet = () => (LSget(RKEY, []) || []).filter(validPlace).slice(0, 8);
+  function remember(p) {
+    if (!validPlace(p) || p.temp) return;
+    const a = recentGet().filter((x) => !(Math.abs(x.lat - p.lat) < 1e-5 && Math.abs(x.lon - p.lon) < 1e-5));
+    a.unshift({ name: String(p.name || '').slice(0, 80), addr: String(p.addr || '').slice(0, 120), lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6) });
+    LSset(RKEY, a.slice(0, 8));
+  }
+  const rowHTML = (p, i, attr) => '<button class="row" ' + attr + '="' + i + '"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg><span class="r-main"><span class="r-name">' + esc(p.name || '地图上的点') + '</span>' +
+    (p.addr ? '<span class="r-sub">' + esc(p.addr) + '</span>' : '') + '</span>' + (me ? '<span class="r-dist">' + fmtDist(dist(me, p)) + '</span>' : '') + '</button>';
+  function renderHome() {
+    const r = recentGet();
+    $('recent').innerHTML = r.length ? '<div class="v-head"><p class="sec-t">最近去过</p><button class="bare" id="recent-clear">清除</button></div>' + r.map((p, i) => rowHTML(p, i, 'data-recent')).join('') : '<p class="note">搜地点，或者长按地图选一个点。</p>';
+    $('credit-home').innerHTML = '<button class="bare" data-act="check">地图服务检查</button>';
+    renderTrip();
+  }
+  $('recent').onclick = (e) => {
+    if (e.target.id === 'recent-clear') { LSset(RKEY, []); renderHome(); return; }
+    const b = e.target.closest('[data-recent]'); if (b) openPlace(recentGet()[+b.dataset.recent]);
   };
-  function renderRecents() {
-    const list = $('recent-places');
-    list.replaceChildren();
-    $('recents').hidden = !recents.length;
-    for (const place of recents) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = place.name;
-      const detail = document.createElement('small');
-      detail.textContent = place.address || coordText(place);
-      button.append(detail);
-      button.onclick = () => choosePlace(place);
-      list.append(button);
+
+  /* ---------- 我的位置 ---------- */
+  let me = null, watchId = null, firstFix = true, following = false, gpsDenied = false;
+  const meIcon = L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: '<div class="me-dot nohead"><i></i></div>' });
+  let meMarker = null, meCircle = null;
+  function startGPS() {
+    if (watchId != null || !navigator.geolocation) return;
+    watchId = navigator.geolocation.watchPosition(onFix, onGpsErr, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  }
+  function stopGPS() { if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
+  function onGpsErr(err) {
+    if (err && err.code === 1) {
+      gpsDenied = true; stopGPS();
+      banner('没有定位权限：在手机的设置里允许 Chatter（或浏览器）使用位置，才能显示你在哪、跟着走导航。', true);
+    } else if (!me) banner('暂时定位不到，到开阔的地方试试。');
+  }
+  function onFix(pos) {
+    const c = pos.coords;
+    const prev = me;
+    me = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, head: Number.isFinite(c.heading) && c.speed > 0.7 ? c.heading : null, speed: c.speed, t: pos.timestamp };
+    if (me.head == null && prev && dist(prev, me) > 4) me.head = bearing(prev, me);   // 手机没给方向时，用这次和上次的位置算
+    if (gpsDenied) { gpsDenied = false; banner(''); }
+    drawMe();
+    if (firstFix) {
+      firstFix = false;
+      if (!hasTarget()) { map.setView([me.lat, me.lon], 16); following = true; $('locate').classList.add('on'); }
+      if (viewNow === 'list' && results.length) renderList();
+    }
+    if (nav) navTick();
+    else if (following) map.panTo([me.lat, me.lon], { animate: true });
+    tripShare();
+  }
+  function drawMe() {
+    if (!me) return;
+    const ll = [me.lat, me.lon];
+    if (!meMarker) { meMarker = L.marker(ll, { icon: meIcon, interactive: false, zIndexOffset: 1000, keyboard: false }).addTo(map); meCircle = L.circle(ll, { radius: me.acc, interactive: false, stroke: false, fillColor: '#1a73e8', fillOpacity: 0.12 }).addTo(map); }
+    meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(Math.min(me.acc || 0, 500));
+    const el = meMarker.getElement() && meMarker.getElement().querySelector('.me-dot');
+    if (el) {
+      const h = nav && nav.head != null ? nav.head : me.head;
+      el.classList.toggle('nohead', h == null);
+      if (h != null) el.querySelector('i').style.transform = 'rotate(' + Math.round(h) + 'deg)';
     }
   }
-  $('clear-recents').onclick = () => {
-    recents.length = 0;
-    renderRecents();
-    $('query').focus();
+  map.on('dragstart', () => { following = false; $('locate').classList.remove('on'); });
+  $('locate').onclick = () => {
+    if (!me) { if (gpsDenied) onGpsErr({ code: 1 }); else { banner('正在定位…'); startGPS(); } return; }
+    following = true; $('locate').classList.add('on');
+    if (nav) followNav(true); else map.setView([me.lat, me.lon], Math.max(map.getZoom(), 16));
   };
-  function choosePlace(place) {
-    if (!validPlace(place)) return;
-    choosing = false;
-    if (trip && proposing) {
-      proposing = false;
-      action('propose', trip.id, place);
-      render();
-    } else if (!trip) {
-      const old = recents.findIndex((p) => p.lat === place.lat && p.lon === place.lon && p.name === place.name);
-      if (old >= 0) recents.splice(old, 1);
-      recents.unshift({ ...place });
-      if (recents.length > 3) recents.pop();
-      renderRecents();
-      select(place);
-      $('dest-name').focus();
-    }
-  }
-  function select(place) {
-    if (!validPlace(place)) return;
-    resetRoute();
-    choosing = false;
-    mapAnchor = null;
-    dest = { name: place.name, lat: place.lat, lon: place.lon };
-    inviteId = null;
-    $('confirmed').hidden = false;
-    $('dest-name').textContent = dest.name;
-    $('dest-info').textContent = place.address || '';
-    $('dest-coords').textContent = coordText(dest);
-    $('coordinates').open = false;
-    $('plan').open = !trip;
-    $('copy-status').textContent = '';
-    $('nearby-status').textContent = '';
-    $('manual').open = false;
-    const target = new URL('https://uri.amap.com/marker');
-    target.search = new URLSearchParams({
-      position: dest.lon + ',' + dest.lat,
-      name: dest.name,
-      coordinate: 'wgs84',
-      src: 'Chatter'
-    }).toString();
-    $('route').href = target.href;
-    draw(true);
-    render();
-  }
-  function resetRoute() {
-    ++routeRevision;
-    routerRequest?.abort();
-    routeLine = null;
-    sound?.stop();
-    routeSpeech = '';
-    $('route-summary').hidden = true;
-    $('step-list').replaceChildren();
-    $('steps').open = false;
-    $('route-audio-status').textContent = '';
-    $('plan').querySelector('summary').textContent = '规划路线';
-    $('plan-status').textContent = '';
-    $('plan-go').disabled = false;
-    $('plan-go').textContent = '计算' + document.querySelector('#mode :checked + span').textContent + '路线';
-  }
-  function metres(a, b) {
-    const rad = (n) => (n * Math.PI) / 180;
-    const h =
-      Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
-      Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lon - a.lon) / 2) ** 2;
-    return 12742000 * Math.asin(Math.sqrt(Math.min(1, h)));
-  }
-  const directionNames = {
-    left: '左转', right: '右转', 'slight left': '向左前方行进', 'slight right': '向右前方行进',
-    'sharp left': '向左急转', 'sharp right': '向右急转', straight: '直行', uturn: '掉头'
-  };
-  function stepTitle(step) {
-    const maneuver = step?.maneuver;
-    if (!maneuver || !Number.isFinite(step.distance) || step.distance < 0) return '';
-    const road = typeof step.name === 'string' ? step.name.trim().slice(0, 100) : '';
-    let instruction;
-    switch (maneuver.type) {
-      case 'depart': instruction = '从起点出发'; break;
-      case 'arrive': return '到达路线终点';
-      case 'roundabout': case 'rotary':
-        instruction = Number.isInteger(maneuver.exit) && maneuver.exit > 0 ? '进入环岛，从第 ' + maneuver.exit + ' 个出口驶出' : '进入环岛';
-        break;
-      case 'exit roundabout': case 'exit rotary': instruction = '离开环岛'; break;
-      case 'on ramp': instruction = '进入匝道'; break;
-      case 'off ramp': instruction = '驶离匝道'; break;
-      case 'merge': instruction = '汇入道路'; break;
-      case 'fork': instruction = ({left:'在岔路靠左','slight left':'在岔路靠左',right:'在岔路靠右','slight right':'在岔路靠右'})[maneuver.modifier] || '经过岔路'; break;
-      case 'turn': case 'continue': case 'end of road': instruction = directionNames[maneuver.modifier] || '沿路线前行'; break;
-      default: instruction = '沿路线前行';
-    }
-    return road ? instruction + ' · ' + road : instruction;
-  }
-  function presentRoute(route, gap) {
-    const minutes = Math.max(1, Math.round(route.duration / 60));
-    const unit = route.distance >= 1000 ? '公里' : '米';
-    const distance = unit === '公里' ? Number((route.distance / 1000).toFixed(2)) : Math.round(route.distance);
-    const mode = document.querySelector('#mode :checked + span').textContent;
-    $('duration').textContent = minutes;
-    $('distance').textContent = distance;
-    $('distance-unit').textContent = unit;
-    $('route-gap').textContent = '道路终点距所选入口约 ' + Math.round(gap) + ' 米。';
-    routeSpeech = mode + '前往' + dest.name + '，预计 ' + minutes + ' 分钟，全程约 ' + distance + ' ' + unit + '。';
-    const list = $('step-list');
-    for (const leg of Array.isArray(route.legs) ? route.legs : []) {
-      for (const step of Array.isArray(leg?.steps) ? leg.steps : []) {
-        const title = stepTitle(step);
-        if (!title) continue;
-        const row = document.createElement('li'), text = document.createElement('span'), listen = document.createElement('button');
-        text.textContent = title;
-        const length = step.distance > 0 ? '本段约 ' + Math.round(step.distance) + ' 米' : '';
-        if (length) {
-          const detail = document.createElement('small');
-          detail.textContent = length;
-          text.append(detail);
-        }
-        const index = list.children.length + 1;
-        listen.type = 'button';
-        listen.textContent = '听';
-        listen.setAttribute('aria-label', '朗读第 ' + index + ' 段');
-        listen.onclick = () => sound?.read('路线预览，第 ' + index + ' 段。' + title.replace(' · ', '，') + '。' + length, $('route-audio-status'));
-        row.append(text);
-        if (sound) row.append(listen);
-        list.append(row);
-      }
-    }
-    $('steps').hidden = !list.children.length;
-    $('route-summary').hidden = false;
-    $('plan-status').textContent = '';
-    $('plan').open = false;
-    $('plan').querySelector('summary').textContent = '调整路线';
-    $('route-heading').focus();
-    sound?.announce(routeSpeech, $('route-audio-status'));
-  }
-  $('hear-route').onclick = () => { if (routeSpeech) sound?.read(routeSpeech, $('route-audio-status')); };
-  function changeStart() {
-    resetRoute();
-    $('from-fields').hidden = $('start-source').value !== 'manual';
-    draw();
-  }
-  $('start-source').onchange = changeStart;
-  $('mode').onchange = changeStart;
-  $('from-fields').oninput = changeStart;
-  $('plan-go').onclick = async () => {
-    if (!dest) return;
-    if (Date.now() - lastRouteAt < 1200) {
-      $('plan-status').textContent = '刚完成一次算路，请稍等一秒再试。';
-      return;
-    }
-    resetRoute();
-    draw();
-    const rev = routeRevision,
-      target = { ...dest },
-      mode = document.querySelector('#mode :checked').value;
-    const ctl = new AbortController();
-    routerRequest = ctl;
-    $('plan-go').disabled = true;
-    let timer;
-    try {
-      let start;
-      if ($('start-source').value === 'manual') {
-        start = { lat: $('from-lat').valueAsNumber, lon: $('from-lon').valueAsNumber };
-        if (!valid(start)) throw new Error('请填写有效的 WGS84 起点纬度和经度。');
-      } else {
-        $('plan-status').textContent = '正在获取本次出发位置…';
-        const pos = await new Promise((resolve, reject) =>
-          navigator.geolocation
-            ? navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true,
-                timeout: 12000,
-                maximumAge: 0
-              })
-            : reject(new Error('请手填起点坐标。'))
-        );
-        const age = Date.now() - pos.timestamp;
-        if (!Number.isFinite(age) || age < -1000 || age >= 30000) throw new Error('起点定位已过期，请重新定位或手填起点。');
-        if (!Number.isFinite(pos.coords.accuracy) || pos.coords.accuracy < 0 || pos.coords.accuracy > 120) throw new Error('当前定位误差超过 120 米，请手填起点或在室外重试。');
-        start = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        if (!valid(start)) throw new Error('起点坐标无效，请重新定位或手填起点。');
-      }
-      if (rev !== routeRevision || stopped) return;
-      lastRouteAt = Date.now();
-      $('plan-status').textContent = '正在按已选起点和入口算路…';
-      const profile = { foot: 'routed-foot', bike: 'routed-bike', car: 'routed-car' }[mode];
-      if (!profile) throw new Error('请选择出行方式。');
-      const path = start.lon + ',' + start.lat + ';' + target.lon + ',' + target.lat;
-      timer = setTimeout(() => ctl.abort(), 12000);
-      const response = await fetch(
-        routerBase.href +
-          profile +
-          '/route/v1/driving/' +
-          path +
-          '?overview=full&geometries=geojson&steps=true',
-        { signal: ctl.signal, credentials: 'omit', referrerPolicy: 'no-referrer' }
-      );
-      const data = response.ok && (await response.json());
-      if (rev !== routeRevision || stopped) return;
-      const r = data?.routes?.[0],
-        raw = r?.geometry?.coordinates;
-      if (
-        data?.code !== 'Ok' ||
-        !Array.isArray(raw) ||
-        raw.length < 2 ||
-        !Number.isFinite(r.distance) ||
-        !Number.isFinite(r.duration) || r.duration < 0 || r.distance < 0
-      )
-        throw new Error('暂时没有可核对的路线。可用高德查看已选地点。');
-      const line = raw.map(([lon, lat]) => ({ lat, lon }));
-      if (!line.every(valid)) throw new Error('路线数据异常，请重新规划。');
-      const fromGap = metres(start, line[0]),
-        toGap = metres(target, line[line.length - 1]);
-      const tolerance = mode === 'car' ? 120 : 60;
-      if (fromGap > tolerance || toGap > tolerance)
-        throw new Error(
-          '可通行道路与所选起点或入口相距较远（起点 ' +
-            Math.round(fromGap) +
-            ' 米，终点 ' +
-            Math.round(toGap) +
-            ' 米）。请核对入口后再规划。'
-        );
-      routeLine = line.map((p) => [p.lat, p.lon]);
-      draw(true);
-      presentRoute(r, toGap);
-    } catch (e) {
-      if (rev === routeRevision && !stopped)
-        $('plan-status').textContent =
-          e.code === 3 ? '定位超时，可到室外重试或手填起点。' : e.code === 2 ? '设备暂时无法定位，可手填起点。' : e.code === 1
-            ? '定位未授权，可手填起点。'
-            : e.name === 'AbortError'
-              ? '路线请求超时，请重试。'
-              : e instanceof TypeError
-                ? '路线服务暂时连不上。可用高德核对原地点。'
-                : e.message || '无法规划，请手填起点或重试。';
-    } finally {
-      clearTimeout(timer);
-      if (rev === routeRevision) $('plan-go').disabled = false;
-    }
-  };
-  function invalidateSearch() {
-    ++queryRevision;
-    entranceFix = null; $('gps-entrance').hidden = true;
-    queryRequest?.abort();
-    $('results').replaceChildren();
-    $('search-status').textContent = '';
-    $('nearby-status').textContent = '';
-  }
-  function clearSelection() {
-    if (!trip) {
-      resetRoute();
-      dest = null;
-      inviteId = null;
-      $('confirmed').hidden = true;
-      render();
-      draw();
-    }
-  }
-  $('query').oninput = () => {
-    invalidateSearch();
-    clearSelection();
-    $('amap-search').hidden = true;
-  };
-  $('coords').oninput = clearSelection;
-  $('replace').onclick = () => {
-    invalidateSearch();
-    clearSelection();
-    choosing = false;
-    $('amap-search').hidden = true;
-    $('query').focus();
-    $('query').select();
-    draw();
-  };
-  $('pick').onclick = () => {
-    choosing = !choosing;
-    draw();
-    if (choosing) $('map').focus();
-    else if (map?.getZoom() < 6) $('map-status').textContent = '';
-  };
-  $('nearby').onclick = () => {
-    if (!navigator.geolocation) {
-      $('nearby-status').textContent = '设备无法定位，可以搜索或输入坐标。';
-      return;
-    }
-    invalidateSearch();
-    const rev = queryRevision;
-    $('nearby-status').textContent = '正在获取当前位置…';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (stopped || rev !== queryRevision || (trip && !proposing)) return;
-        mapAnchor = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        if (!valid(mapAnchor)) { $('nearby-status').textContent = '定位坐标无效，请重试。'; return; }
-        const age = Date.now() - pos.timestamp;
-        if (Number.isFinite(pos.coords.accuracy) && pos.coords.accuracy >= 0 && pos.coords.accuracy <= 30 && age >= -1000 && age < 30000) {
-          entranceFix = { ...mapAnchor, until: performance.now() + 30000 - Math.max(0, age) };
-          $('gps-entrance').hidden = false;
-        }
-        choosing = true;
-        draw(true);
-        if (map) map.setView([mapAnchor.lat, mapAnchor.lon], 16);
-        $('nearby-status').textContent = '定位精度约 ' + Math.round(pos.coords.accuracy) + ' 米。';
-        if (!entranceFix) $('nearby-status').textContent += ' 到入口后请重新定位，精度在 30 米以内可直接标记。';
-        if (entranceFix) $('gps-entrance').focus(); else $('map').focus();
-      },
-      () => {
-        if (!stopped && rev === queryRevision) $('nearby-status').textContent = '未取得定位，可以搜索地点或输入坐标。';
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
-  };
-  $('gps-entrance').onclick = () => {
-    const fix = entranceFix;
-    invalidateSearch();
-    if (!fix || performance.now() >= fix.until || (trip && !proposing)) {
-      $('nearby-status').textContent = '这次定位已过期，请在入口重新定位。';
-      return;
-    }
-    if (!trip) clearSelection();
-    choosing = false;
-    $('manual').open = true;
-    $('place-name').value = '';
-    $('lat').value = fix.lat.toFixed(6); $('lon').value = fix.lon.toFixed(6);
-    $('nearby-status').textContent = '请写下你所在的入口或楼层，确认后才会选为目的地。';
-    $('place-name').focus();
-    draw();
-  };
-  $('search').onsubmit = async (e) => {
-    e.preventDefault();
-    invalidateSearch();
-    const rev = queryRevision;
-    const q = $('query').value.trim();
-    if (!q || (trip && !proposing)) return;
-    const fallback = new URL('https://uri.amap.com/search');
-    fallback.search = new URLSearchParams({ keyword: q, src: 'Chatter' });
-    $('amap-search').href = fallback.href;
-    $('amap-search').hidden = false;
-    const ctl = new AbortController();
-    queryRequest = ctl;
-    const timer = setTimeout(() => ctl.abort(), 9000);
-    $('search-status').textContent = '正在查找地点…';
-    try {
-      const url = new URL(searchService);
-      url.searchParams.set('q', q); url.searchParams.set('limit', '8');
-      const response = await fetch(url, {
-        signal: ctl.signal,
-        credentials: 'omit',
-        referrerPolicy: 'no-referrer'
-      });
-      if (!response.ok) throw new Error('地点来源暂不可用');
-      const data = await response.json();
-      if (rev !== queryRevision || stopped) return;
-      const places = (data.features || [])
-        .filter((f) => f.geometry?.type === 'Point')
-        .map((f) => {
-          const [lon, lat] = f.geometry.coordinates;
-          const p = f.properties || {};
-          return {
-            lat,
-            lon,
-            name: p.name || p.street,
-            address: [
-              ...new Set([p.country, p.state, p.city, p.district, p.street, p.housenumber].filter(Boolean))
-            ].join(' · ')
-          };
-        })
-        .filter(validPlace);
-      $('search-status').textContent = places.length
-        ? '请选择正确的城市和入口。'
-        : '没有匹配地点，请补充城市、门牌或入口。';
-      for (const place of places) {
-        const btn = document.createElement('button'),
-          detail = document.createElement('small');
-        btn.type = 'button';
-        btn.textContent = place.name;
-        detail.textContent = place.address || coordText(place);
-        btn.append(detail);
-        btn.onclick = () => {
-          invalidateSearch();
-          choosePlace(place);
-        };
-        $('results').append(btn);
-      }
-    } catch {
-      if (rev === queryRevision && !stopped)
-        $('search-status').textContent = '地点查询未完成。可以重试，也可输入已核对的 GPS 坐标。';
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  $('coords').onsubmit = (e) => {
-    e.preventDefault();
-    if (trip && !proposing) return;
-    invalidateSearch();
-    choosePlace({
-      name: $('place-name').value.trim(),
-      lat: $('lat').valueAsNumber,
-      lon: $('lon').valueAsNumber
-    });
-  };
-  $('copy').onclick = async () => {
-    if (!dest) return;
-    const u = new URL('navigation.html', location.href);
-    u.hash = new URLSearchParams({ name: dest.name, lat: dest.lat, lon: dest.lon }).toString();
-    try {
-      await navigator.clipboard.writeText(u.href);
-      $('copy-status').textContent = '已复制目的地链接。';
-    } catch {
-      window.prompt('复制目的地链接', u.href);
-    }
-  };
-  $('recenter').onclick = () => draw(true);
-  function stopGPS() {
-    if (watch !== null) navigator.geolocation.clearWatch(watch);
-    watch = null;
-    ownFix = null;
-    lastUpload = 0;
-  }
-  function render() {
-    $('together').hidden = !bridge?.peer;
-    $('destination-search').hidden = !!dest && !proposing;
-    $('replace').hidden = !!trip;
-    $('search-title').textContent = proposing ? '新的会合点在哪里？' : '你想去哪里？';
-    document.querySelector('main').toggleAttribute('data-trip', !!trip);
-    $('people').hidden = !trip?.active;
-    $('change').textContent = proposing ? '取消更换' : '提议更换会合点';
-    if ($('destination-search').hidden) $('amap-search').hidden = true;
-    $('meeting').hidden = !trip?.active;
-    const needsReply = trip?.renewBy && trip.renewBy !== bridge?.me;
-    $('renew').hidden = !trip?.canExtend || (!!trip.renewBy && !needsReply);
-    $('renew').disabled = busy;
-    $('renew').textContent = needsReply ? '同意延长 30 分钟' : '提议延长 30 分钟';
-    const minutes = trip && Math.ceil((Date.parse(trip.expires) - serverNow()) / 60000);
-    $('renew-status').textContent = trip?.renewBy ? (needsReply ? '好友想延长本次同行。' : '已提议续时，等待好友同意。')
-      : trip?.active && minutes <= 5 ? '同行将在 ' + Math.max(0, minutes) + ' 分钟后结束。' : '';
-    $('wait-info').textContent = [
-      trip?.myWait && '我等在：' + trip.myWait.name,
-      trip?.peerWait && '好友等在：' + trip.peerWait.name
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    $('proposal').textContent = trip?.proposal
-      ? '提议的新会合点：' + trip.proposal.name + ' · ' + coordText(trip.proposal)
-      : '';
-    $('agree').hidden = !trip?.proposal || trip.proposal.by === bridge?.me;
-    $('invite').hidden = !dest || !!trip || !!requested;
-    $('accept').hidden = !trip || trip.active || trip.inviter === bridge?.me;
-    $('share').hidden = !trip?.active || watch !== null || !!pendingEnd;
-    for (const id of ['invite', 'accept', 'agree', 'end', 'wait-here', 'change']) $(id).disabled = busy;
-    $('end').hidden = !trip;
-    $('trip-title').textContent = bridge?.peer ? '和 ' + (bridge.peerLabel || bridge.peer) + ' 一起导航' : '一起导航';
-    if (!trip)
-      $('trip-status').textContent = requested ? '此邀请已结束或不可用。' : '选好入口后可以邀请这位好友。';
-    else
-      $('trip-status').textContent =
-        (trip.active
-          ? '双方已加入。选择共享后，好友可在本次同行中看见你的位置。'
-          : trip.inviter === bridge.me
-            ? '等待对方接受。'
-            : '对方邀请你前往上方地点。') +
-        ' 到期时间 ' +
-        new Date(trip.expires).toLocaleTimeString();
-    if (pendingEnd) $('trip-status').textContent = '本机已停止共享，等待联网关闭同行。旧定位最多显示 90 秒。';
-    if (trip?.active && !$('gps').textContent) $('gps').textContent = '我还没有开启位置共享。';
-    $('other').textContent = fresh(peerFix)
-      ? '好友更新于 ' +
-        new Date(peerFix.time).toLocaleTimeString() +
-        ' · 精度约 ' +
-        Math.round(peerFix.accuracy) +
-        ' 米'
-      : trip?.active
-        ? lastPeerTime
-          ? '好友最后更新于 ' + new Date(lastPeerTime).toLocaleTimeString() + '，请等待新定位。'
-          : '好友尚未分享定位。'
-        : '';
-    let separation = '';
-    if (trip?.active && fresh(ownFix) && fresh(peerFix)) {
-      const gap = metres(ownFix, peerFix);
-      const error = ownFix.accuracy + peerFix.accuracy;
-      separation = gap <= error ? '两人的定位范围重叠，可用入口或楼层确认。'
-        : gap < 1000 ? '你们直线相距约 ' + Math.round(gap / 10) * 10 + ' 米'
-        : '你们直线相距约 ' + (gap / 1000).toFixed(1) + ' 公里';
-    }
-    $('separation').textContent = separation;
-  }
-  function setTrip(value) {
-    const prev = trip;
-    if (prev?.id !== value?.id) {
-      ++generation;
-      lastPeerTime = 0;
-      proposing = false;
-      choosing = false;
-      stopGPS();
-      $('gps').textContent = '';
-    }
-    trip = value;
-    bridge?.remember?.(value);
-    if (Number.isFinite(value?.serverTime))
-      clock = { server:clock ? Math.max(value.serverTime, serverNow()) : value.serverTime, received:performance.now() };
-    peerFix = value?.peerFix || null;
-    if (peerFix) lastPeerTime = peerFix.time;
-    if (
-      trip &&
-      (!prev || prev.id !== trip.id || JSON.stringify(prev.destination) !== JSON.stringify(trip.destination))
-    ) {
-      invalidateSearch();
-      select(trip.destination);
-    }
-    if (!trip && prev) {
-      $('plan').open = true;
-      pendingEnd = null;
-      say('本次同行已结束。');
-    }
-    render();
-    draw(!prev && !!value);
-    let announcement;
-    if (prev && !trip) announcement = '本次同行已结束。';
-    if (trip && prev?.id === trip.id) {
-      if (!prev.active && trip.active) announcement = '双方已加入同行。';
-      if (trip.proposal && prev.proposal?.key !== trip.proposal.key && trip.proposal.by !== bridge?.me)
-        announcement = '好友提议更换会合点，请打开同行页面确认。';
-      if (prev.destination && (prev.destination.name !== trip.destination.name || prev.destination.lat !== trip.destination.lat || prev.destination.lon !== trip.destination.lon))
-        announcement = '会合点已更新为' + trip.destination.name + '。';
-    }
-    if (announcement) sound?.announce(announcement, $('trip-notice'));
-  }
-  function backendError(err) {
-    const missing = ['PGRST202', '42883'].includes(err?.code);
-    say(
-      missing
-        ? '这个环境尚未启用双人同行，单人地点和路线入口可继续使用。'
-        : String(err?.message || '网络暂不可用，请重试').slice(0, 160)
-    );
-  }
-  async function action(op, id, value) {
-    if (busy || stopped) return;
-    busy = true;
-    render();
-    const seq = ++generation;
-    try {
-      const result = await bridge.rpc(op, id, value);
-      if (stopped || seq !== generation) return;
-      say('');
-      setTrip(result);
-      if (op === 'invite' && result) bridge.notify(result.id);
-      if (op === 'end') {
-        pendingEnd = null;
-        requested = null;
-        render();
-      }
-    } catch (err) {
-      if (!stopped) backendError(err);
-    } finally {
-      busy = false;
-      render();
-    }
-  }
-  async function poll() {
-    if (stopped || busy || pollBusy || document.hidden || !bridge?.peer) return;
-    if (pendingEnd) {
-      await action('end', pendingEnd);
-      return;
-    }
-    pollBusy = true;
-    const seq = generation;
-    try {
-      const value = await bridge.rpc('read', trip?.id || requested);
-      if (!busy && !stopped && seq === generation) setTrip(value);
-    } catch (err) {
-      if (!stopped) backendError(err);
-    } finally {
-      pollBusy = false;
-    }
-  }
-  $('invite').onclick = () => {
-    if (dest) {
-      if (!inviteId) {
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
-        const hex = Array.from(bytes, n => n.toString(16).padStart(2, '0')).join('');
-        inviteId = [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
-      }
-      action('invite', inviteId, dest);
-    }
-  };
-  $('renew').onclick = () => {
-    if (!trip?.canExtend) return;
-    if (trip.renewBy && trip.renewBy !== bridge.me) action('accept_more', trip.id, { key: trip.renewKey });
-    else if (!trip.renewBy) action('offer_more', trip.id);
-  };
-  $('accept').onclick = () => action('accept', trip?.id);
-  $('end').onclick = () => {
-    if (!trip) return;
-    pendingEnd = trip.id;
-    stopGPS();
-    render();
-    draw();
-    action('end', pendingEnd);
-  };
-  $('change').onclick = () => {
-    proposing = !proposing;
-    render();
-    draw();
-    if (proposing) $('query').focus();
-  };
-  $('agree').onclick = () => {
-    if (trip?.proposal) action('agree', trip.id, { key: trip.proposal.key });
-  };
-  $('wait-here').onclick = () => {
-    const name = $('wait-note').value.trim();
-    if (!fresh(ownFix) || !name) {
-      say('先共享本次定位，再写明入口或楼层。');
-      return;
-    }
-    action('wait', trip.id, { lat: ownFix.lat, lon: ownFix.lon, name });
-  };
-  $('share').onclick = () => {
-    if (!trip?.active || watch !== null) return;
-    if (!navigator.geolocation) {
-      say('设备暂不支持定位。');
-      return;
-    }
-    const id = trip.id;
-    $('gps').textContent = '等待设备定位…';
-    watch = navigator.geolocation.watchPosition(
-      async (pos) => {
-        if (stopped || watch === null || trip?.id !== id) return;
-        ownFix = {
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-          time: serverNow() - (Date.now() - pos.timestamp)
-        };
-        if (!fresh(ownFix)) {
-          ownFix = null;
-          draw();
-          return;
-        }
-        draw();
-        if (Date.now() - lastUpload < 4000) return;
-        lastUpload = Date.now();
-        try {
-          const result = await bridge.rpc('fix', id, ownFix);
-          if (!stopped && trip?.id === id && watch !== null) {
-            if (!result) setTrip(null);
-            else $('gps').textContent = '我的位置更新于 ' + new Date(pos.timestamp).toLocaleTimeString();
-          }
-        } catch (err) {
-          if (!stopped && trip?.id === id) backendError(err);
-        }
-      },
-      (err) => {
-        if (stopped || trip?.id !== id) return;
-        if (err.code === 1) stopGPS();
-        $('gps').textContent = err.code === 1 ? '你已拒绝定位，仍可查看会合点。' : '设备暂未取得新定位。';
-        render();
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-    );
-    render();
-  };
-  const timer = setInterval(() => {
-    if (stopped) return;
-    if (trip && Date.parse(trip.expires) <= serverNow()) setTrip(null);
-    render();
-    draw();
-    poll();
-  }, 6000);
-  window.addEventListener('online', poll);
-  window.addEventListener('pageshow', (e) => {
-    if (e.persisted) location.reload();
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      render();
-      draw();
-      poll();
-    }
-  });
-  function dispose() {
-    stopped = true;
-    recents.length = 0;
-    sound?.dispose();
-    ++generation;
-    clearInterval(timer);
-    resetRoute();
-    invalidateSearch();
-    stopGPS();
-  }
-  window.addEventListener('pagehide', dispose, { once: true });
-  window.stopChatterNavigation = dispose;
-  window.pauseChatterNavigation = () => {
-    sound?.stop();
-    if (watch !== null) {
-      stopGPS();
-      $('gps').textContent = '来电已暂停定位，通话后可重新共享。';
-      render(); draw();
-    }
-  };
-  function openSharedPlace() {
-    if (trip || bridge?.peer) return;
-    const hadLocation = !!(dest || mapAnchor);
-    invalidateSearch();
-    clearSelection();
-    say('');
-    mapAnchor = null;
-    draw();
-    if (!location.hash) {
-      if (hadLocation) map?.setView([33.7, 111.5], 4);
-      return;
-    }
-    const params = new URLSearchParams(location.hash.slice(1));
-    const number = (key) => {
-      const raw = params.get(key);
-      return raw && /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(raw.trim()) ? Number(raw) : NaN;
-    };
-    const place = { name: params.get('name'), lat: number('lat'), lon: number('lon') };
-    if (validPlace(place)) select(place);
+
+  /* ---------- 搜地点 ---------- */
+  let results = [], tdtDown = false, lastSrc = '';
+  function tdtUrl(path, post, type) { return 'https://api.tianditu.gov.cn/' + path + '?postStr=' + encodeURIComponent(JSON.stringify(post)) + (type ? '&type=' + type : '') + '&tk=' + TDT; }
+  const lonlat = (s) => { const m = /(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)/.exec(String(s || '')); return m ? { lon: +m[1], lat: +m[2] } : null; };
+  async function tdtSearch(q, nearby, specify) {
+    const c = me && (nearby || map.getZoom() < 9) ? { lat: me.lat, lon: me.lon } : { lat: map.getCenter().lat, lon: map.getCenter().lng };
+    let post;
+    if (nearby) post = { keyWord: q, level: 15, queryRadius: 3000, pointLonlat: c.lon.toFixed(6) + ',' + c.lat.toFixed(6), queryType: 3, start: 0, count: 20, show: 2 };
     else {
-      if (hadLocation) map?.setView([33.7, 111.5], 4);
-      say('地点链接无效，请重新选点。');
+      const b = map.getBounds(), pad = 0.4;   // 至少搜周围几十公里：地图放得很大时也能搜到附近城区的
+      const w = Math.min(b.getWest(), c.lon - pad), s = Math.min(b.getSouth(), c.lat - pad), e = Math.max(b.getEast(), c.lon + pad), n = Math.max(b.getNorth(), c.lat + pad);
+      post = { keyWord: q, level: 12, mapBound: [w, s, e, n].map((x) => x.toFixed(5)).join(','), queryType: 1, start: 0, count: 20, show: 2 };
+      if (specify) post.specify = specify;
+    }
+    const r = await fetchT(tdtUrl('v2/search', post, 'query'), 9000);
+    if (!r.ok) throw new Error('天地图搜索 ' + r.status);
+    const d = await r.json();
+    if (d && d.status && d.status.infocode != null && String(d.status.infocode) !== '1000') throw new Error(String(d.status.cndesc || '天地图搜索出错'));
+    const pois = (d.pois || []).map((p) => { const ll = lonlat(p.lonlat); return ll && { name: p.name, addr: [p.address, p.typeName].filter(Boolean).join(' · ') || [p.province, p.city, p.county].filter((x, i, a) => x && a.indexOf(x) === i).join(''), lat: ll.lat, lon: ll.lon }; }).filter(validPlace);
+    if (pois.length) return { places: pois };
+    if (d.area) { const ll = lonlat(d.area.lonlat); if (ll) return { places: [{ name: d.area.name, addr: '行政区', lat: ll.lat, lon: ll.lon, zoom: 11 }] }; }
+    const admins = (d.statistics && (d.statistics.priorityCitys || d.statistics.allAdmins)) || [];
+    const cities = admins.map((a) => { const ll = lonlat(a.lonlat); return ll && { name: a.name || a.adminName, addr: (a.count || '') + ' 个结果', lat: ll.lat, lon: ll.lon, admin: a.adminCode || a.adminCodes || '' }; }).filter(validPlace);
+    return { places: [], cities };
+  }
+  async function photonSearch(q) {
+    const c = me || { lat: map.getCenter().lat, lon: map.getCenter().lng };
+    const r = await fetchT(PHOTON + '?q=' + encodeURIComponent(q) + '&limit=15&lat=' + c.lat.toFixed(5) + '&lon=' + c.lon.toFixed(5), 9000);
+    if (!r.ok) throw new Error('Photon ' + r.status);
+    const d = await r.json();
+    return (d.features || []).map((f) => {
+      const p = f.properties || {}, co = (f.geometry || {}).coordinates || [];
+      const addr = [p.state, p.city, p.district, p.street, p.housenumber].filter((x, i, a) => x && a.indexOf(x) === i && x !== p.name).join('');
+      return { name: p.name || p.street || q, addr, lat: +co[1], lon: +co[0] };
+    }).filter(validPlace);
+  }
+  let searchSeq = 0;
+  async function runSearch(q, nearby, specify) {
+    q = String(q || '').trim(); if (!q) return;
+    $('q').value = nearby ? '' : q; $('q-clear').hidden = !$('q').value;
+    $('q').blur();
+    const seq = ++searchSeq;
+    $('list-title').textContent = nearby ? '附近的' + q : '“' + q + '”';
+    $('list-note').textContent = '正在找…'; $('list').innerHTML = '';
+    show('list');
+    let out = { places: [] }, src = '', err = '';
+    if (TDT && !tdtDown) {
+      try { out = await tdtSearch(q, nearby, specify); src = '天地图'; } catch (e) { if (e && (e.name === 'TypeError' || e.name === 'AbortError')) tdtDown = true; err = String(e && e.message || e); }
+    }
+    if (seq !== searchSeq) return;
+    if (!out.places.length && !(out.cities && out.cities.length)) {
+      try { out = { places: await photonSearch(q) }; src = 'Photon（开源地图数据）'; } catch (e) { err = err || String(e && e.message || e); }
+    }
+    if (seq !== searchSeq) return;
+    lastSrc = src;
+    results = out.places;
+    if (me) results.sort((a, b) => (nearby ? dist(me, a) - dist(me, b) : 0));
+    if (!results.length && out.cities && out.cities.length) {
+      $('list-note').textContent = '附近没找到，这些地方有：';
+      $('list').innerHTML = out.cities.map((p, i) => rowHTML(p, i, 'data-city')).join('');
+      $('list').onclick = (e) => { const b = e.target.closest('[data-city]'); if (!b) return; const c = out.cities[+b.dataset.city]; map.setView([c.lat, c.lon], 11); runSearch(q, false, c.admin); };
+      return;
+    }
+    $('list').onclick = onListClick;
+    renderList();
+    if (!results.length) $('list-note').textContent = err ? '搜不到：' + (tdtDown ? '天地图问不通，' : '') + '网络不太好，稍后再试' : '没找到，换个说法试试';
+  }
+  function renderList() {
+    $('list-note').textContent = results.length ? '共 ' + results.length + ' 个' + (lastSrc ? ' · 来自' + lastSrc : '') : $('list-note').textContent;
+    $('list').innerHTML = results.map((p, i) => rowHTML(p, i, 'data-res')).join('');
+    resLayer.clearLayers();
+    const pts = [];
+    results.forEach((p, i) => { pts.push([p.lat, p.lon]); L.marker([p.lat, p.lon], { icon: pinIcon('res') }).on('click', () => openPlace(results[i])).addTo(resLayer); });
+    if (pts.length) fitTo(pts.concat(me ? [[me.lat, me.lon]] : []).slice(0, pts.length + (me && pts.length < 6 ? 1 : 0)), 16);
+  }
+  function onListClick(e) { const b = e.target.closest('[data-res]'); if (b) openPlace(results[+b.dataset.res]); }
+  $('search').onsubmit = (e) => { e.preventDefault(); runSearch($('q').value, false); };
+  $('q').oninput = () => { $('q-clear').hidden = !$('q').value; };
+  $('q-clear').onclick = () => { $('q').value = ''; $('q-clear').hidden = true; $('q').focus(); };
+  function fitTo(pts, maxZoom) {
+    if (!pts.length) return;
+    const top = (viewNow === 'nav' ? $('guide') : $('top')).getBoundingClientRect().bottom + 16;
+    const bottom = $('sheet').getBoundingClientRect().height + 16;
+    if (pts.length === 1) { map.setView(pts[0], Math.min(maxZoom || 16, 17)); return; }
+    map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [30, top], paddingBottomRight: [60, bottom], maxZoom: maxZoom || 17 });
+  }
+
+  /* ---------- 地点卡片 ---------- */
+  let place = null;
+  function hasTarget() { return !!place || !!nav || (trip && trip.destination) || viewNow !== 'home'; }
+  function openPlace(p, push = true) {
+    if (!validPlace(p)) return;
+    place = p;
+    following = false; $('locate').classList.remove('on');
+    selLayer.clearLayers();
+    L.marker([p.lat, p.lon], { icon: pinIcon('sel'), zIndexOffset: 500 }).addTo(selLayer);
+    $('p-name').textContent = p.name || '地图上的点';
+    $('p-addr').textContent = [p.addr, me ? '离你 ' + fmtDist(dist(me, p)) : ''].filter(Boolean).join(' · ');
+    const acts = ['<button class="solid" id="p-route">路线</button>'];
+    if (PEER && bridge && bridge.sendPlace) acts.push('<button id="p-send">发给' + esc(PEER_NAME) + '</button>');
+    if (PEER && bridge && bridge.rpc && !(trip && trip.active)) acts.push('<button id="p-invite">邀请' + esc(PEER_NAME) + '一起去</button>');
+    if (PEER && trip && trip.active) acts.push('<button id="p-invite">改成在这里会合</button>');
+    $('p-acts').innerHTML = acts.join('');
+    show('place', push);
+    map.setView([p.lat, p.lon], Math.max(map.getZoom(), p.zoom || 16), { animate: true });
+    setTimeout(() => { const pt = map.latLngToContainerPoint([p.lat, p.lon]), H = map.getSize().y, sh = $('sheet').getBoundingClientRect().height; if (pt.y > H - sh - 30) map.panBy([0, pt.y - (H - sh) / 2], { animate: true }); }, 60);
+    if (!p.name && !p.temp) reverseName(p);
+  }
+  $('p-acts').onclick = (e) => {
+    const id = e.target.closest('button') && e.target.closest('button').id;
+    if (id === 'p-route') { remember(place); openRoute(place); }
+    if (id === 'p-send') { try { bridge.sendPlace({ name: place.name || '地图上的点', addr: place.addr || '', lat: place.lat, lon: place.lon }); banner('已发到和' + esc(PEER_NAME) + '的聊天'); } catch (err) { banner('没发出去：' + esc(err && err.message || '请重试')); } }
+    if (id === 'p-invite') { remember(place); invite(place); }
+  };
+  map.on('contextmenu', (e) => {   // 长按地图（电脑上点右键）：选这个点
+    if (nav) return;
+    const p = { name: '', addr: '正在查地址…', lat: e.latlng.lat, lon: e.latlng.wrap().lng };
+    openPlace(p);
+  });
+  async function reverseName(p) {
+    let name = '', addr = '';
+    if (TDT && !tdtDown) {
+      try {
+        const r = await fetchT(tdtUrl('geocoder', { lon: +p.lon.toFixed(6), lat: +p.lat.toFixed(6), ver: 1 }, 'geocode'), 8000);
+        const d = await r.json(); const res = d && d.result;
+        if (res) { const ac = res.addressComponent || {}; name = ac.poi || ac.road || ''; addr = res.formatted_address || ''; }
+      } catch (e) { if (e && e.name === 'TypeError') tdtDown = true; }
+    }
+    if (!name && !addr) {
+      try {
+        const r = await fetchT(PHOTON_REV + '?lat=' + p.lat.toFixed(6) + '&lon=' + p.lon.toFixed(6), 8000);
+        const f = ((await r.json()).features || [])[0];
+        if (f) { const q = f.properties || {}; name = q.name || q.street || ''; addr = [q.state, q.city, q.district, q.street, q.housenumber].filter((x, i, a) => x && a.indexOf(x) === i).join(''); }
+      } catch { /* 查不到就叫“地图上的点” */ }
+    }
+    if (place !== p) return;
+    p.name = name || '地图上的点'; p.addr = addr || (p.lat.toFixed(5) + ', ' + p.lon.toFixed(5));
+    if (viewNow === 'place') { $('p-name').textContent = p.name; $('p-addr').textContent = [p.addr, me ? '离你 ' + fmtDist(dist(me, p)) : ''].filter(Boolean).join(' · '); }
+  }
+
+  /* ---------- 路线 ---------- */
+  let mode = ['car', 'bike', 'foot'].includes(LSget('ch2navMode', '')) ? LSget('ch2navMode', '') : 'car';
+  let plan = null, routeSeq = 0;
+  const MODE_NAME = { car: '驾车', bike: '骑行', foot: '步行' };
+  async function getRoute(from, to, m) {
+    const url = ROUTER + 'routed-' + m + '/route/v1/driving/' + from.lon.toFixed(6) + ',' + from.lat.toFixed(6) + ';' + to.lon.toFixed(6) + ',' + to.lat.toFixed(6) + '?overview=full&geometries=geojson&steps=true';
+    const r = await fetchT(url, 15000);
+    const d = await r.json().catch(() => null);
+    if (!d || d.code !== 'Ok' || !d.routes || !d.routes[0]) throw new Error(d && d.code === 'NoRoute' ? '这两个地方之间找不到能走的路' : d && d.code === 'NoSegment' ? '起点或终点附近没有路' : '路线服务出错了（' + r.status + '）');
+    const rt = d.routes[0];
+    const line = (rt.geometry.coordinates || []).map((c) => [c[1], c[0]]);
+    const steps = ((rt.legs[0] || {}).steps || []).map((s) => ({ d: s.distance, t: s.duration, name: s.name || s.ref || '', type: s.maneuver.type, mod: s.maneuver.modifier || '', exit: s.maneuver.exit, loc: [s.maneuver.location[1], s.maneuver.location[0]] }));
+    return prepRoute({ dist: rt.distance, time: rt.duration, line, steps, mode: m, to, from });
+  }
+  function prepRoute(rt) {   // 算好每个点、每个转弯离起点多远，导航时用
+    const cum = [0];
+    for (let i = 1; i < rt.line.length; i++) cum.push(cum[i - 1] + dist({ lat: rt.line[i - 1][0], lon: rt.line[i - 1][1] }, { lat: rt.line[i][0], lon: rt.line[i][1] }));
+    rt.cum = cum; rt.len = cum[cum.length - 1] || rt.dist || 0;
+    let acc = 0; const sum = rt.steps.reduce((n, s) => n + s.d, 0) || 1, k = rt.len / sum;
+    rt.steps.forEach((s) => { s.at = acc * k; acc += s.d; });
+    return rt;
+  }
+  async function openRoute(to) {
+    $('r-to').textContent = '到 ' + (to.name || '地图上的点');
+    paintModes();
+    show('route');
+    await planRoute();
+  }
+  function paintModes() { $('modes').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode)); }
+  $('modes').onclick = (e) => { const b = e.target.closest('[data-mode]'); if (!b || b.dataset.mode === mode) return; mode = b.dataset.mode; LSset('ch2navMode', mode); paintModes(); planRoute(); };
+  async function planRoute() {
+    routeLayer.clearLayers(); plan = null;
+    const to = place, seq = ++routeSeq;
+    $('go').disabled = true; $('r-steps').hidden = true;
+    if (!me) {
+      $('r-sum').innerHTML = '<p class="note">' + (gpsDenied ? '没有定位权限，算不了从你这里出发的路线。在手机设置里允许使用位置后再试。' : '正在定位你的位置…') + '</p>';
+      startGPS();
+      if (!gpsDenied) { const wait = Date.now(); while (!me && Date.now() - wait < 15000 && seq === routeSeq) await new Promise((r) => setTimeout(r, 300)); }
+      if (!me || seq !== routeSeq) { if (seq === routeSeq && !me) $('r-sum').innerHTML = '<p class="note">定位不到你的位置，到开阔的地方再试。</p>'; return; }
+    }
+    $('r-sum').innerHTML = '<p class="note">正在算' + MODE_NAME[mode] + '路线…</p>';
+    try {
+      const rt = await getRoute({ lat: me.lat, lon: me.lon }, to, mode);
+      if (seq !== routeSeq || viewNow !== 'route') return;
+      plan = rt;
+      drawRoute(rt);
+      $('r-sum').innerHTML = '<div class="big">' + fmtTime(rt.time) + '<small>' + fmtDist(rt.dist) + ' · ' + clock(Date.now() + rt.time * 1000) + ' 到</small></div>' +
+        (mode === 'car' ? '<p class="note">时间按不堵车算。</p>' : '');
+      $('r-steps').innerHTML = stepsHTML(rt);
+      $('go').disabled = false;
+      fitTo(rt.line.concat([[me.lat, me.lon]]), 17);
+    } catch (e) {
+      if (seq !== routeSeq) return;
+      $('r-sum').innerHTML = '<p class="note">' + esc(e && e.name === 'AbortError' ? '路线服务太慢了，稍后再试' : e && e.name === 'TypeError' ? '连不上路线服务，看看网络' : (e && e.message) || '算不出路线') + '</p>' + '<div class="acts"><button id="r-retry">重试</button></div>';
+      $('r-retry').onclick = planRoute;
     }
   }
-  window.addEventListener('hashchange', openSharedPlace);
-  openSharedPlace();
-  render();
-  layers.get(history.state?.chatterNavLayer)?.show();
-  poll();
+  function drawRoute(rt) {
+    routeLayer.clearLayers();
+    const css = getComputedStyle(document.documentElement);
+    L.polyline(rt.line, { color: css.getPropertyValue('--route-edge').trim() || '#0b4fae', weight: 9, opacity: 0.9, interactive: false }).addTo(routeLayer);
+    L.polyline(rt.line, { color: css.getPropertyValue('--route').trim() || '#1a73e8', weight: 6, opacity: 1, interactive: false }).addTo(routeLayer);
+    L.marker([rt.to.lat, rt.to.lon], { icon: pinIcon('dest'), interactive: false }).addTo(routeLayer);
+  }
+  function clearRoute() { routeLayer.clearLayers(); plan = null; ++routeSeq; }
+  $('r-steps-btn').onclick = () => { $('r-steps').hidden = !$('r-steps').hidden; sheetSize(); };
+
+  /* 转弯说明（中文） */
+  const DIR = { left: '左转', right: '右转', 'slight left': '向左前方行驶', 'slight right': '向右前方行驶', 'sharp left': '向左后方转', 'sharp right': '向右后方转', straight: '直行', uturn: '掉头' };
+  function stepText(s) {
+    const road = s.name ? '进入' + s.name : '', along = s.name ? '，沿' + s.name : '';
+    switch (s.type) {
+      case 'arrive': return '到达目的地';
+      case 'depart': return '出发' + along;
+      case 'roundabout': case 'rotary': return '进入环岛' + (s.exit ? '，从第' + s.exit + '个出口出' : '') + (s.name ? '，到' + s.name : '');
+      case 'exit roundabout': case 'exit rotary': return '出环岛' + (road ? '，' + road : '');
+      case 'merge': return '并入' + (s.name || '主路');
+      case 'on ramp': return (DIR[s.mod] && s.mod !== 'straight' ? DIR[s.mod] + '，' : '') + '上匝道' + (s.name ? '，往' + s.name : '');
+      case 'off ramp': return (DIR[s.mod] && s.mod !== 'straight' ? DIR[s.mod] + '，' : '') + '走出口下' + (s.name ? '，往' + s.name : '');
+      case 'fork': return (/left/.test(s.mod) ? '靠左走' : /right/.test(s.mod) ? '靠右走' : '走中间') + (s.name ? '，往' + s.name : '');
+      case 'end of road': return '走到路的尽头' + (DIR[s.mod] || '转弯') + (road ? '，' + road : '');
+      case 'continue': case 'new name': return (s.mod && s.mod !== 'straight' && DIR[s.mod] ? DIR[s.mod] : '继续直行') + along;
+      default: return (DIR[s.mod] || '继续') + (road ? (DIR[s.mod] ? road : '，' + road) : '');
+    }
+  }
+  const IC = {
+    straight: '<path d="M12 20V5"/><path d="m6 11 6-6 6 6"/>',
+    left: '<path d="M17 20v-7a4 4 0 0 0-4-4H6"/><path d="m10 5-4 4 4 4"/>',
+    right: '<path d="M7 20v-7a4 4 0 0 1 4-4h7"/><path d="m14 5 4 4-4 4"/>',
+    'slight left': '<path d="M15 20v-6L8 7"/><path d="M8 13V7h6"/>',
+    'slight right': '<path d="M9 20v-6l7-7"/><path d="M10 7h6v6"/>',
+    uturn: '<path d="M16 20V9a4 4 0 0 0-8 0v4"/><path d="m4 10 4 4 4-4"/>',
+    arrive: '<path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/>',
+    round: '<circle cx="12" cy="9" r="4"/><path d="M12 13v8"/>'
+  };
+  function stepIcon(s) {
+    const k = s.type === 'arrive' ? 'arrive' : /roundabout|rotary/.test(s.type) && !/exit/.test(s.type) ? 'round' : s.mod === 'sharp left' ? 'left' : s.mod === 'sharp right' ? 'right' : IC[s.mod] ? s.mod : 'straight';
+    return '<svg viewBox="0 0 24 24">' + IC[k] + '</svg>';
+  }
+  function stepsHTML(rt) { return rt.steps.map((s, i) => '<li data-i="' + i + '">' + stepIcon(s) + '<span>' + esc(stepText(s)) + '</span>' + (s.d > 0 && s.type !== 'arrive' ? '<span class="d">' + fmtDist(s.d) + '</span>' : '') + '</li>').join(''); }
+
+  /* ---------- 跟着走的导航 ---------- */
+  let nav = null, voiceOn = LSget('ch2navVoice', true) !== false, wake = null;
+  const SAY_AT = { car: [600, 200, 40], bike: [150, 40], foot: [80, 20] };
+  function speak(text, force) {
+    if ((!voiceOn && !force) || !('speechSynthesis' in window) || !text) return;
+    if (bridge && bridge.beforeSound && bridge.beforeSound() === false) return;   // 在打电话、录语音：不出声（顺便先停 Chatter 的音乐）
+    try {
+      const u = new SpeechSynthesisUtterance(text); u.lang = 'zh-CN'; u.rate = 1.05;
+      const v = speechSynthesis.getVoices().find((x) => /^zh(-|_)?(CN|Hans)/i.test(x.lang)) || speechSynthesis.getVoices().find((x) => /^zh/i.test(x.lang));
+      if (v) u.voice = v;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch { /* 这台设备不会说话 */ }
+  }
+  async function keepAwake(on) {
+    try {
+      if (on && !wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+      else if (!on && wake) { const w = wake; wake = null; await w.release(); }
+    } catch { /* 不支持就算了：页面上有提示 */ }
+  }
+  function startNav(rt) {
+    if (!rt) return;
+    nav = { rt, seg: 0, off: 0, offSince: 0, said: new Set(), rerouting: false, lastReroute: 0, head: null, along: 0, arrived: false, started: Date.now() };
+    following = true; $('locate').classList.add('on');
+    $('n-list').innerHTML = stepsHTML(rt); $('n-list').hidden = true;
+    $('n-voice').textContent = voiceOn ? '声音开' : '声音关'; $('n-voice').setAttribute('aria-pressed', String(voiceOn));
+    show('nav');
+    keepAwake(true);
+    $('n-note').textContent = navigator.wakeLock ? '导航时屏幕保持常亮。锁屏或切到别的 App，导航会暂停。' : '导航时别锁屏：锁屏或切到别的 App，网页拿不到位置，导航会暂停。';
+    speak('开始导航，全程' + sayDist(rt.dist) + '，大约' + fmtTime(rt.time).replace(/ /g, '') + '。', true);   // 这一下是在按钮里：手机才肯让网页说话
+    if (me) followNav(false, rt.mode === 'car' ? 17 : 18); else map.setZoom(rt.mode === 'car' ? 17 : 18);   // 放大和移到我这里一步做完（两个动画叠在一起时后一个会被吞掉）
+    navTick();
+  }
+  function stopNav(msg) {
+    nav = null; keepAwake(false);
+    try { speechSynthesis.cancel(); } catch { /* 没关系 */ }
+    if (msg) banner(msg);
+    drawMe();
+  }
+  function project(rt, p, from) {   // 我在路线上的哪儿：离路线多远、已经走了多少
+    const kx = Math.cos(rad(p.lat)) * R * Math.PI / 180, ky = R * Math.PI / 180;
+    const scan = (a, b) => {
+      let best = { d: Infinity, seg: a, along: 0 };
+      for (let i = Math.max(0, a); i < Math.min(rt.line.length - 1, b); i++) {
+        const ax = (rt.line[i][1] - p.lon) * kx, ay = (rt.line[i][0] - p.lat) * ky, bx = (rt.line[i + 1][1] - p.lon) * kx, by = (rt.line[i + 1][0] - p.lat) * ky;
+        const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+        let t = L2 ? -(ax * dx + ay * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+        const x = ax + t * dx, y = ay + t * dy, d = Math.sqrt(x * x + y * y);
+        if (d < best.d) best = { d, seg: i, along: rt.cum[i] + t * (rt.cum[i + 1] - rt.cum[i]) };
+      }
+      return best;
+    };
+    let best = scan(from - 3, from + 80);
+    if (best.d > 50) { const all = scan(0, rt.line.length); if (all.d < best.d) best = all; }
+    return best;
+  }
+  function navTick() {
+    if (!nav || !me) return;
+    const rt = nav.rt, pr = project(rt, me, nav.seg);
+    const limit = Math.max(35, Math.min(me.acc || 30, 80) + 15);
+    if (pr.d > limit) { if (!nav.off) nav.offSince = Date.now(); nav.off++; } else { nav.off = 0; nav.seg = pr.seg; if (!(pr.along < nav.along && nav.along - pr.along < 30)) nav.along = pr.along; }   // 定位抖动往回跳一点不算倒退
+    if (nav.off >= 3 && Date.now() - nav.offSince > 5000 && !nav.rerouting && Date.now() - nav.lastReroute > 12000) reroute();
+    const left = Math.max(0, rt.len - nav.along), toDest = dist(me, rt.to);
+    const seg = rt.line[Math.min(nav.seg + 1, rt.line.length - 1)], segA = rt.line[nav.seg];
+    nav.head = me.head != null ? me.head : bearing({ lat: segA[0], lon: segA[1] }, { lat: seg[0], lon: seg[1] });
+    if (!nav.arrived && (left < 20 || toDest < Math.max(20, Math.min(me.acc || 20, 40)))) { arrive(); return; }
+    let k = rt.steps.findIndex((s, i) => i > 0 && s.at > nav.along + 3);
+    if (k < 0) k = rt.steps.length - 1;
+    const s = rt.steps[k], to = Math.max(0, (k === rt.steps.length - 1 ? rt.len : s.at) - nav.along);
+    $('g-ic').innerHTML = stepIcon(s);
+    $('g-dist').textContent = fmtDist(to);
+    $('g-text').textContent = nav.off >= 2 ? '好像走错了，正在核对…' : stepText(s);
+    const remain = rt.time * (left / (rt.len || 1));
+    $('n-left').textContent = fmtTime(remain) + ' · ' + fmtDist(left);
+    $('n-eta').textContent = clock(Date.now() + remain * 1000) + ' 到达';
+    $('n-list').querySelectorAll('li').forEach((li) => { const i = +li.dataset.i; li.classList.toggle('done', i < k); li.classList.toggle('cur', i === k); });
+    const ths = SAY_AT[rt.mode] || SAY_AT.car;
+    for (let j = 0; j < ths.length; j++) {
+      const th = ths[j], key = k + ':' + j;
+      if (to <= th && !nav.said.has(key) && (j === ths.length - 1 || to > ths[j + 1])) {
+        ths.forEach((_, jj) => { if (jj < j) nav.said.add(k + ':' + jj); });
+        nav.said.add(key);
+        speak(j === ths.length - 1 ? stepText(s) : '前方' + sayDist(to) + '，' + stepText(s));
+        break;
+      }
+    }
+    drawMe();
+    if (following) followNav(true);
+  }
+  function followNav(animate, zoom) {   // 我在屏幕上转向提示和底部卡片之间的正中间
+    if (!me) return;
+    const z = zoom || map.getZoom(), pt = map.project([me.lat, me.lon], z);
+    const gh = $('guide').getBoundingClientRect().height, sh = $('sheet').getBoundingClientRect().height;
+    map.setView(map.unproject(pt.add([0, (sh - gh) / 2]), z), z, { animate });
+  }
+  async function reroute() {
+    if (!nav || nav.rerouting) return;
+    nav.rerouting = true; nav.lastReroute = Date.now();
+    $('g-text').textContent = '正在重新规划路线…';
+    const cur = nav;
+    try {
+      const rt = await getRoute({ lat: me.lat, lon: me.lon }, cur.rt.to, cur.rt.mode);
+      if (nav !== cur) return;
+      nav.rt = rt; nav.seg = 0; nav.along = 0; nav.off = 0; nav.said = new Set();
+      drawRoute(rt);
+      $('n-list').innerHTML = stepsHTML(rt);
+      speak('已重新规划路线');
+    } catch {
+      if (nav === cur) banner('网络不好，暂时没法重新算路线，按原路线继续');
+    } finally { if (nav === cur) nav.rerouting = false; }
+    navTick();
+  }
+  function arrive() {
+    nav.arrived = true;
+    $('g-ic').innerHTML = stepIcon({ type: 'arrive' });
+    $('g-dist').textContent = '已到达';
+    $('g-text').textContent = nav.rt.to.name || '目的地';
+    speak('已到达目的地，导航结束');
+    const to = nav.rt.to;
+    setTimeout(() => { if (nav && nav.arrived) { stopNav(''); clearRoute(); show('home', false); openPlace(to); banner('已到达' + esc(to.name || '目的地')); } }, 4000);
+  }
+  $('go').onclick = () => { if (plan) startNav(plan); };
+  $('n-end').onclick = () => { const to = nav && nav.rt.to; stopNav('导航已结束'); clearRoute(); show('home', false); if (to) openPlace(to); };
+  $('n-voice').onclick = () => { voiceOn = !voiceOn; LSset('ch2navVoice', voiceOn); $('n-voice').textContent = voiceOn ? '声音开' : '声音关'; $('n-voice').setAttribute('aria-pressed', String(voiceOn)); if (voiceOn) speak('声音已打开', true); else try { speechSynthesis.cancel(); } catch { /* 没关系 */ } };
+  $('n-steps').onclick = () => { $('n-list').hidden = !$('n-list').hidden; sheetSize(); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && nav) keepAwake(true); if (!document.hidden) tripPoll(); });
+
+  /* ---------- 和好友一起去（只有从私聊打开时） ---------- */
+  let trip = null, tripBusy = false, tripSeq = 0, lastShare = 0, offset = 0, peerMarker = null, tripTimer = 0;
+  const serverNow = () => Date.now() + offset;
+  const tripOn = !!(PEER && bridge && bridge.rpc);
+  function uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    const h = Array.from(b, (n) => n.toString(16).padStart(2, '0')).join('');
+    return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20)].join('-');
+  }
+  function tripErr(e) {
+    const missing = e && ['PGRST202', '42883'].includes(e.code);
+    banner(missing ? '一起导航还没开通' : '一起导航：' + esc(String((e && e.message) || '网络不好，请重试').slice(0, 80)));
+  }
+  async function tripCall(op, id, value) {
+    if (!tripOn || tripBusy) return;
+    tripBusy = true; renderTrip();
+    const seq = ++tripSeq;
+    try {
+      const v = await bridge.rpc(op, id, value);
+      if (seq === tripSeq) setTrip(v || null);
+      if (op === 'invite' && v) bridge.notify && bridge.notify(v.id);
+    } catch (e) { tripErr(e); } finally { tripBusy = false; renderTrip(); }
+  }
+  async function tripPoll() {
+    if (!tripOn || tripBusy || document.hidden) return;
+    const seq = tripSeq;
+    try { const v = await bridge.rpc('read', (trip && trip.id) || bridge.invitation || null); if (seq === tripSeq && !tripBusy) setTrip(v || null); } catch (e) { if (!trip) return; tripErr(e); }
+  }
+  function setTrip(v) {
+    const prev = trip;
+    trip = v && v.id ? v : null;
+    if (trip && Number.isFinite(trip.serverTime)) offset = trip.serverTime - Date.now();
+    bridge && bridge.remember && bridge.remember(trip);
+    if (prev && !trip) banner('和' + esc(PEER_NAME) + '的同行已结束，位置不再共享');
+    if (trip && trip.active && prev && prev.id === trip.id && !prev.active) {
+      banner(esc(PEER_NAME) + '接受了，你们能互相看到位置了'); speak(PEER_NAME + '接受了一起导航');
+      if (!nav) setTimeout(() => { const pts = [[trip.destination.lat, trip.destination.lon]]; if (me) pts.push([me.lat, me.lon]); if (trip.peerFix) pts.push([trip.peerFix.lat, trip.peerFix.lon]); fitTo(pts, 17); }, 50);   // 一眼看到我、对方、会合点
+    }
+    if (trip && prev && prev.id === trip.id && prev.destination && trip.destination && (prev.destination.lat !== trip.destination.lat || prev.destination.lon !== trip.destination.lon)) banner('会合点改成了「' + esc(trip.destination.name || '新地点') + '」');
+    if (trip && trip.proposal && trip.proposal.by !== ME && !(prev && prev.proposal && prev.proposal.key === trip.proposal.key)) speak(PEER_NAME + '提议换个地方会合');
+    if (trip && (!prev || prev.id !== trip.id) && trip.destination && !nav && viewNow === 'home') map.setView([trip.destination.lat, trip.destination.lon], 15);
+    drawTrip(); renderTrip();
+    if (trip && trip.active) tripShare(true);
+  }
+  function drawTrip() {
+    tripLayer.clearLayers(); peerMarker = null;
+    if (!trip) return;
+    const d = trip.destination;
+    if (validPlace(d)) L.marker([d.lat, d.lon], { icon: pinIcon('dest'), zIndexOffset: 400 }).bindTooltip('会合：' + (d.name || ''), { direction: 'top', offset: [0, -36] }).addTo(tripLayer);
+    const pp = trip.proposal;
+    if (pp && validPlace(pp)) L.marker([pp.lat, pp.lon], { icon: pinIcon('res'), zIndexOffset: 300 }).bindTooltip('提议的会合点：' + (pp.name || ''), { direction: 'top', offset: [0, -36] }).addTo(tripLayer);
+    const f = trip.peerFix;
+    if (trip.active && f && validPlace(f) && serverNow() - f.time < 90000) {
+      peerMarker = L.marker([f.lat, f.lon], { zIndexOffset: 900, icon: L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html: '<div class="peer-dot">' + esc(Array.from(PEER_NAME)[0] || '友') + '</div>' }) }).addTo(tripLayer);
+    }
+  }
+  function renderTrip() {
+    const box = $('trip-box');
+    if (!tripOn) { box.hidden = true; return; }
+    box.hidden = false;
+    const n = esc(PEER_NAME), dn = trip && trip.destination ? '「' + esc(trip.destination.name || '会合点') + '」' : '';
+    let h = '';
+    if (!trip) h = '<b>和' + n + '一起导航</b><p class="note">搜一个地方（或长按地图选点），在地点卡片上点“邀请' + n + '一起去”。对方接受后，你们能互相看到位置，30 分钟后自动停止。</p>';
+    else if (!trip.active && trip.inviter === ME) h = '<b>已邀请' + n + '一起去' + dn + '</b><p class="note">等对方接受。接受后互相看到位置。</p><div class="acts"><button data-trip="end">取消邀请</button></div>';
+    else if (!trip.active) h = '<b>' + n + '邀请你一起去' + dn + '</b><p class="note">接受后你们能互相看到位置（30 分钟，到期自动停止）。</p><div class="acts"><button class="solid" data-trip="accept">接受</button><button data-trip="end">不去了</button></div>';
+    else {
+      const f = trip.peerFix, fresh = f && serverNow() - f.time < 90000;
+      const mins = Math.max(0, Math.round((Date.parse(trip.expires) - serverNow()) / 60000));
+      const far = fresh && me ? n + '离你 ' + fmtDist(dist(me, f)) : fresh ? n + '的位置在地图上' : n + '还没共享到位置';
+      const ext = trip.renewBy && trip.renewBy !== ME ? '<button data-trip="accept_more">同意多 30 分钟</button>' : trip.renewBy === ME ? '<button disabled>已请求多 30 分钟</button>' : trip.canExtend ? '<button data-trip="offer_more">多 30 分钟</button>' : '';
+      h = '<b>正在和' + n + '一起去' + dn + '</b><p class="note">' + far + (fresh ? '（' + Math.max(1, Math.round((serverNow() - f.time) / 1000)) + ' 秒前）' : '') + ' · 还剩 ' + mins + ' 分钟</p>' +
+        (me ? '' : '<p class="note">你的位置还没定到，对方暂时看不到你。</p>') +
+        (trip.proposal && trip.proposal.by !== ME ? '<p class="note">' + n + '提议改在「' + esc(trip.proposal.name || '新地点') + '」会合</p><div class="acts"><button class="solid" data-trip="agree">同意换</button><button data-trip="see">看看在哪</button></div>' : '') +
+        (trip.proposal && trip.proposal.by === ME ? '<p class="note">你提议改在「' + esc(trip.proposal.name || '新地点') + '」会合，等' + n + '同意</p>' : '') +
+        '<div class="acts"><button class="solid" data-trip="go">导航去会合点</button>' + (fresh ? '<button data-trip="peer">看' + n + '在哪</button>' : '') + ext + '<button data-trip="end" class="danger">结束</button></div>';
+    }
+    box.innerHTML = '<div class="trip">' + h + '</div>';
+    box.querySelectorAll('button').forEach((b) => { b.disabled = b.disabled || tripBusy; });
+    if (viewNow === 'nav' && trip && trip.active) { const f = trip.peerFix; $('n-note').textContent = f && me && serverNow() - f.time < 90000 ? PEER_NAME + '离你 ' + fmtDist(dist(me, f)) : '和' + PEER_NAME + '共享位置中'; }
+  }
+  $('trip-box').onclick = (e) => {
+    const b = e.target.closest('[data-trip]'); if (!b || !trip) return;
+    const a = b.dataset.trip;
+    if (a === 'accept') { startGPS(); tripCall('accept', trip.id); }
+    else if (a === 'end') tripCall('end', trip.id);
+    else if (a === 'offer_more') tripCall('offer_more', trip.id);
+    else if (a === 'accept_more') tripCall('accept_more', trip.id, { key: trip.renewKey });
+    else if (a === 'agree' && trip.proposal) tripCall('agree', trip.id, { key: trip.proposal.key });
+    else if (a === 'see' && trip.proposal) { following = false; map.setView([trip.proposal.lat, trip.proposal.lon], 17); }
+    else if (a === 'peer' && trip.peerFix) { following = false; map.setView([trip.peerFix.lat, trip.peerFix.lon], 17); }
+    else if (a === 'go' && trip.destination) { const d = trip.destination; openPlace({ name: d.name, addr: '会合点', lat: d.lat, lon: d.lon }); openRoute(place); }
+  };
+  function invite(p) {
+    if (!tripOn) return;
+    const name = String(p.name || '地图上的点').slice(0, 120);
+    if (trip && trip.active) { tripCall('propose', trip.id, { lat: p.lat, lon: p.lon, name }); banner('已提议在这里会合，等' + esc(PEER_NAME) + '同意'); return; }
+    if (trip && !trip.active && trip.inviter === ME) { banner('已经邀请过了，先等对方回应，或者先取消'); return; }
+    startGPS();
+    tripCall('invite', uuid(), { lat: p.lat, lon: p.lon, name });
+    show('home', false);
+  }
+  async function tripShare(force) {
+    if (!tripOn || !trip || !trip.active || !me || tripBusy) return;
+    if (!force && Date.now() - lastShare < 5000) return;
+    if (Date.now() - me.t > 60000) return;   // 太旧的定位不发
+    lastShare = Date.now();
+    const id = trip.id;
+    try {
+      const v = await bridge.rpc('fix', id, { lat: me.lat, lon: me.lon, accuracy: Math.min(100000, Math.max(0, me.acc || 50)), time: Math.round(serverNow() - (Date.now() - me.t)) });
+      if (trip && trip.id === id) setTripQuiet(v);
+    } catch (e) { if (e && /过期/.test(e.message || '')) return; }
+  }
+  function setTripQuiet(v) { if (!v) { setTrip(null); return; } trip = v; if (Number.isFinite(v.serverTime)) offset = v.serverTime - Date.now(); drawTrip(); renderTrip(); }
+  if (tripOn) {
+    tripTimer = setInterval(() => { tripPoll(); if (trip && Date.parse(trip.expires) <= serverNow()) setTrip(null); }, 6000);
+    tripPoll();
+  }
+
+  /* ---------- 地图服务检查 ---------- */
+  function tileUrlOf(set, z) {   // 我所在位置（没有就用地图中间）那一块图的地址
+    if (!set) return '';
+    const c = me ? L.latLng(me.lat, me.lon) : map.getCenter(), p = map.project(c, z).divideBy(256).floor();
+    return L.Util.template(set.url, { s: set.sub[Math.abs(p.x + p.y) % set.sub.length], x: p.x, y: p.y, z });
+  }
+  function imgOk(url, ms) {
+    return new Promise((res) => {
+      if (!url) { res({ ok: false, why: '没有配置' }); return; }
+      const im = new Image(), t0 = Date.now(), tm = setTimeout(() => { im.src = ''; res({ ok: false, why: '超时' }); }, ms || 8000);
+      im.referrerPolicy = 'strict-origin-when-cross-origin';
+      im.onload = () => { clearTimeout(tm); res({ ok: im.naturalWidth > 0, ms: Date.now() - t0 }); };
+      im.onerror = () => { clearTimeout(tm); res({ ok: false, why: '服务器没给图片' }); };
+      im.src = url;
+    });
+  }
+  async function fetchOk(url, check) {
+    const t0 = Date.now();
+    try { const r = await fetchT(url, 9000); const txt = await r.text(); const ok = r.ok && check(txt); return { ok, ms: Date.now() - t0, why: ok ? '' : 'HTTP ' + r.status + ' ' + txt.slice(0, 80) }; }
+    catch (e) { return { ok: false, why: e && e.name === 'AbortError' ? '超时' : '连不上，或者不允许手机直接问（跨域）' }; }
+  }
+  let rawUrl = '';
+  async function openCheck() {
+    $('check').hidden = false; $('check-raw-wrap').hidden = true; $('check-show').hidden = true;
+    const list = $('check-list'), tip = $('check-tip');
+    const items = [
+      ['天地图街道图', () => imgOk(tileUrlOf(sets.street, 15))],
+      ['天地图卫星图', () => imgOk(tileUrlOf(sets.sat, 15))],
+      ['天地图搜地点', () => TDT ? fetchOk(tdtUrl('v2/search', { keyWord: '公园', level: 12, mapBound: '115.4,39.4,117.5,41.1', queryType: 1, start: 0, count: 1 }, 'query'), (t) => /"pois"|"resultType"/.test(t)) : Promise.resolve({ ok: false, why: '没有密钥' })],
+      ['备用卫星图（Esri）', () => imgOk(tileUrlOf(sets.backup, 15))],
+      ['开源地图搜地点（Photon）', () => fetchOk(PHOTON + '?q=park&limit=1', (t) => /features/.test(t))],
+      ['路线（routing.openstreetmap.de）', () => { const c = me || { lat: 39.9087, lon: 116.3975 }; return fetchOk(ROUTER + 'routed-foot/route/v1/driving/' + c.lon.toFixed(5) + ',' + c.lat.toFixed(5) + ';' + (c.lon + 0.003).toFixed(5) + ',' + (c.lat + 0.003).toFixed(5) + '?overview=false', (t) => /"code":"Ok"/.test(t)); }]
+    ];
+    list.innerHTML = items.map(([n]) => '<li><b>' + esc(n) + '</b><span>检查中…</span></li>').join('');
+    tip.textContent = '';
+    const res = await Promise.all(items.map(([, f], i) => f().then((r) => { const li = list.children[i]; li.innerHTML = '<b>' + esc(items[i][0]) + '</b><span class="' + (r.ok ? 'ok">✓ 正常' + (r.ms ? '（' + r.ms + ' 毫秒）' : '') : 'bad">✗ ' + esc(r.why || '不行')) + '</span>'; return r; })));
+    const tdtTile = res[0].ok || res[1].ok;
+    if (!tdtTile && (res[3].ok || res[5].ok)) {
+      tip.innerHTML = '天地图不给图，但别的服务都通，说明是<b>天地图的密钥</b>的问题。最常见的原因：申请密钥时“应用类型”选成了“服务端”（要选<b>浏览器端</b>），或者填了“域名白名单”（先留空）。改好以后不用更新 App，重开导航就行。';
+      rawUrl = tileUrlOf(sets.street, 15); $('check-show').hidden = !rawUrl;
+    } else if (!tdtTile && !res[3].ok) tip.textContent = '地图服务都连不上：手机网络可能有问题，换个网络试试。';
+    else if (!res[2].ok && tdtTile) tip.textContent = '天地图的地图正常，但搜地点不让手机直接问，现在用开源地图数据搜（中文地点会少一些）。';
+    else tip.textContent = '都正常。';
+  }
+  $('check-close').onclick = () => { $('check').hidden = true; $('check-raw').src = 'about:blank'; };
+  $('check-again').onclick = openCheck;
+  $('check-show').onclick = () => { $('check-raw-wrap').hidden = false; $('check-raw').src = rawUrl; };
+
+  /* ---------- 打开时 ---------- */
+  function openFromHash() {
+    if (!location.hash) return false;
+    const q = new URLSearchParams(location.hash.slice(1));
+    const num = (k) => { const v = q.get(k); return v != null && /^[+-]?\d+(\.\d+)?$/.test(v.trim()) ? +v : NaN; };
+    const p = { name: (q.get('name') || '').slice(0, 80), addr: (q.get('addr') || '').slice(0, 120), lat: num('lat'), lon: num('lon') };
+    if (!validPlace(p)) return false;
+    if (!p.name) p.name = '朋友发来的位置';
+    openPlace(p);
+    return true;
+  }
+  addEventListener('hashchange', openFromHash);
+  show('home', false);
+  openFromHash();
+  startGPS();
+  sheetSize();
+
+  function dispose() {
+    stopGPS(); clearInterval(tripTimer); keepAwake(false);
+    try { speechSynthesis.cancel(); } catch { /* 没关系 */ }
+    nav = null;
+  }
+  addEventListener('pagehide', dispose, { once: true });
+  window.stopChatterNavigation = dispose;
+  window.pauseChatterNavigation = () => { try { speechSynthesis.cancel(); } catch { /* 没关系 */ } };   // 来电：先别说话
+  window.__nav = { map, get nav() { return nav; }, get me() { return me; }, get trip() { return trip; }, get kind() { return shown && shown.name; }, sets, runSearch, openPlace, startNav: () => startNav(plan), get plan() { return plan; } };   // 给自动检查用
 })();
