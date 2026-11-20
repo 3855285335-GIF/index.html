@@ -13,7 +13,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261119-3';
+const VER = '20261120-1';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -37,6 +37,8 @@ const CORS: Record<string, string> = {
 const DAY = 86400000, TTL = DAY, ALL = '00000000-0000-0000-0000-000000000000';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const BOT_UA = 'ChatterSearch/1.0 (https://github.com/3855285335-gif/index.html)';
+// 判断原网页能不能在 App 里显示时，用 iPhone 的身份去问：有手机版的网站会把手机版给我们，和用户手机上看到的一致
+const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 const MAX_PAGE = 3 * 1024 * 1024;
 const VID_SITES = ['youtube.com', 'bilibili.com', 'vimeo.com'];
 const CJK = /[\u3400-\u9fff]/;
@@ -234,7 +236,7 @@ const wikiLink = (host: string, title: string) => 'https://' + host.replace('.wi
 async function wiki(q: string) {   // 百科卡片：维基百科的第一条（标题要和搜的词对得上，不然不显示）
   if (q.length > 60) return null;
   const host = wikiHost(q);
-  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrlimit: '1', gsrnamespace: '0', prop: 'extracts|pageimages|info', exintro: '1', explaintext: '1', piprop: 'thumbnail', pithumbsize: '240', inprop: 'url|displaytitle', redirects: '1' });
+  const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrlimit: '1', gsrnamespace: '0', prop: 'extracts|pageimages|info|pageprops', ppprop: 'wikibase_item', exintro: '1', explaintext: '1', piprop: 'thumbnail', pithumbsize: '240', inprop: 'url|displaytitle', redirects: '1' });
   if (CJK.test(q)) p.set('variant', 'zh-cn');
   const j = await getJson('https://' + host + '/w/api.php?' + p, { 'Api-User-Agent': BOT_UA, 'Accept-Language': CJK.test(q) ? 'zh-CN' : 'en' }, 5000);
   const pg = j && j.query && j.query.pages && j.query.pages[0];
@@ -243,7 +245,18 @@ async function wiki(q: string) {   // 百科卡片：维基百科的第一条（
   const ex = String(pg.extract || '').trim();
   if (ex.length < 20 || /may refer to|可以指|可能指|可指/.test(ex.slice(0, 80))) return null;
   if (!loose(title, q) && !loose(pg.title, q)) return null;
-  return { t: title.slice(0, 120), s: clip(ex), img: link(pg.thumbnail && pg.thumbnail.source), u: wikiLink(host, pg.title), src: '维基百科' };
+  const site = await officialSite(pg.pageprops && pg.pageprops.wikibase_item);
+  return { t: title.slice(0, 120), s: clip(ex), img: link(pg.thumbnail && pg.thumbnail.source), u: wikiLink(host, pg.title), src: '维基百科', site };
+}
+async function officialSite(qid: Any) {   // 维基数据里这个条目的“官方网站”：搜索结果把它排第一
+  if (!/^Q\d{1,12}$/.test(String(qid || ''))) return '';
+  try {
+    const j = await getJson('https://www.wikidata.org/w/api.php?' + new URLSearchParams({ action: 'wbgetclaims', entity: String(qid), property: 'P856', format: 'json' }), { 'Api-User-Agent': BOT_UA }, 3500);
+    const cl = ((j && j.claims && j.claims.P856) || []).filter((c: Any) => c && c.rank !== 'deprecated');
+    cl.sort((a: Any, b: Any) => (b.rank === 'preferred' ? 1 : 0) - (a.rank === 'preferred' ? 1 : 0));
+    for (const c of cl) { const v = link(c.mainsnak && c.mainsnak.datavalue && c.mainsnak.datavalue.value); if (v) return v; }
+  } catch { /* 查不到就算了 */ }
+  return '';
 }
 async function commons(q: string) {   // 维基共享资源的图片：免费、清晰、能标出处
   const p = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', generator: 'search', gsrsearch: q, gsrnamespace: '6', gsrlimit: '20', prop: 'imageinfo', iiprop: 'url|size|mime', iiurlwidth: '480' });
@@ -457,7 +470,7 @@ function httpErr(st: number, arch: boolean, to: string) {
   if (st >= 500) return new Oops('down', '这个网站自己出错了（' + st + '）', to);
   return new Oops('fetch', '这个网页取不到（' + st + '）', to);
 }
-async function grab(u0: URL, ms = 9000, arch = false, headOnly = false) {   // headOnly：只要最后那个网页的响应头（看能不能嵌进 App），不读正文
+async function grab(u0: URL, ms = 9000, arch = false, headOnly = false, sniff = 0, ua = UA) {   // headOnly：只要最后那个网页的响应头（看能不能嵌进 App）；sniff：顺便读开头这么多字节（看有没有做手机适配），其余不读
   let cur = u0;
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), ms);
   try {
@@ -465,7 +478,7 @@ async function grab(u0: URL, ms = 9000, arch = false, headOnly = false) {   // h
       await checkPublicDns(cur, controller.signal);
       const r = await fetch(cur.href, {
         redirect: 'manual', signal: controller.signal,
-        headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' }
+        headers: { 'User-Agent': ua, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8' }
       });
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location'); try { await r.body?.cancel(); } catch { /* 不要正文 */ }
@@ -479,7 +492,11 @@ async function grab(u0: URL, ms = 9000, arch = false, headOnly = false) {   // h
         throw httpErr(r.status, arch, cur.href);
       }
       const ct = (r.headers.get('content-type') || '').toLowerCase();
-      if (headOnly) { try { await r.body?.cancel(); } catch { /* 不要正文 */ } return { html: '', url: cur.href, headers: r.headers, ct }; }
+      if (headOnly) {
+        if (sniff > 0 && (!ct || /html/.test(ct))) { try { return { html: decode(await readCapped(r, sniff), ct), url: cur.href, headers: r.headers, ct }; } catch { /* 读不到就当不知道 */ } }
+        try { await r.body?.cancel(); } catch { /* 不要正文 */ }
+        return { html: '', url: cur.href, headers: r.headers, ct };
+      }
       if (ct && !/html|xml|text\/plain/.test(ct)) {
         try { await r.body?.cancel(); } catch { /* 不要正文 */ }
         throw new Oops('notHtml', /pdf/.test(ct) ? '这是 PDF 文件，用原网页打开' : '这不是网页（是文件），用原网页打开', cur.href);
@@ -521,13 +538,13 @@ export function frameVerdict(h: Headers, origin: string): { frame: boolean; why?
 }
 async function doFrame(uid: string, b: Any, c: Any, origin: string) {
   const u0 = safeUrl(b.url); if (!u0) return fail('bad', '这个网址不能打开');
-  const key = 'f' + await sha(JSON.stringify([uid, u0.href, origin]));
+  const key = 'f2' + await sha(JSON.stringify([uid, u0.href, origin]));
   const hit = await cget(key);
   if (hit) return json({ ok: true, cached: true, ...hit });
   if (await bump(uid, 'f', c.read_per_user_day) < 0) return fail('limit', '今天打开网页太多次了，明天再来');
   const tries = u0.protocol === 'http:' ? [new URL(u0.href.replace(/^http:/, 'https:')), u0] : [u0];   // App 是 https，http 网页嵌不进来：先试 https 版
   let got: Any = null, err: Any = null;
-  for (const t of tries) { try { got = await grab(t, 7000, false, true); break; } catch (e) { err = e; } }
+  for (const t of tries) { try { got = await grab(t, 7000, false, true, 65536, MOBILE_UA); break; } catch (e) { err = e; } }
   if (!got) {   // 服务器这边打不开：不一定代表手机打不开（有些网站不让国外服务器访问），交给手机决定
     if (err instanceof Oops) return json({ ok: true, frame: null, code: err.code, msg: err.message, url: u0.href });
     throw err;
@@ -536,9 +553,16 @@ async function doFrame(uid: string, b: Any, c: Any, origin: string) {
   let v = frameVerdict(got.headers, origin);
   if (fin.protocol !== 'https:') v = { frame: false, why: 'http' };
   else if (got.ct && !/html|xml|text\/plain/.test(got.ct)) v = { frame: false, why: /pdf/.test(got.ct) ? 'pdf' : 'file' };
-  const out = { frame: v.frame, why: v.why || '', url: fin.href };
+  const out = { frame: v.frame, why: v.why || '', url: fin.href, mobile: mobileReady(got.html) };   // mobile：false = 没做手机适配的电脑版页面，手机上该用 Safari 窗口打开
   bg(cput(key, out));
   return json({ ok: true, cached: false, ...out });
+}
+// 网页开头有 <meta name="viewport" content="width=device-width…"> 就是做了手机适配；读不到正文时不下结论（null）
+export function mobileReady(html: string): boolean | null {
+  if (!html) return null;
+  const metas = html.match(/<meta\b[^>]*>/gi) || [];
+  for (const m of metas) { if (/name\s*=\s*["']?viewport/i.test(m) && /width\s*=\s*device-width|initial-scale\s*=\s*1/i.test(m)) return true; }
+  return /<\/head>|<body/i.test(html) ? false : null;   // 整个开头都读到了还没有：电脑版页面
 }
 // 互联网档案馆经常对同一批服务器限流：太忙或出错时等 1.5 秒自动再试一次
 async function grabArch(u: URL) {
@@ -827,5 +851,5 @@ export async function handle(req: Request): Promise<Response> {
     return fail('server', '服务器出错了，请稍后重试');
   }
 }
-export const __test = { tidy, dropTitle, frameVerdict, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; } };
+export const __test = { tidy, dropTitle, frameVerdict, mobileReady, reset() { CFG = null; CFG_AT = 0; DBK = {}; DBK_AT = 0; DNS_OK = null; } };
 if (!env('CHATTER_TEST')) Deno.serve(handle);

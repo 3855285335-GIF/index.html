@@ -75,6 +75,7 @@ window.__chWS = {
     if (b.type === 'deep') return DATA.DEEP;
     if (b.type === 'images') return DATA.IMGS;
     if (b.type === 'videos') return DATA.VIDS;
+    if (b.q === '测官网') return Object.assign({}, DATA.WEB, { q: b.q, wiki: { t: '测试条目', s: '测试用的百科卡片，带官网。', site: 'https://arxiv.org/' } });
     if (/^[\\x00-\\x7f]+$/.test(b.q)) return Object.assign({}, DATA.EN, { q: b.q });
     return b.src === 'tavily' ? Object.assign({}, DATA.TAV, { q: b.q }) : Object.assign({}, DATA.WEB, { q: b.q });
   },
@@ -121,9 +122,9 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('[data-act="tgl-clean"]');
       await pg.click('.ws-r a.t >> text=如何通俗地解释量子计算？');
       await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err');
-      ok(!(await pg.evaluate(() => __opened.length)) && /用浏览器打开（能用你的登录）/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '知乎这类要登录的：不再自动跳出 App；不让在 App 里显示时给出“用浏览器打开（能用你的登录）”');
+      ok(!(await pg.evaluate(() => __opened.length)) && /用 Safari 窗口打开/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '知乎这类要登录的（在 Safari 浏览器里用时）：不自动跳出去，给出“用 Safari 窗口打开”');
       await pg.click('.ws-v.on .ws-err [data-act="web-ext"]');
-      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com'), '点了才用浏览器打开');
+      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com'), '点了才打开');
       await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'res');
       ok(await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Exa'), '结果页标出这次是用 Exa 搜的');
       await pg.click('[data-act="swap"]'); await pg.waitForSelector('.ws-r a.t >> text=量子计算科普合集');
@@ -273,10 +274,11 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       // ---------- 在 App 里看原网页 ----------
       await pg.evaluate(() => { window.__frame = b => /frame\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url } : /unsure\.test/.test(b.url) ? { ok: true, frame: null, code: 'login', url: b.url } : /nowhere\.test/.test(b.url) ? { ok: true, frame: null, code: 'nohost', url: b.url } : { ok: true, frame: false, why: 'xfo', url: b.url }; });
       await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(80);
-      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-open"]');
-      ok(await pg.$eval('.ws-sw[data-act="tgl-open"]', e => e.getAttribute('aria-checked')) === 'false', '规则页有“先显示原网页”的开关（这组检查一开始设成了先简洁阅读）');
-      await pg.click('.ws-sw[data-act="tgl-open"]');
-      ok(await pg.$eval('.ws-sw[data-act="tgl-open"]', e => e.getAttribute('aria-checked')) === 'true', '打开“先显示原网页”');
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="pref-open"]');
+      ok(await pg.$eval('[data-act="pref-open"] .ws-val', e => e.textContent) === '简洁阅读', '规则页有“打开网页的方式”（这组检查一开始设成了先简洁阅读）');
+      await pg.click('[data-act="pref-open"]'); ok(/自动（推荐）/.test((await pg.evaluate(() => __acts[0].label))), '三种方式：自动（推荐）、总是 Safari 窗口、先简洁阅读');
+      await pg.evaluate(() => __acts[0].fn()); await pg.waitForTimeout(80);
+      ok(await pg.$eval('[data-act="pref-open"] .ws-val', e => e.textContent) === '自动', '改成“自动”');
       await pg.goBack(); await pg.waitForTimeout(120);
       const depth0 = await pg.evaluate(() => history.state && history.state.ws), op0 = await pg.evaluate(() => window.__opened.length);
       await typeGo('https://frame.test/a');
@@ -299,29 +301,64 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(!(await pg.evaluate(() => ChatterSearch.isOpen())) || (await pg.evaluate(() => history.state && history.state.ws)) !== depth0, '再返回一次就离开这一页（中间没有要多按几次的空记录）');
       await pg.evaluate(() => ChatterSearch.open()); await pg.waitForTimeout(80);
       await typeGo('https://frame.test/a'); await pg.waitForSelector('.ws-v.on iframe');
-      await pg.click('.ws-v.on [data-act="web-read"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
+      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => /简洁阅读/.test(x.label)).fn()); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
       ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://frame.test/a', '原网页里点“简洁阅读”：换成简洁阅读（能翻译、调字号）');
       await pg.goBack(); await pg.waitForTimeout(200);
       ok(await on() === 'home', '从简洁阅读返回：回到进来之前那一页');
-      await typeGo('https://deny.test/x'); await pg.waitForFunction(() => /不允许在别的 App 里显示原网页，已换成简洁阅读/.test((document.querySelector('[data-r="read"]') || {}).textContent || ''));
-      ok(await on() === 'read' && (await pg.evaluate(() => window.__opened.length)) === op0, '不让嵌的网站：自动换成简洁阅读，说清原因（不跳出 App）');
-      await pg.click('[data-r="rdsc"] [data-act="rd-ext"]');
-      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://deny.test/x', '说明旁边可以“用浏览器打开原网页”');
-      await pg.click('.ws-v.on .ws-bar [data-act="rd-orig"]');
-      ok((await pg.evaluate(() => window.__opened.length)) === op0 + 2 && await on() === 'read', '已经知道不让嵌：“原网页”按钮直接用浏览器打开，不会来回跳');
-      await pg.goBack(); await pg.waitForTimeout(150);
+      const rd0 = await pg.evaluate(() => __log.filter(x => x.op === 'read').length);
+      await typeGo('https://deny.test/x'); await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err');
+      ok(await on() === 'web' && /不允许在别的 App 里显示/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)) && (await pg.evaluate(() => __log.filter(x => x.op === 'read').length)) === rd0, '不让嵌的网站：不再自动变成文字（不取简洁版），说清原因');
+      await pg.click('.ws-v.on .ws-err [data-act="web-ext"]');
+      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://deny.test/x', '点“用 Safari 窗口打开”：打开原网站');
+      await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(300);
       await typeGo('https://x.com/someone'); await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err');
-      ok(/用浏览器打开（能用你的登录）/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '要登录的网站（推特等）不让嵌：给出“用浏览器打开（能用你的登录）”');
+      ok(/用 Safari 窗口打开/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '要登录的网站（推特等）不让嵌：给出“用 Safari 窗口打开”');
       await shot('14-不让嵌');
       await pg.click('.ws-v.on .ws-err [data-act="web-ext"]');
-      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://x.com/someone', '点了才用浏览器打开');
+      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://x.com/someone', '点了才打开');
       await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(300);
       await typeGo('https://nowhere.test/'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
       ok(true, '找不到网站：交给简洁阅读那边按原因提示');
       await pg.goBack(); await pg.waitForTimeout(150);
       await typeGo('https://unsure.test/p'); await pg.waitForSelector('.ws-v.on iframe'); await pg.waitForSelector('[data-r="wtip"]:not([hidden])');
-      ok(/没能确认[\s\S]*换简洁阅读/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示，下面提示“看不到内容？换简洁阅读”');
+      ok(/没能确认[\s\S]*用 Safari 窗口打开/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示，下面提示“看不到内容？用 Safari 窗口打开”');
       ok(!errs.length, '原网页功能没有报错 ' + errs.join(' | '));
+
+      // ---------- 20261120c：从主屏幕打开时什么都能打开（Safari 窗口）、视频网站、电脑版网页、官网排第一 ----------
+      await pg.evaluate(() => {
+        window.__nav = [];
+        Object.defineProperty(navigator, 'standalone', { configurable: true, get: () => true });
+        document.addEventListener('click', e => { const a = e.target && e.target.closest && e.target.closest('a[href]'); if (a && !a.closest('#ws')) { e.preventDefault(); __nav.push(a.href); } }, true);
+        window.__frame = b => /desk\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url, mobile: false } : /frame\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url, mobile: true } : { ok: true, frame: false, why: 'xfo', url: b.url };
+      });
+      await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(80);
+      const nav = () => pg.evaluate(() => __nav.slice());
+      const rd1 = await pg.evaluate(() => __log.filter(x => x.op === 'read').length);
+      await typeGo('https://deny.test/y'); await pg.waitForFunction(() => __nav.length >= 1, null, { timeout: 5000 }).catch(() => {});
+      await pg.waitForTimeout(500);
+      ok((await nav()).slice(-1)[0] === 'https://deny.test/y' && await on() === 'home' && (await pg.evaluate(() => __log.filter(x => x.op === 'read').length)) === rd1, '主屏幕版：不让嵌的大网站直接用 Safari 窗口打开原网站，退回原来那页，不变成文字');
+      await typeGo('https://desk.test/p'); await pg.waitForFunction(() => __nav.length >= 2, null, { timeout: 5000 }).catch(() => {});
+      await pg.waitForTimeout(500);
+      ok((await nav()).slice(-1)[0] === 'https://desk.test/p' && await on() === 'home', '没做手机适配的电脑版网页：也用 Safari 窗口打开（会自动缩放）→ ' + JSON.stringify(await nav()) + ' ' + await on() + ' ' + JSON.stringify(await pg.evaluate(() => [ChatterSearch._w.stack.map(x => x.v), __log.filter(x => x.op === 'frame').slice(-2)])));
+      const fr0 = await pg.evaluate(() => __log.filter(x => x.op === 'frame').length);
+      await typeGo('https://www.iqiyi.com/v_abc.html'); await pg.waitForTimeout(300);
+      ok((await nav()).slice(-1)[0] === 'https://www.iqiyi.com/v_abc.html' && (await pg.evaluate(() => __log.filter(x => x.op === 'frame').length)) === fr0, '视频网站：直接打开原网站（不先去问能不能嵌，更不变成文字）');
+      const nv0 = (await nav()).length;
+      await typeGo('https://frame.test/a'); await pg.waitForSelector('.ws-v.on iframe');
+      ok((await nav()).length === nv0, '能嵌、又做了手机适配的网页：照样在 Chatter 里显示');
+      await pg.click('.ws-v.on [data-act="web-sheet"]'); await pg.waitForTimeout(500);
+      ok((await nav()).slice(-1)[0] === 'https://frame.test/a' && await on() === 'home', '原网页顶上的按钮：随时换成 Safari 窗口打开');
+      ok(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsSeen:u1') || '[]').some(x => /desk\.test/.test(x.u) && x.m === 'web')), '用 Safari 窗口打开的也记进浏览记录');
+      // 官网排第一
+      await typeGo('哔哩哔哩'); await pg.waitForSelector('.ws-r a.t');
+      const off1 = await pg.$eval('.ws-r', e => ({ t: e.textContent, h: (e.querySelector('a.t') || {}).href || '' }));
+      ok(/官网/.test(off1.t) && /bilibili\.com/.test(off1.h), '搜“哔哩哔哩”：结果里没有官网时，第一条补上官网并标“官网” → ' + off1.h);
+      await shot('20-官网排第一');
+      await typeGo('测官网'); await pg.waitForSelector('.ws-r a.t');
+      const off2 = await pg.$eval('.ws-r', e => ({ t: e.textContent, h: (e.querySelector('a.t') || {}).href || '' }));
+      ok(/官网/.test(off2.t) && /arxiv\.org/.test(off2.h), '维基数据给了官网：结果里那条官网提到第一并标“官网”（排在置顶前面）→ ' + off2.h);
+      await pg.evaluate(() => Object.defineProperty(navigator, 'standalone', { configurable: true, get: () => false }));
+      ok(!errs.length, '“什么都能打开”和官网排第一没有报错 ' + errs.join(' | '));
     }
     // ---------- 20261120a：收藏、浏览记录、输入联想、常去的网站、查找、朗读、阅读位置、手机里保存的文章 ----------
     {
@@ -394,7 +431,9 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
         ok(await pg.$$eval('[data-r="hist"] .ws-row', a => a.length) === n0 - 1, '浏览记录能一条条删');
       }
       await pg.goBack(); await pg.waitForTimeout(150);
-      // 简洁阅读里查找
+      // 简洁阅读里查找（这几项要文章先用简洁阅读打开：在规则里选“先用简洁阅读”）
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="pref-open"]'); await pg.click('[data-act="pref-open"]');
+      await pg.evaluate(() => __acts.find(x => /先用简洁阅读/.test(x.label)).fn()); await pg.waitForTimeout(80); await pg.goBack(); await pg.waitForTimeout(150);
       await openArt();
       await pg.click('.ws-tool [data-act="rd-find"]'); await pg.fill('[data-r="find"] input', '量子');
       await pg.waitForFunction(() => /^\d+\/\d+$/.test(document.querySelector('[data-r="fcount"]').textContent));
@@ -459,6 +498,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
         await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]');
         await pg.waitForFunction(() => /\d+ 篇/.test(document.querySelector('[data-r="artn"]').textContent));
         ok(true, '规则页：显示手机里存了几篇文章，可以清空');
+        await pg.click('[data-act="pref-open"]'); await pg.evaluate(() => __acts[0].fn()); await pg.waitForTimeout(80);   // 打开方式改回“自动”
         await pg.click('.ws-sw[data-act="tgl-nohist"]');
         const h0 = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsSeen:u1') || '[]').length), q0 = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsHist:u1') || '[]').length);
         await pg.goBack(); await pg.waitForTimeout(150);

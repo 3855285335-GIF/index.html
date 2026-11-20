@@ -1,0 +1,15 @@
+# 检查两个服务器函数在线上是不是装好了、版本号对不对（只调用不用登录的“ping”，不花任何额度）
+# 用法：GitHub 仓库 → Actions（操作）→ check-functions → Run workflow（运行工作流）
+name: check-functions
+on:
+  workflow_dispatch: {}
+permissions: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 搜索函数 chatter-search
+        run: curl -sS -m 30 -X POST https://uaoiqbxptnbrvkzjwguc.supabase.co/functions/v1/chatter-search -H 'content-type: application/json' -d '{"op":"ping","probe":"dns"}'; echo
+      - name: 推送函数 chatter-push
+        run: curl -sS -m 30 -X POST https://uaoiqbxptnbrvkzjwguc.supabase.co/functions/v1/chatter-push -H 'content-type: application/json' -d '{"op":"ping"}'; echo

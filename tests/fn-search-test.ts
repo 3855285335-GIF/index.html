@@ -13,6 +13,7 @@ const UID = '11111111-1111-4111-8111-111111111111', TOK = 'aaa.bbb.ccc', ALL = '
 const UID2 = '22222222-2222-4222-8222-222222222222', TOK2 = 'ddd.eee.fff';
 let CONF: Any = {}, DBKEYS: Any[] = [], sessionAlive = true;
 const cache = new Map<string, Any>(), counts = new Map<string, number>();
+let lastFrameUA = '';
 let rpcMissing = false, siteCalls: string[] = [], exaBodies: Any[] = [], tavBodies: Any[] = [];
 const calls: Record<string, number> = {};
 let exaMode = 'ok', tavMode = 'ok', deepDown = '', glmMode = 'ok', flakyOnce = false;
@@ -91,9 +92,13 @@ globalThis.fetch = async (input: Any, init: Any = {}) => {
     if (deepDown.includes('wiki')) return J({}, 503);
     if (u.searchParams.get('gsrlimit') === '6') { ok(u.searchParams.get('prop') === 'extracts|info' && u.searchParams.get('variant') === 'zh-cn', '深挖·维基百科：用“搜索 + 简体摘要”的取法'); return J({ query: { pages: [{ title: '量子比特', index: 2, extract: '量子比特是……' }, { title: '量子計算', displaytitle: '量子计算', index: 1, extract: '量子计算是一种……', touched: '2026-09-01T00:00:00Z' }] } }); }
     const q = u.searchParams.get('gsrsearch');
-    if (q === '量子计算') return J({ query: { pages: [{ title: '量子計算', displaytitle: '量子计算', extract: '量子计算是一种遵循量子力学规律调控量子信息单元进行计算的新型计算模式。它和经典计算不同。第三句话。第四句话很长' + '很长'.repeat(200), fullurl: 'https://zh.wikipedia.org/wiki/%E9%87%8F', thumbnail: { source: 'https://upload.wikimedia.org/a.png' } }] } });
+    if (q === '量子计算') return J({ query: { pages: [{ pageprops: { wikibase_item: 'Q12345' }, title: '量子計算', displaytitle: '量子计算', extract: '量子计算是一种遵循量子力学规律调控量子信息单元进行计算的新型计算模式。它和经典计算不同。第三句话。第四句话很长' + '很长'.repeat(200), fullurl: 'https://zh.wikipedia.org/wiki/%E9%87%8F', thumbnail: { source: 'https://upload.wikimedia.org/a.png' } }] } });
     return J({ query: { pages: [{ title: '完全无关', extract: '这一条和搜的词没关系，不应该显示成卡片。'.repeat(3) }] } });
   }
+  if (u.host === 'www.wikidata.org') { hitc('wikidata'); ok(u.searchParams.get('property') === 'P856' && u.searchParams.get('entity') === 'Q12345', '官网：向维基数据要这个条目的“官方网站”（P856）');
+    return J({ claims: { P856: [{ rank: 'deprecated', mainsnak: { datavalue: { value: 'https://old.example.org/' } } }, { rank: 'normal', mainsnak: { datavalue: { value: 'https://quantum.example.org/' } } }] } }); }
+  if (u.host === 'mobile-ok.example.com' || u.host === 'desktop-only.example.com') { hitc('frame-site'); lastFrameUA = H.get('user-agent') || '';
+    return new Response(u.host.startsWith('mobile') ? '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>M</title></head><body>手机版</body></html>' : '<!doctype html><html><head><meta charset="utf-8"><title>D</title></head><body><table width="980">电脑版</table></body></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }); }
   if (u.host === 'commons.wikimedia.org') { hitc('commons'); return J({ query: { pages: [{ title: 'File:Aurora borealis.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/a.jpg', thumburl: 'https://upload.wikimedia.org/thumb/a.jpg', width: 4000, height: 3000, mime: 'image/jpeg', descriptionurl: 'https://commons.wikimedia.org/wiki/File:A.jpg' }] }, { title: 'File:Doc.pdf', imageinfo: [{ url: 'https://upload.wikimedia.org/d.pdf', mime: 'application/pdf' }] }] } }); }
   if (u.host === 'archive.org' && u.pathname === '/advancedsearch.php') {
     hitc('archive'); if (deepDown.includes('archive')) return J({}, 503);
@@ -209,6 +214,7 @@ const eb = exaBodies[exaBodies.length - 1];
 ok(eb.type === 'lite' && eb.numResults === 10 && eb.contents && eb.startPublishedDate && Date.now() - Date.parse(eb.startPublishedDate) > 6 * 86400000, 'Exa 请求：简版、10 条、带摘要、“一周内”换成起始日期');
 ok(r.j.items[0].s === '2025-01-02 来源：维基_百科 量子计算是…… … 第二句' && r.j.items[0].d === '2025-01-02', '摘要去掉开头重复的标题和转义符号、日期整理好了 → ' + r.j.items[0].s);
 ok(r.j.wiki && r.j.wiki.t === '量子计算' && r.j.wiki.s.length <= 290 && r.j.wiki.u.includes('zh.m.wikipedia.org'), '百科卡片：标题对得上才显示、摘要截短、链到手机版');
+ok(r.j.wiki && r.j.wiki.site === 'https://quantum.example.org/', '官网：百科卡片带上维基数据里的官方网站（跳过已作废的旧网址）→ ' + (r.j.wiki && r.j.wiki.site));
 ok(r.j.used === 1 && r.j.left === undefined, '记下 Exa 本月用了 1 次；默认不限次数，所以不报还剩几次');
 await settle();
 const e1 = calls.exa;
@@ -492,6 +498,12 @@ x = await fr('https://redir.example.com/');
 ok(x.j.frame === null && x.j.code === 'bad', '跳到内网地址：拒绝（不能拿来探内网）');
 x = await fr('http://127.0.0.1/');
 ok(!x.j.ok && x.j.code === 'bad', '本机地址：拒绝');
+x = await fr('https://mobile-ok.example.com/');
+ok(x.j.frame === true && x.j.mobile === true && /iPhone/.test(lastFrameUA), '做了手机适配的网页：mobile = true（用 iPhone 的身份去问）');
+x = await fr('https://desktop-only.example.com/');
+ok(x.j.frame === true && x.j.mobile === false, '没做手机适配的电脑版网页：mobile = false（手机上换 Safari 窗口打开）');
+const mr = __test.mobileReady;
+ok(mr('<meta content="width=device-width" name="viewport">') === true && mr('<html><head><title>x</title></head>') === false && mr('x'.repeat(100)) === null && mr('') === null, '手机适配判断：属性顺序不同也认得；读到页头还没有就是电脑版；读不到不下结论');
 const fs0 = calls['frame-site'] || 0;
 x = await fr('https://fr-deny.example.com/page');
 ok(x.j.cached === true && (calls['frame-site'] || 0) === fs0, '同一个网址再问：用缓存，不再去取');

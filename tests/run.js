@@ -548,9 +548,9 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
     ok(/隐藏了 1 条营销号/.test(ws.textContent) && ws.querySelector('.ws-kg') && /词条/.test(ws.querySelector('.ws-kg').textContent), '营销号提示或百科卡片没显示');
     const rows = Array.from(ws.querySelectorAll('.ws-r'));
     click(env, rows[3]); await sleep(80);
-    ok(!opened.length && on() === 'web' && /用浏览器打开（能用你的登录）/.test(ws.querySelector('.ws-v.on').textContent), '要登录的网站：不该自动跳出 App，不让嵌时应该给出“用浏览器打开”：' + on() + ' ' + opened[0]);
+    ok(!opened.length && on() === 'web' && /用 Safari 窗口打开/.test(ws.querySelector('.ws-v.on').textContent), '要登录的网站（在 Safari 浏览器里用时）：不该自动跳出去，不让嵌时应该给出“用 Safari 窗口打开”：' + on() + ' ' + opened[0]);
     click(env, ws.querySelector('.ws-v.on [data-act="web-ext"]')); await sleep(20);
-    ok(opened[0] === 'https://x.com/a/status/1', '点“用浏览器打开”没打开：' + opened[0]);
+    ok(opened[0] === 'https://x.com/a/status/1', '点“用 Safari 窗口打开”没打开：' + opened[0]);
     H.back(); await sleep(120);
     ok(on() === 'res' && H.state.ws === 2, '从原网页那一层返回没回到结果页：' + on());
     click(env, ws.querySelectorAll('.ws-r')[2]); await sleep(150);   // 返回结果页时列表重画过：重新取
@@ -701,6 +701,23 @@ test('快速关闭并重开同一聊天：旧请求、旧媒体预览不能覆�
     await Promise.all([pending, first]);
     ok(env.T.S.msgs.map(m => m.id).join() === uid(71), '旧回包污染重开的聊天');
     ok(db.messages.length === 1 && !env.$('ipv-sheet').classList.contains('active'), '关闭后的附件仍然发出');
+  } finally { env.close(); }
+});
+
+test('清空聊天记录：服务器上会话时间比最后一条消息晚一点，同步以后旧的那句话也不会再冒出来', async () => {
+  const t = Date.now();
+  const env = makeEnv({ db: baseDb(t) });
+  try {
+    await env.login(); await sleep(200);
+    const shown = () => Array.from(env.$('conv-list').querySelectorAll('.conv-item')).some(e => e.dataset.key === 'bob::me');
+    ok(shown(), '（准备）和 bob 的会话在消息列表里');
+    env.T.clearConv('bob::me'); env.T.renderList();
+    ok(!shown(), '清空以后会话从列表里拿掉');
+    const c = conv(env, 'bob::me'); c.last_ts = iso(t - 200); c.last_body = '删除前的话';   // 服务器同步回来：时间比本机记的最后一条晚 0.8 秒（但仍在清空之前）
+    env.T.renderList();
+    ok(!shown() && !/删除前的话/.test(env.$('conv-list').textContent), '同步以后旧的那句话没有回来');
+    c.last_ts = iso(Date.now() + 5000); c.last_body = '清空以后的新消息'; env.T.renderList();
+    ok(shown() && /清空以后的新消息/.test(env.$('conv-list').textContent), '清空以后对方发来的新消息照常出现');
   } finally { env.close(); }
 });
 
