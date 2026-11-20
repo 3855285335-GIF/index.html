@@ -58,6 +58,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       if (u.pathname === '/') return J({ data: ['https://api.audius.co'] });
       if (u.pathname === '/v1/tracks/trending') { await new Promise(r => setTimeout(r, 150)); const g = u.searchParams.get('genre'); return J({ data: g ? TREND.slice(0, 4).map(t => Object.assign({}, t, { id: t.id + g.replace(/\W/g, ''), title: g + ' · ' + t.title })) : TREND }); }
       if (u.pathname === '/v1/tracks/search') { const off = +u.searchParams.get('offset') || 0, q = u.searchParams.get('query'); if (q === '没有') return J({ data: [] }); if (q === '坏了') return rt.fulfill({ status: 500, body: '' });
+        if (q === '后面才有') return J({ data: off >= 150 ? [] : Array.from({ length: 30 }, (_, i) => TR(700 + off + i, { title: '后面 ' + (off + i + 1), access: { stream: off >= 120 } })) });   // 前 4 页全不能播，第 5 页才有
         if (q === '少量') return J({ data: off >= 90 ? [] : Array.from({ length: 30 }, (_, i) => TR(500 + off + i, { title: '少量 ' + (off + i + 1), access: { stream: i % 5 < 2 } })) });   // 一页 30 条里只有 12 条能播
         return J({ data: off >= 60 ? [] : Array.from({ length: 30 }, (_, i) => TR(100 + off + i, { title: q + ' 第 ' + (off + i + 1) + ' 首' })) }); }
       const m = /^\/v1\/tracks\/([^/]+)\/stream$/.exec(u.pathname);
@@ -224,6 +225,29 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length === 24, null, { timeout: 5000 }).catch(() => {});
       ok(reqs.some(r => /query=%E5%B0%91%E9%87%8F&limit=30&offset=30/.test(r)) && await pg.$$eval('.mu-v.on .mu-row', a => a.length) === 24, '加载更多：按 Audius 给过的条数往后取（offset=30，不是 12），不跳过、不重复');
       await pg.goBack(); await pg.waitForTimeout(150);
+      // GPT 11-20 第二轮的 2 个问题（复测）
+      const L12 = await pg.evaluate(() => Array.from({ length: 12 }, (_, i) => ({ id: 's' + i, t: '随机 ' + i, a: '' })));
+      let okShuffle = true;
+      for (let round = 0; round < 6; round++) {
+        await pg.evaluate(L => { ChatterMusic._play(L, 0); ChatterMusic._m.mode = 'shuffle'; ChatterMusic._m.order = null; ChatterMusic.next(); }, L12); await pg.waitForTimeout(60);
+        const want = await pg.evaluate(r => { const m = ChatterMusic._m; const t = m.q.find(x => x.id !== m.q[m.i].id && x.id === 's' + ((m.i + 5 + r) % 12)) || m.q.find(x => x.id !== m.q[m.i].id); ChatterMusic._next(t); return t.id; }, round);
+        await pg.evaluate(() => ChatterMusic.next()); await pg.waitForTimeout(60);
+        const got = await pg.evaluate(() => ChatterMusic._m.q[ChatterMusic._m.i].id);
+        if (got !== want) okShuffle = false;
+      }
+      const seenAfter = new Set([await pg.evaluate(() => ChatterMusic._m.i)]); for (let k = 0; k < 11; k++) { await pg.evaluate(() => ChatterMusic.next()); seenAfter.add(await pg.evaluate(() => ChatterMusic._m.i)); }
+      ok(okShuffle && seenAfter.size === 12, '【GPT 第二轮①】随机播放时点“下一首播放”：下一首一定是它（试了 6 次）；之后接着随机，每首轮到一次才重复');
+      await pg.evaluate(() => { ChatterMusic._m.mode = 'one'; ChatterMusic._next(ChatterMusic._m.q.find(x => x.id !== ChatterMusic._m.q[ChatterMusic._m.i].id)); window.__nu = ChatterMusic._m.nextUp; });
+      await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.dispatchEvent(new Event('ended')); }); await pg.waitForTimeout(60);
+      ok(await pg.evaluate(() => ChatterMusic._m.q[ChatterMusic._m.i].id === window.__nu && !ChatterMusic._m.nextUp), '单曲循环时点了“下一首播放”：这首放完先放点的那首（只一次）');
+      await pg.evaluate(() => { ChatterMusic._m.mode = 'list'; });
+      await pg.evaluate(() => ChatterMusic.open()); await pg.waitForSelector('.mu-v.on[data-v="home"]');
+      await pg.fill('.mu-v.on input[type="search"]', '后面才有'); await pg.press('.mu-v.on input[type="search"]', 'Enter');
+      await pg.waitForFunction(() => /继续往后找/.test((document.querySelector('.mu-v.on[data-v="list"]') || {}).textContent || ''), null, { timeout: 6000 }).catch(() => {});
+      ok(/前面 120 首都不能直接听/.test(await pg.$eval('.mu-v.on[data-v="list"]', e => e.textContent)) && await pg.$('[data-act="more-res"]'), '【GPT 第二轮②】前 4 页全不能播：不说“没找到”，写清前面 120 首都不能直接听，给“继续往后找”');
+      await pg.click('[data-act="more-res"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on[data-v="list"] .mu-row').length > 0, null, { timeout: 5000 }).catch(() => {});
+      ok(await pg.$$eval('.mu-v.on .mu-row', a => a.length) === 30 && reqs.some(r => /offset=120/.test(r)), '点“继续往后找”：取到第 5 页能听的 30 首');
+      await pg.goBack(); await pg.waitForTimeout(150); await pg.evaluate(() => ChatterMusic.closeNow());
       ok(tt[0] === '“坏的 1”放不出来，换下一首' && tt[1] === '“坏的 2”放不出来，换下一首' && /可能是网络不好/.test(tt[2]) && !(await st()).src.includes('t5'), '放不出来：说一声换下一首；连续 3 首不行就停下说原因（不一直转）→ ' + tt.join(' / '));
     }
     await pg.close();

@@ -316,6 +316,7 @@ function renderList(t) {
   const box = R('list'); let h = '';
   if (!L || (L.loading && !L.items.length)) { h = skel(8); if (!L) loadList(key); }
   else if (L.err && !L.items.length) h = msg('没搜到', L.err, '<button type="button" class="mu-btn pri" data-act="retry" data-k="' + esc(key) + '">重试</button>');
+  else if (!L.items.length && key.indexOf('q:') === 0 && !L.done) h = msg('前面 ' + (L.off || 0) + ' 首都不能直接听', '要付费或关注才能听的歌已经去掉了；后面可能还有', '<button type="button" class="mu-btn pri" data-act="more-res" data-k="' + esc(key) + '"' + (L.more ? ' disabled' : '') + '>' + (L.more ? '正在找…' : '继续往后找') + '</button>');
   else if (!L.items.length) h = key === 'likes' ? msg('还没有喜欢的歌', '听歌时点 ♡ 就会存在这里') : key === 'recent' ? msg('还没听过歌', '') : msg('没找到能直接听的歌', 'Audius 是独立音乐人的曲库，很多大明星的歌没有；换个说法，或者用英文搜');
   else {
     h = '<div style="padding:4px 0 2px">' + rows(L.items, key) + '</div>';
@@ -347,7 +348,7 @@ function ensureAudio() {
 function playAt(list, i, from) {   // 把这串歌作为播放列表，从第 i 首开始放
   if (!list || !list[i]) return;
   const start = Math.max(0, Math.min(i - 100, list.length - 200));   // 播放列表最多 200 首：取所选这首前后的一段（以前只取前 200 首，第 201 首就放不了）
-  M.q = list.slice(start, start + 200); M.i = i - start; M.order = null; M.from = from || '';
+  M.q = list.slice(start, start + 200); M.i = i - start; M.order = null; M.nextUp = null; M.from = from || '';
   startCur(true);
 }
 function startCur(autoplay, keepPos) {   // keepPos：重开 App 后第一次点播放，从上次的位置接着放
@@ -374,11 +375,19 @@ function nextIndex(dir) {
   }
   return (M.i + dir + n) % n;
 }
+function takeNextUp() {   // 用户点过“下一首播放”的那首：不管是随机还是单曲循环，下一首都先放它（只放一次）
+  const id = M.nextUp; M.nextUp = null;
+  const k = id ? M.q.findIndex(x => x.id === id) : -1;
+  if (k < 0) return -1;
+  if (M.order) { const o = M.order.filter(x => x !== k), p = o.indexOf(M.i); o.splice(p + 1, 0, k); M.order = o; }   // 随机的顺序里挪到正在放的后面：之后接着原来的随机，不重复
+  return k;
+}
 function step(dir, auto) {
   if (!M.q.length) return;
   if (dir < 0 && audio && audio.currentTime > 3) { seekTo(0); return; }   // 放了 3 秒以上点“上一首”：先回到这首开头
-  if (auto && M.mode === 'one') { seekTo(0); audio.play().catch(() => { /* 系统不让就停着 */ }); return; }
-  const k = nextIndex(dir); if (k < 0) return;
+  const forced = dir > 0 ? takeNextUp() : -1;
+  if (forced < 0 && auto && M.mode === 'one') { seekTo(0); audio.play().catch(() => { /* 系统不让就停着 */ }); return; }
+  const k = forced >= 0 ? forced : nextIndex(dir); if (k < 0) return;
   M.i = k; startCur(true);
 }
 function onEnded() { step(1, true); }
@@ -420,6 +429,8 @@ function renderNow() {
   if (!t) { box.innerHTML = msg('还没有在放的歌', ''); return; }
   const md = MODES.find(x => x[0] === M.mode) || MODES[0];
   const up = [];
+  const nu = M.nextUp && M.q.find(x => x.id === M.nextUp);
+  if (nu && M.mode === 'shuffle') up.push(nu);
   for (let k = 1; k <= Math.min(8, M.q.length - 1); k++) { const j = M.mode === 'shuffle' ? null : (M.i + k) % M.q.length; if (j != null && M.q[j]) up.push(M.q[j]); }
   box.innerHTML = art(t, 'l', 'mu-big') +
     '<div class="mu-nt"><div class="mu-tx"><div class="mu-rt">' + esc(t.t) + '</div><div class="mu-rs">' + esc(t.a) + '</div></div><button type="button" class="mu-ib mu-like' + (isLiked(t.id) ? ' on' : '') + '" data-act="like" aria-label="喜欢">' + ico(isLiked(t.id) ? I.heartOn : I.heart, 24) + '</button></div>' +
@@ -504,7 +515,7 @@ function playNext(t) {   // 把这首排到正在放的那首后面：先记住�
   if (c.id === t.id) { B.toast('正在放的就是这首'); return; }
   const q = M.q.filter(x => x.id !== t.id), k = q.findIndex(x => x.id === c.id);
   if (k < 0) return;
-  q.splice(k + 1, 0, t); M.q = q.slice(0, 200); M.i = k; M.order = null; saveNow();
+  q.splice(k + 1, 0, t); M.q = q.slice(0, 200); M.i = k; M.order = null; M.nextUp = t.id; saveNow();
   B.toast('下一首放“' + t.t + '”'); show();
 }
 function rowList(from) { return from === 'up' ? M.upList : (listOf(from) || {}).items; }
@@ -528,7 +539,7 @@ function onClick(e) {
     case 'clear': { const f = el.closest('.mu-field'), inp = f.querySelector('input'); inp.value = ''; f.classList.remove('has'); inp.focus(); break; }
     case 'genre': M.genre = el.dataset.g || ''; renderHome(); { const sc = V('home').querySelector('.mu-sc'); if (sc) sc.scrollTop = 0; } break;
     case 'retry': delete M.lists[el.dataset.k]; show(); break;
-    case 'more-res': loadList(el.dataset.k, true); show(); break;
+    case 'more-res': { const L0 = M.lists[el.dataset.k]; if (L0) L0.pages = 0; loadList(el.dataset.k, true); show(); break; }   // 用户自己点的：这次又可以自动多取几页
     case 'likes': go('list', { key: 'likes' }); break;
     case 'recent': go('list', { key: 'recent' }); break;
     case 'row': { const L = rowList(el.dataset.from), i = +el.dataset.i, t = L && L[i]; if (!t) break;
@@ -551,7 +562,7 @@ function onClick(e) {
 function resetAccount() {
   acct++;
   if (audio) { try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) { /* 没关系 */ } }
-  M.q = []; M.i = -1; M.order = null; M.lists = {}; M.restored = false; M.genre = ''; M.upList = []; M.resumeAt = 0;
+  M.q = []; M.i = -1; M.order = null; M.nextUp = null; M.lists = {}; M.restored = false; M.genre = ''; M.upList = []; M.resumeAt = 0;
   close();
   if (root) { root.remove(); root = null; }   // 页面整个拿掉、下次重建：搜索框、列表里不会留着上一个账号的东西
   if (mini) { mini.remove(); mini = null; }
