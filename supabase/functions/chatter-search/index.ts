@@ -14,7 +14,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261120-2';
+const VER = '20261121-1';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -831,6 +831,44 @@ async function doTranslate(uid: string, b: Any, c: Any) {
   return json({ ok: true, cached: false, items: out, failed: bad.length, why });
 }
 
+/* ---------- 自检：天地图（只读，返回状态码和前几百个字，密钥打码；10 分钟内只真查一次） ---------- */
+let MAPP: Any = null, MAPP_AT = 0;
+async function probeMap() {
+  if (MAPP && Date.now() - MAPP_AT < 600000) return { cached: true, ...MAPP };
+  const out: Any = {};
+  const r = await tfetch(SB_URL + '/rest/v1/app_config?key=eq.navigation&select=value', { headers: dbh() }, 6000);
+  const rows = await r.json().catch(() => null);
+  const tiles = (Array.isArray(rows) && rows[0]?.value?.tiles) || [];
+  const tk = (/[?&]tk=([0-9a-f]{16,64})/i.exec(String(tiles[0]?.url || '')) || [])[1] || '';
+  out.cfg = { layers: Array.isArray(tiles) ? tiles.length : 0, tk: !!tk };
+  if (!tk) { MAPP = out; MAPP_AT = Date.now(); return out; }
+  const hide = (x: string) => x.split(tk).join('…');
+  const REF = 'https://3855285335-gif.github.io/', ORG = 'https://3855285335-gif.github.io';
+  const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+  const xy = (lat: number, lon: number, z: number) => { const n = 2 ** z, la = lat * Math.PI / 180; return [Math.floor((lon + 180) / 360 * n), Math.floor((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n)]; };
+  const tile = (L: string, z: number) => { const [x, y] = xy(39.9087, 116.3975, z); return `https://t${z % 8}.tianditu.gov.cn/${L}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${L}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}&tk=${tk}`; };
+  const api = (path: string, post: Any, type: string) => `https://api.tianditu.gov.cn/${path}?postStr=${encodeURIComponent(JSON.stringify(post))}${type ? '&type=' + type : ''}&tk=${tk}`;
+  const one = async (name: string, url: string, ref: boolean) => {
+    try {
+      const h: Record<string, string> = { 'User-Agent': UA };
+      if (ref) { h.Referer = REF; h.Origin = ORG; }
+      const res = await tfetch(url, { headers: h, redirect: 'manual' }, 9000);
+      const ct = res.headers.get('content-type') || '', buf = new Uint8Array(await res.arrayBuffer());
+      out[name] = { s: res.status, ct: ct.slice(0, 60), n: buf.length, acao: res.headers.get('access-control-allow-origin'), cache: res.headers.get('cache-control'), body: /image/.test(ct) ? undefined : hide(new TextDecoder().decode(buf.slice(0, 700))) };
+    } catch (e) { out[name] = { err: String((e as Any)?.message || e).slice(0, 160) }; }
+  };
+  await Promise.all([
+    one('tile15_ref', tile('vec', 15), true), one('tile15_noref', tile('vec', 15), false), one('tile8_ref', tile('vec', 8), true),
+    one('tile18_ref', tile('vec', 18), true), one('img15_ref', tile('img', 15), true), one('cva15_ref', tile('cva', 15), true),
+    one('search', api('v2/search', { keyWord: '天安门', level: 12, mapBound: '115.4,39.4,117.5,41.1', queryType: 1, start: 0, count: 3, show: 2 }, 'query'), true),
+    one('near', api('v2/search', { keyWord: '咖啡', level: 15, queryRadius: 2000, pointLonlat: '116.3975,39.9087', queryType: 3, start: 0, count: 3, show: 2 }, 'query'), true),
+    one('drive', api('drive', { orig: '116.3975,39.9087', dest: '116.3786,39.8651', style: '0' }, 'search'), true),
+    one('geo', api('geocoder', { lon: 116.3975, lat: 39.9087, ver: 1 }, 'geocode'), true)
+  ]);
+  MAPP = out; MAPP_AT = Date.now();
+  return out;
+}
+
 /* ---------- 入口 ---------- */
 export async function handle(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -844,6 +882,7 @@ export async function handle(req: Request): Promise<Response> {
       try { const rd = (Deno as Any).resolveDns; out.dnsApi = typeof rd !== 'function' ? 'missing' : (await rd('example.com', 'A')).length ? 'works' : 'empty'; } catch (e) { out.dnsApi = 'error:' + String((e as Any)?.name || e).slice(0, 60); }   // 自测：连一个按规定永远不存在的 .invalid 域名，确认“找不到网站”认得出来（固定地址，不接受外部传入）
       try { await grab(new URL('https://chatter-probe-' + Date.now() + '.invalid/'), 5000); out.dns = 'resolved?'; } catch (e) { out.dns = e instanceof Oops ? e.code : 'error'; out.dnsMsg = String((e as Any)?.message || e).slice(0, 120); }
     }
+    if (b.probe === 'map') { try { out.map = await probeMap(); } catch (e) { out.map = { err: String((e as Any)?.message || e).slice(0, 160) }; } }
     return json(out);
   }
   let uid: string | null = null; try { uid = await uidOf(req); } catch { uid = null; }
