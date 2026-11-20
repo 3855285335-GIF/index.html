@@ -1,0 +1,92 @@
+name: check-map
+# 手动运行：在 GitHub 的服务器上实测天地图（图块、搜地点、算路线）和 B 站（搜索、播放器能不能嵌入）的真实返回。
+# 天地图密钥从数据库的公开配置 app_config.navigation 里读（和手机读的是同一个），日志里打码，不存任何东西。
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    env:
+      SB: https://uaoiqbxptnbrvkzjwguc.supabase.co
+      ANON: sb_publishable_2FQ9q01lGWiDntr7VUrzcQ_SkgIo8uf
+      REF: https://3855285335-gif.github.io/
+      ORIGIN: https://3855285335-gif.github.io
+    steps:
+      - name: 读数据库里的地图配置
+        run: |
+          curl -sS -m 20 "$SB/rest/v1/app_config?key=eq.navigation&select=value" -H "apikey: $ANON" -o cfg.json
+          TK=$(python3 -c 'import json,re; v=json.load(open("cfg.json"))[0]["value"]; u=v["tiles"][0]["url"]; print(re.search(r"tk=([0-9a-f]+)",u).group(1))')
+          echo "::add-mask::$TK"; echo "TK=$TK" >> $GITHUB_ENV
+          python3 -c 'import json,re; v=json.load(open("cfg.json"))[0]["value"]; [print(re.sub(r"tk=[0-9a-f]+","tk=…",t["url"]), {k:t[k] for k in t if k!="url"}) for t in v["tiles"]]; print("其他键:", [k for k in v if k!="tiles"])'
+      - name: 图块（北京天安门附近，各级；带 / 不带来源网址）
+        run: |
+          tile() { python3 - "$1" "$2" "$3" <<'PY'
+          import math,sys
+          lat,lon,z=float(sys.argv[1]),float(sys.argv[2]),int(sys.argv[3])
+          n=2**z; x=int((lon+180)/360*n); y=int((1-math.log(math.tan(math.radians(lat))+1/math.cos(math.radians(lat)))/math.pi)/2*n)
+          print(x,y)
+          PY
+          }
+          for L in vec cva img cia; do
+            for z in 3 6 9 12 14 16 18; do
+              read X Y < <(tile 39.9087 116.3975 $z)
+              U="https://t0.tianditu.gov.cn/${L}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=$L&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=$z&TILEROW=$Y&TILECOL=$X&tk=$TK"
+              a=$(curl -sS -m 20 -o a.bin -w '%{http_code} %{content_type} %{size_download}' -H "Referer: $REF" -A 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' "$U")
+              b=$(curl -sS -m 20 -o b.bin -w '%{http_code} %{content_type} %{size_download}' "$U")
+              echo "$L z=$z | 带来源：$a | 不带：$b"
+              case "$a" in *image*) ;; *) head -c 300 a.bin; echo;; esac
+            done
+          done
+          echo "子域名 t0~t7："; read X Y < <(tile 39.9087 116.3975 15)
+          for s in 0 1 2 3 4 5 6 7; do curl -sS -m 20 -o /dev/null -w "t$s %{http_code} %{content_type} %{size_download}\n" -H "Referer: $REF" "https://t$s.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=15&TILEROW=$Y&TILECOL=$X&tk=$TK"; done
+          echo "图块的跨域、缓存头："; curl -sS -m 20 -o /dev/null -D - -H "Origin: $ORIGIN" -H "Referer: $REF" "https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=15&TILEROW=$Y&TILECOL=$X&tk=$TK" | grep -iE '^(HTTP|access-control|cache-control|expires|content-type|server)' | sed "s/$TK/…/g"
+          echo "错误的密钥："; curl -sS -m 20 -w '\n%{http_code} %{content_type}\n' "https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=15&TILEROW=$Y&TILECOL=$X&tk=0000" | head -c 400; echo
+      - name: 搜地点（v2）、逆地理、驾车路线
+        run: |
+          q() { echo "== $1"; curl -sS -m 25 -G -D h.txt -o r.txt -w 'HTTP %{http_code} %{content_type} %{size_download}\n' -H "Origin: $ORIGIN" -H "Referer: $REF" "$2" --data-urlencode "postStr=$3" --data-urlencode "type=$4" --data-urlencode "tk=$TK"; grep -i 'access-control' h.txt || echo "（没有跨域头）"; head -c 1500 r.txt | sed "s/$TK/…/g"; echo; }
+          q 搜索-关键词 https://api.tianditu.gov.cn/v2/search '{"keyWord":"天安门","level":12,"mapBound":"115.4,39.4,117.5,41.1","queryType":1,"start":0,"count":5,"show":2}' query
+          q 搜索-周边 https://api.tianditu.gov.cn/v2/search '{"keyWord":"咖啡","level":15,"queryRadius":2000,"pointLonlat":"116.3975,39.9087","queryType":3,"start":0,"count":5,"show":2}' query
+          q 搜索-全国 https://api.tianditu.gov.cn/v2/search '{"keyWord":"西湖","level":5,"mapBound":"73,3,135,54","queryType":1,"start":0,"count":5,"show":2}' query
+          q 搜索-建议 https://api.tianditu.gov.cn/v2/search '{"keyWord":"北京南站","level":12,"mapBound":"115.4,39.4,117.5,41.1","queryType":4,"start":0,"count":5}' query
+          q 逆地理 https://api.tianditu.gov.cn/geocoder '{"lon":116.3975,"lat":39.9087,"ver":1}' geocode
+          q 地理编码 https://api.tianditu.gov.cn/geocoder '{"keyWord":"北京市海淀区莲花池西路28号"}' ''
+          q 驾车 https://api.tianditu.gov.cn/drive '{"orig":"116.3975,39.9087","dest":"116.3786,39.8651","style":"0"}' search
+          echo "驾车结果的结构："; python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          try:
+              r=ET.parse('r.txt').getroot()
+              def walk(e,d=0,seen=set()):
+                  k=(d,e.tag)
+                  if k in seen: return
+                  seen.add(k); print('  '*d+e.tag, (e.text or '').strip()[:80], dict(list(e.attrib.items())[:4]))
+                  for c in list(e)[:3]: walk(c,d+1,seen)
+              walk(r)
+          except Exception as ex: print('不是 XML：',ex)
+          PY
+          q 公交 https://api.tianditu.gov.cn/transit '{"startposition":"116.3975,39.9087","endposition":"116.3786,39.8651","linetype":"1"}' busline
+      - name: 步行、骑行（routing.openstreetmap.de）
+        run: |
+          for p in foot bike car; do curl -sS -m 25 -o r.json -D h.txt -w "$p HTTP %{http_code}\n" -H "Origin: $ORIGIN" "https://routing.openstreetmap.de/routed-$p/route/v1/driving/116.3975,39.9087;116.3786,39.8651?overview=false&steps=true"; grep -i access-control h.txt; python3 -c 'import json; d=json.load(open("r.json")); r=d["routes"][0]; s=r["legs"][0]["steps"]; print("距离",r["distance"],"时间",r["duration"],"步数",len(s)); [print(" ",x["maneuver"]["type"],x["maneuver"].get("modifier"),x.get("name"),round(x["distance"])) for x in s[:6]]'; done
+  bili:
+    runs-on: ubuntu-latest
+    steps:
+      - name: B 站：搜索接口、视频信息、播放器能不能嵌入
+        run: |
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+          echo "== 不带饼干直接搜"; curl -sS -m 20 -G -A "$UA" "https://api.bilibili.com/x/web-interface/search/type" --data-urlencode "search_type=video" --data-urlencode "keyword=晴天 周杰伦" | head -c 400; echo
+          echo "== 先拿访客饼干再搜"; curl -sS -m 20 -A "$UA" -c jar.txt -o /dev/null https://www.bilibili.com/ ; grep -o 'buvid3\s*[^ ]*' jar.txt | cut -c1-20
+          curl -sS -m 20 -G -A "$UA" -b jar.txt -e https://www.bilibili.com/ "https://api.bilibili.com/x/web-interface/search/type" --data-urlencode "search_type=video" --data-urlencode "keyword=晴天 周杰伦" --data-urlencode "page=1" -o s.json -w 'HTTP %{http_code}\n'
+          python3 -c '
+          import json,re
+          d=json.load(open("s.json")); print("code",d.get("code"),d.get("message"))
+          r=(d.get("data") or {}).get("result") or []
+          print("条数",len(r), "字段", sorted(r[0].keys()) if r else None)
+          for x in r[:6]: print(x.get("bvid"), x.get("duration"), x.get("play"), re.sub("<[^>]+>","",x.get("title",""))[:40], x.get("author"), (x.get("pic") or "")[:60], x.get("typename"))
+          ' || head -c 600 s.json
+          BV=$(python3 -c 'import json; r=json.load(open("s.json"))["data"]["result"]; print(r[0]["bvid"])' 2>/dev/null || echo BV1fK4y1q79u)
+          echo "== 视频信息 $BV"; curl -sS -m 20 -A "$UA" "https://api.bilibili.com/x/web-interface/view?bvid=$BV" | python3 -c 'import sys,json; d=json.load(sys.stdin); v=d.get("data") or {}; print(d.get("code"), v.get("title"), v.get("duration"), v.get("cid"), (v.get("pic") or "")[:70], "分P", len(v.get("pages") or []), "rights", v.get("rights"))'
+          echo "== 播放器页面的嵌入限制"; curl -sS -m 20 -A "$UA" -o p.html -D - "https://player.bilibili.com/player.html?bvid=$BV&autoplay=0" | grep -iE '^(HTTP|x-frame-options|content-security-policy|location)' | cut -c1-300
+          echo "== 手机身份的播放器"; curl -sS -m 20 -A 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' -o /dev/null -D - "https://player.bilibili.com/player.html?bvid=$BV&autoplay=1&high_quality=1" | grep -iE '^(HTTP|x-frame-options|content-security-policy|location)' | cut -c1-300
+          echo "== 接口的跨域头"; curl -sS -m 20 -o /dev/null -D - -A "$UA" -H 'Origin: https://3855285335-gif.github.io' "https://api.bilibili.com/x/web-interface/view?bvid=$BV" | grep -i 'access-control' || echo 没有
+          echo "== 封面图（不带来源网址）"; P=$(curl -sS -m 20 -A "$UA" "https://api.bilibili.com/x/web-interface/view?bvid=$BV" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["pic"])'); curl -sS -m 20 -o /dev/null -w '%{http_code} %{content_type}\n' "$P"; curl -sS -m 20 -o /dev/null -w '带外站来源 %{http_code} %{content_type}\n' -e https://3855285335-gif.github.io/ "$P"
