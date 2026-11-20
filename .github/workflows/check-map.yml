@@ -21,6 +21,9 @@ jobs:
           d=json.load(open("p.json")); print("版本", d.get("v")); m=d.get("map") or {}
           for k,v in m.items(): print(k, "=>", json.dumps(v, ensure_ascii=False)[:900])
           '
+      - name: 服务器（东京）上搜 B 站（自检接口）
+        run: |
+          curl -sS -m 60 -X POST "$SB/functions/v1/chatter-search" -H 'Content-Type: application/json' -d '{"op":"ping","probe":"bili"}' | python3 -c 'import sys,json; d=json.load(sys.stdin); print("版本", d.get("v"), "B 站：", json.dumps(d.get("bili"), ensure_ascii=False))'
       - name: GitHub（美国）上不带密钥看天地图接口的跨域头和报错格式
         run: |
           for u in "https://api.tianditu.gov.cn/v2/search?postStr=%7B%22keyWord%22%3A%22a%22%7D&type=query&tk=0000" "https://api.tianditu.gov.cn/drive?postStr=%7B%7D&type=search&tk=0000" "https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=15&TILEROW=12416&TILECOL=26979&tk=0000"; do
@@ -55,3 +58,4 @@ jobs:
           echo "== 搜索建议（不用饼干）"; curl -sS -m 20 -G -A "$UA" "https://s.search.bilibili.com/main/suggest" --data-urlencode "term=晴天" | head -c 300; echo
           echo "== 音乐区排行"; curl -sS -m 20 -A "$UA" -b jar.txt "https://api.bilibili.com/x/web-interface/ranking/v2?rid=3&type=all" | python3 -c 'import sys,json; d=json.load(sys.stdin); l=(d.get("data") or {}).get("list") or []; print(d.get("code"), len(l), [x.get("title","")[:20] for x in l[:5]])' || true
           echo "== 封面图（不带来源网址）"; P=$(curl -sS -m 20 -A "$UA" -b jar.txt -e https://www.bilibili.com/ "https://api.bilibili.com/x/web-interface/view?bvid=$BV" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["pic"])'); curl -sS -m 20 -o /dev/null -w '%{http_code} %{content_type}\n' "$P"; curl -sS -m 20 -o /dev/null -w '带外站来源 %{http_code} %{content_type}\n' -e https://3855285335-gif.github.io/ "$P"
+          echo "== 小封面（@160w_100h_1c.jpg）"; curl -sS -m 20 -o /dev/null -w '%{http_code} %{content_type} %{size_download} 字节\n' "$P@160w_100h_1c.jpg"; curl -sS -m 20 -o /dev/null -w '原图 %{size_download} 字节\n' "$P"
