@@ -87,6 +87,7 @@ window.__chWS = {
 localStorage.setItem('ch2ws:u1', JSON.stringify({ pin: ['github.com', 'developer.mozilla.org', 'bilibili.com'], fav: [{ u: 'https://example.org/quantum-intro', t: '量子计算入门：从量子比特到量子门', s: 'example.org' }] }));
 localStorage.setItem('ch2wsHist:u1', JSON.stringify(['量子计算', '极光 拍摄 参数', '周末 徒步 路线']));
 addEventListener('popstate', e => window.ChatterSearch && ChatterSearch.onPop(e));
+window.webkitSpeechRecognition = function () { window.__sr = this; this.start = () => { window.__srStarted = (window.__srStarted || 0) + 1; }; this.stop = () => { if (this.onend) this.onend(); }; this.abort = this.stop; }; window.SpeechRecognition = window.webkitSpeechRecognition;   // 假的语音识别（新版 Chromium 自带不带前缀的，也换掉）
 </script><script src="/search.js"></script></body></html>`;
 const srv = http.createServer((q, r) => {
   if (q.url.startsWith('/search.js')) { r.writeHead(200, { 'content-type': 'text/javascript' }); return r.end(fs.readFileSync(path.join(ROOT, 'search.js'))); }
@@ -385,6 +386,81 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(await on() === 'home' && await pg.evaluate(() => history.state && history.state.ws) === 1, '历史也退干净了，再返回一次就关掉搜索');
       const css = await pg.evaluate(() => document.getElementById('ws-css').textContent);
       ok(/\.ws a\[href\]\{-webkit-touch-callout:none\}/.test(css), '长按链接不弹系统的预览（以前长按再点一下会跳到系统浏览器）');
+      // ---------- 20261120i：像一般的浏览器：底部工具栏、前进、刷新、窗口、电脑版 / 手机版、分享、语音 ----------
+      const ifu = async () => (await (await pg.$('.ws-v.on iframe')).contentFrame()).url();
+      await typeGo('https://frame.test/a'); const fA = await (await pg.$('.ws-v.on iframe')).contentFrame(); await fA.waitForSelector('#to-b');
+      const navb = await pg.$$eval('.ws-v.on .ws-wnav button', a => a.map(x => (x.getAttribute('aria-label') || '') + (x.disabled ? '（不能点）' : '')));
+      ok(navb.join('、') === '后退、前进（不能点）、刷新、窗口、更多', '原网页底下像浏览器一样有一排按钮：' + navb.join('、'));
+      ok(await pg.$eval('[data-r="wsite"]', e => !!e.querySelector('svg') && !e.querySelector('.warn') && /frame\.test/.test(e.textContent)), 'https 网站：网址前面有小锁');
+      await fA.click('#to-b'); await pg.waitForTimeout(350);
+      await pg.click('.ws-v.on .ws-wnav [data-act="back"]'); await pg.waitForTimeout(450);
+      ok(/\/a$/.test(await ifu()) && await pg.$eval('[data-act="web-fwd"]', e => !e.disabled), '网页里后退一页以后：“前进”能点了');
+      await pg.click('[data-act="web-fwd"]'); await pg.waitForTimeout(450);
+      ok(/\/b$/.test(await ifu()) && await pg.$eval('[data-act="web-fwd"]', e => e.disabled), '点“前进”：回到刚才那页，前进又不能点了');
+      const hl0 = await pg.evaluate(() => history.length);
+      await pg.click('[data-act="web-reload"]'); await pg.waitForTimeout(450);
+      ok(/\/a$/.test(await ifu()) && (await pg.evaluate(() => history.length)) === hl0 && /没法单独刷新/.test((await pg.evaluate(() => __log.filter(x => x.toast).map(x => x.toast))).slice(-1)[0] || ''), '刷新：网页里点开的那一页没法单独刷新时，说清楚、重新打开起始页（不多一条历史）');
+      const tz = await pg.evaluate(() => __log.filter(x => x.toast).length);
+      await pg.click('[data-act="web-reload"]'); await pg.waitForTimeout(400);
+      ok(/\/a$/.test(await ifu()) && (await pg.evaluate(() => __log.filter(x => x.toast).length)) === tz && (await pg.evaluate(() => history.length)) === hl0, '在起始页刷新：直接刷新，不提示、不多历史');
+      // 电脑版 / 手机版
+      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => x.label === '换成电脑版网页').fn());
+      ok(await pg.$eval('.ws-v.on iframe', e => /^scale\(0\.39/.test(e.style.transform) && e.style.width === '980px'), '“换成电脑版网页”：按电脑的宽度显示、缩小到整页（手机版网站会变成电脑版的排版）');
+      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => x.label === '换成手机版网页').fn());
+      ok(await pg.$eval('.ws-v.on iframe', e => !e.style.transform), '“换成手机版网页”：换回来');
+      // 分享到其他 App
+      await pg.evaluate(() => { navigator.share = d => { window.__shared = d; return Promise.resolve(); }; });
+      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => x.label === '分享到其他 App').fn());
+      ok(await pg.evaluate(() => window.__shared && window.__shared.url === 'https://frame.test/a'), '“分享到其他 App”：用手机系统的分享（微信、备忘录……）');
+      // 安卓 / 电脑的桌面版：“在浏览器打开”开新窗口，不把整个 Chatter 换走
+      await pg.evaluate(() => { window.__mm = window.matchMedia; window.matchMedia = q => ({ matches: /standalone/.test(q), addListener() {}, removeListener() {} }); });
+      const op5 = await pg.evaluate(() => __opened.length);
+      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => x.label === '在浏览器打开').fn());
+      ok((await pg.evaluate(() => __opened.length)) === op5 + 1 && await on() === 'web', '安卓、电脑的桌面版点“在浏览器打开”：开新窗口（以前会把整个 Chatter 换走）');
+      await pg.evaluate(() => { window.matchMedia = window.__mm; });
+      // 窗口
+      const nT = await pg.evaluate(() => ChatterSearch._w.tabs.list.length);
+      await pg.click('.ws-v.on .ws-wnav [data-act="tabs"]'); await pg.waitForSelector('.ws-v.on[data-v="tabs"] .ws-tc');
+      ok(await pg.$eval('.ws-tc.cur', e => /frame\.test/.test(e.textContent)) && (await pg.$$eval('.ws-tc', a => a.length)) === nT, '窗口页：列出所有窗口，正在看的那个框起来');
+      await shot('22-窗口');
+      await pg.click('[data-act="tab-new"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'home');
+      ok(await pg.$eval('.ws-v.on .ws-tabsb', (e, n) => !e.hidden && e.textContent.trim() === String(n), nT + 1), '新窗口：回到搜索首页，顶上多了窗口按钮，数字加 1');
+      await typeGo('量子计算'); await pg.waitForSelector('.ws-v.on[data-v="res"] .ws-r');
+      await pg.click('.ws-v.on .ws-tabsb'); await pg.waitForSelector('.ws-v.on[data-v="tabs"] .ws-tc');
+      ok(await pg.$eval('.ws-tc.cur', e => /搜「量子计算」/.test(e.textContent)) && await pg.$$eval('.ws-tc', a => a.some(x => /frame\.test/.test(x.textContent) && !x.classList.contains('cur'))), '两个窗口各记各的：一个是网页，一个是搜索结果');
+      await pg.click('.ws-tc:not(.cur)'); await pg.waitForSelector('.ws-v.on[data-v="web"] iframe');
+      ok(await pg.$eval('.ws-v.on iframe', e => e.getAttribute('src')) === 'https://frame.test/a' && await pg.evaluate(() => history.state && history.state.ws) === 2, '点另一个窗口：换过去（重新打开那一页），历史也对');
+      await pg.click('.ws-v.on .ws-wnav [data-act="tabs"]'); await pg.waitForSelector('.ws-v.on[data-v="tabs"] .ws-tc');
+      await pg.click('.ws-tc.cur [data-act="tab-x"]'); await pg.waitForTimeout(100);
+      ok(await pg.$$eval('.ws-tc', a => a.length) === nT, '关掉正在看的窗口：列表里少一个');
+      await pg.click('.ws-v.on [data-act="back"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'res', null, { timeout: 5000 }).catch(() => {});
+      ok(await on() === 'res', '离开窗口页：换到另一个窗口（搜索结果），不会停在已经关掉的那一页');
+      const nT2 = await pg.evaluate(() => ChatterSearch._w.tabs.list.length);
+      await pg.evaluate(() => ChatterSearch.openPage('https://frame.test/c', '聊天里的链接')); await pg.waitForSelector('.ws-v.on[data-v="web"] iframe');
+      ok(await pg.evaluate(() => ChatterSearch._w.tabs.list.length) === nT2 + 1, '聊天里点的链接：开在新窗口里，不盖掉原来窗口里的东西');
+      ok(await pg.evaluate(() => { const s = JSON.parse(localStorage.getItem('ch2wsTabs:u1') || '{}'); return Array.isArray(s.list) && s.list.length >= 2; }), '窗口存在手机里：关掉 App 再打开还在');
+      await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(400);
+      // 语音搜索（假的语音识别）
+      await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(100);
+      await pg.fill('[data-form="home"] input', ''); await pg.evaluate(() => document.querySelector('[data-form="home"]').classList.remove('has'));
+      ok(await pg.$eval('[data-form="home"] [data-act="mic"]', e => getComputedStyle(e).display !== 'none'), '手机支持语音识别时：搜索框里有话筒');
+      const s5 = await pg.evaluate(() => __log.filter(x => x.op === 'search').length);
+      await pg.click('[data-form="home"] [data-act="mic"]');
+      await pg.evaluate(() => { __sr.onresult({ results: [[{ transcript: '量子' }], [{ transcript: '纠缠' }]] }); __sr.onend(); });
+      await pg.waitForTimeout(150);
+      ok(await pg.evaluate(() => __log.filter(x => x.op === 'search').slice(-1)[0].q) === '量子纠缠' && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === s5 + 1 && await pg.evaluate(() => window.__srStarted >= 1), '点话筒说“量子纠缠”：自动填进去并搜索');
+      await pg.goBack(); await pg.waitForTimeout(150);
+      await pg.fill('[data-form="home"] input', ''); await pg.evaluate(() => document.querySelector('[data-form="home"]').classList.remove('has'));
+      await pg.click('[data-form="home"] [data-act="mic"]');
+      await pg.evaluate(() => { __sr.onerror({ error: 'network' }); __sr.onend(); });
+      ok(/谷歌/.test((await pg.evaluate(() => __log.filter(x => x.toast).map(x => x.toast))).slice(-1)[0]) && await pg.evaluate(() => __log.filter(x => x.op === 'search').length) === s5 + 1, '语音识别连不上：说清楚原因（安卓用的是谷歌的服务），不乱搜');
+      // 不记浏览记录时：网站结论、窗口都不写进手机
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
+      const tabsLS = await pg.evaluate(() => localStorage.getItem('ch2wsTabs:u1'));
+      await typeGo('https://deny9.test/x'); await pg.waitForSelector('.ws-v.on[data-v="read"]'); await pg.waitForTimeout(200);
+      ok(!(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsFrm:u1') || '{}')['deny9.test'])) && (await pg.evaluate(() => localStorage.getItem('ch2wsTabs:u1'))) === tabsLS, '不记浏览记录时：去过的网站、窗口都不写进手机');
+      await pg.goBack(); await pg.waitForTimeout(150);
+      await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
       ok(!errs.length, '原网页功能没有报错 ' + errs.join(' | '));
 
       // ---------- 20261120f：从桌面图标打开时也一律先在 App 里打开；电脑版网页缩小到整页；视频网站不让播的给按钮 ----------
@@ -585,13 +661,19 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const wide = () => pg.evaluate(() => { const v = document.querySelector('.ws-v.on'); const bad = []; v.querySelectorAll('*').forEach(e => { const r = e.getBoundingClientRect(); if (r.width && (r.right > innerWidth + 1 || r.left < -1) && !e.closest('.ws-web, .ws-chips, .ws-tabs, iframe') && getComputedStyle(e).position !== 'fixed') bad.push(e.className || e.tagName); }); return bad.slice(0, 5); });
       await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(150);
       const b1 = await wide();
+      ok(await pg.evaluate(() => { const n = ChatterSearch._w.tabs.list.length, b = document.querySelector('.ws-v.on .ws-tabsb'); return n > 1 ? !b.hidden : getComputedStyle(b).display === 'none'; }), '只有一个窗口时：首页不显示窗口按钮（不占地方）');
       await pg.fill('[data-form="home"] input', '量子计算'); await pg.press('[data-form="home"] input', 'Enter'); await pg.waitForSelector('.ws-r a.t'); await pg.waitForTimeout(150);
       const b2 = await wide();
       await pg.evaluate(() => ChatterSearch.openPage('https://example.org/quantum-intro', '量子计算入门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150);
       const b3 = await wide();
       await pg.goBack(); await pg.waitForTimeout(150); await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('.ws-rules .ws-sw'); await pg.waitForTimeout(150);
       const b4 = await wide();
-      ok(!b1.length && !b2.length && !b3.length && !b4.length, '320 宽的小屏手机：首页、结果页、阅读页、规则页都没有横着溢出 → ' + JSON.stringify([b1, b2, b3, b4]));
+      await pg.goBack(); await pg.waitForTimeout(150);
+      await pg.evaluate(() => ChatterSearch.openPage('https://frame.test/a', '示例')); await pg.waitForSelector('.ws-v.on[data-v="web"] iframe'); await pg.waitForTimeout(200);
+      const b5 = await wide();
+      await pg.click('.ws-v.on .ws-wnav [data-act="tabs"]'); await pg.waitForSelector('.ws-v.on[data-v="tabs"] .ws-tc'); await pg.waitForTimeout(150);
+      const b6 = await wide();
+      ok(!b1.length && !b2.length && !b3.length && !b4.length && !b5.length && !b6.length, '320 宽的小屏手机：首页、结果页、阅读页、规则页、原网页（底下那排按钮）、窗口页都没有横着溢出 → ' + JSON.stringify([b1, b2, b3, b4, b5, b6]));
       await pg.setViewportSize({ width: 390, height: 844 });
     }
     await ctx.close();
