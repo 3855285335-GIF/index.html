@@ -195,9 +195,13 @@ function bar(ph) {
     '<form class="mu-field" action="#" role="search">' + ico(I.find, 18) + '<input type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="' + esc(ph) + '" aria-label="' + esc(ph) + '">' +
     '<button type="button" class="mu-clr" data-act="clear" aria-label="清空">' + ico(I.x, 16) + '</button></form></div>';
 }
+function addCss() {   // 样式一下载就放进页面：重开 App 时只恢复迷你条、没打开音乐页，迷你条也要有样式（11-21 用户截图：以前迷你条没样式，封面撑满半屏）
+  if (!document.getElementById('mu-css')) { const st = document.createElement('style'); st.id = 'mu-css'; st.textContent = CSS; document.head.appendChild(st); }
+}
+addCss();
 function build() {
   if (root) return;
-  if (!document.getElementById('mu-css')) { const st = document.createElement('style'); st.id = 'mu-css'; st.textContent = CSS; document.head.appendChild(st); }
+  addCss();
   root = document.createElement('div'); root.id = 'mu'; root.className = 'mu'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '音乐');
   root.innerHTML =
     '<section class="mu-v" data-v="home">' + bar('搜歌、歌手（英文搜得更多）') + '<div class="mu-chips mu-in" data-r="genres"></div><div class="mu-sc"><div class="mu-in" data-r="home"></div></div></section>' +
@@ -333,7 +337,7 @@ function ensureAudio() {
   document.body.appendChild(audio);
   audio.addEventListener('play', () => { M.wait = false; paint(); });
   audio.addEventListener('playing', () => { M.wait = false; M.failRow = 0; paint(); });
-  audio.addEventListener('pause', () => { paint(); saveNow(); });
+  audio.addEventListener('pause', () => { M.wait = false; paint(); saveNow(); });   // 缓冲中点了暂停：不再一直显示“正在缓冲…”
   audio.addEventListener('waiting', () => { M.wait = true; paintState(); });
   audio.addEventListener('ended', () => onEnded());
   audio.addEventListener('error', () => onAudioError());

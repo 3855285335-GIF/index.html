@@ -4735,15 +4735,15 @@ async function loadMomentViews(rows) {
     let mvDone = {}; try { mvDone = LS.get(mvKey, {}) || {}; } catch (e) {}
     rows.forEach(function (r) { if (r.author_acc === ME()) mine.push(r.id); else if (!mvDone[r.id]) others.push(r.id); });
     if (others.length) {
-      const r = await sb.from('moment_views').select('moment_id').in('moment_id', others);
-      if (!r.error) {
-        const seen = new Set((r.data || []).map(function (x) { return x.moment_id; }));
-        seen.forEach(function (id) { mvDone[id] = 1; });
-        const add = others.filter(function (id) { return !seen.has(id); }).map(function (id) { return { moment_id: id, viewer_acc: ME() }; });
-        add.forEach(function (row) { sb.from('moment_views').insert(row).then(function (r) { if (!r || !r.error) mvDone[row.moment_id] = 1; }, function () {}); });
-        // 本机记住已经记过的访客，下次打开不再重复请求
-        try { const keys = Object.keys(mvDone); if (keys.length > 400) { const keep = keys.slice(-300), o = {}; keep.forEach(function (k) { o[k] = 1; }); mvDone = o; } LS.set(mvKey, mvDone); } catch (e) {}
-      }
+      // 记过的那行只有作者读得到，先查一遍永远是空的；以前每次打开都对每条重发、被数据库以“已记过”拒掉（409）。
+      // 现在直接记，记上了或者“已记过”都算记好，等这一批都回来再存进手机，下次不再发。
+      await Promise.all(others.map(function (id) {
+        return sb.from('moment_views').insert({ moment_id: id, viewer_acc: ME() }).then(function (r) {
+          const e = r && r.error;
+          if (!e || r.status === 409 || e.code === '23505') mvDone[id] = 1;
+        }, function () {});
+      }));
+      try { const keys = Object.keys(mvDone); if (keys.length > 400) { const keep = keys.slice(-300), o = {}; keep.forEach(function (k) { o[k] = 1; }); mvDone = o; } LS.set(mvKey, mvDone); } catch (e) {}
     }
     if (mine.length) {
       const c = await sb.from('moment_views').select('moment_id').in('moment_id', mine);

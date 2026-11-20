@@ -97,10 +97,14 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(s1 && !s1.paused && s1.src === 'https://api.audius.co/v1/tracks/t0/stream?app_name=Chatter', '点一首：打开“正在播放”，手机直接从 Audius 取歌开始放 → ' + JSON.stringify(s1));
       const meta = await pg.evaluate(() => navigator.mediaSession && navigator.mediaSession.metadata && { t: navigator.mediaSession.metadata.title, a: navigator.mediaSession.metadata.artist, n: navigator.mediaSession.metadata.artwork.length });
       ok(meta && meta.t === '夜里的海' && meta.a === '音乐人 0' && meta.n === 3, '锁屏和耳机线控能看到歌名、歌手、封面（系统的“正在播放”）→ ' + JSON.stringify(meta));
-      await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.paused; }, null, { timeout: 4000 }).catch(() => {});
+      await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.paused && /M8 5\.5v13/.test(document.querySelector('[data-act="toggle"]').innerHTML) && navigator.mediaSession.playbackState === 'paused'; }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).paused && /M8 5\.5v13/.test(await pg.$eval('[data-act="toggle"]', e => e.innerHTML)) && await pg.evaluate(() => navigator.mediaSession.playbackState) === 'paused', '点暂停：停下，按钮变回“播放”');
       await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(true, '再点：接着放');
+      const bufOn = await pg.evaluate(() => { document.getElementById('mu-audio').dispatchEvent(new Event('waiting')); return document.querySelector('.mu-v.on [data-r="state"]').textContent; });
+      await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => document.getElementById('mu-audio').paused && !document.querySelector('[data-r="state"]').textContent, null, { timeout: 3000 }).catch(() => {});
+      ok(bufOn === '正在缓冲…' && await pg.$eval('[data-r="state"]', e => e.textContent) === '', '缓冲时点暂停：不再一直显示“正在缓冲…” → ' + bufOn + ' / ' + await pg.$eval('[data-r="state"]', e => e.textContent));
+      await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       await pg.click('[data-act="next"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.getAttribute('src').includes('/t1/stream'); }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).src.includes('/t1/stream') && await pg.$eval('.mu-nt .mu-rt', e => e.textContent) === 'Morning Coffee', '下一首');
       await pg.waitForFunction(() => document.getElementById('mu-audio').getAttribute('src').includes('/t2/stream'), null, { timeout: 6000 }).catch(() => {});
@@ -125,6 +129,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(seen.size === 11, '随机播放：每首都轮到一次才重复 → 轮到了 ' + seen.size + ' 首');
       await pg.click('[data-act="mode"]'); ok((await toasts()).slice(-1)[0] === '列表循环', '→ 回到列表循环');
       // 拖进度条
+      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});   // 刚在随机里连点了下一首：等这首加载好再拖
       await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.pause(); });
       await pg.evaluate(() => { const r = document.querySelector('[data-r="seek"]'); r.value = '500'; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); });
       const t2 = await pg.evaluate(() => { const a = document.getElementById('mu-audio'); return a.currentTime / a.duration; });
@@ -150,6 +155,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(await pg.evaluate(() => { const m = document.getElementById('mu-mini'), n = document.querySelector('.app-nav'); return m.nextElementSibling === n && m.getBoundingClientRect().bottom <= n.getBoundingClientRect().top + 1; }), '迷你条在菜单上面，不挡菜单');
       await pg.click('#mu-mini [data-act="mini-pp"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(!(await pg.evaluate(() => ChatterMusic.isOpen())), '迷你条上点播放：直接放，不打开页面');
+      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});
       await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.currentTime = 2.2; ChatterMusic._m.savedAt = 0; });
       await pg.waitForFunction(() => { const v = JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'); return v && v.at >= 2; }, null, { timeout: 4000 }).catch(() => {});
       const sv = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'));
@@ -260,6 +266,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg2.evaluate(() => ChatterMusic.restore()); await pg2.waitForTimeout(300);
       const mm = await pg2.evaluate(() => { const m = document.getElementById('mu-mini'), a = document.getElementById('mu-audio'); return { on: m && m.classList.contains('on'), txt: m && m.textContent, paused: a.paused, src: a.getAttribute('src') }; });
       ok(mm.on && /雨天/.test(mm.txt) && mm.paused && !mm.src && reqs.slice(r0).every(r => !/stream/.test(r)), '重开 App：底部恢复上次的歌（不自动播放、先不连 Audius 不花流量）→ ' + JSON.stringify(mm));
+      const look = await pg2.evaluate(() => { const m = document.getElementById('mu-mini'), r = m.getBoundingClientRect(), im = m.querySelector('.mu-art'); return { h: Math.round(r.height), disp: getComputedStyle(m).display, art: im ? Math.round(im.getBoundingClientRect().width) : 0, btn: Math.round(m.querySelector('[data-act="mini-pp"]').getBoundingClientRect().width) }; });
+      ok(look.disp === 'flex' && look.h > 40 && look.h < 70 && look.art === 40 && look.btn === 40, '重开 App 只恢复迷你条（没打开音乐页）：迷你条也有样式，是一条细条，不会封面撑满半屏 → ' + JSON.stringify(look));
       await pg2.click('#mu-mini [data-act="mini-pp"]');
       await pg2.waitForFunction(() => { const a = document.getElementById('mu-audio'); return !a.paused && a.currentTime >= 0.9; }, null, { timeout: 6000 }).catch(() => {});
       const at = await pg2.evaluate(() => document.getElementById('mu-audio').currentTime);

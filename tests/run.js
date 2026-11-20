@@ -116,6 +116,24 @@ test('不闪：朋友圈刷新时卡片不重建（入场动画不重播）', as
   } finally { env.close(); }
 });
 
+test('省请求：朋友圈“谁看过”每条只记一次（访客读不到自己那行，以前每次打开都重发、被拒 409）', async () => {
+  const t = Date.now();
+  const db = baseDb(t, { moments: [1, 2, 3].map(i => ({ id: 'm' + i, author_acc: 'bob', body: '动态' + i, images: [], created_at: iso(t - i * 60000) })),
+    moment_views: [{ moment_id: 'm1', viewer_acc: 'me', created_at: iso(t - 3600000) }] });   // m1 在别的手机上已经记过
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await sleep(300);
+    click(env, env.w.document.querySelector('.app-nav button[data-tab="moments"]')); await sleep(800);
+    const ins = () => env.log.filter(q => q.table === 'moment_views' && (q.op === 'insert' || q.op === 'upsert')).length;
+    const sel = () => env.log.filter(q => q.table === 'moment_views' && q.op === 'select').length;
+    ok(db.moment_views.filter(v => v.viewer_acc === 'me').length === 3, '三条动态没都记上“我看过”：' + JSON.stringify(db.moment_views));
+    const n1 = ins();
+    ok(n1 === 3 && sel() === 0, '第一次打开：应该对三条各记一次、不先查（查了也是空的）：记 ' + n1 + ' 次、查 ' + sel() + ' 次');
+    await env.T.pullRefresh(); await sleep(800);
+    ok(ins() === n1, '刷新朋友圈又重发了“我看过”：' + (ins() - n1) + ' 次');
+  } finally { env.close(); }
+});
+
 // ---------------- 编辑 ----------------
 test('编辑：对方改消息立刻提示一次、只在改的是最新一条时改预览；聊天开着时就地更新', async () => {
   const t = Date.now();
