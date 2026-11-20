@@ -118,3 +118,7 @@ SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查
 ```bash
 cd tests && deno run -A --node-modules-dir=none fn-backup-test.ts   # 23 项：只有私有仓库主分支上的“每日备份”任务能拿到数据库连接；别的仓库、分支、任务、过期、伪造签名一律拒绝
 ```
+
+## 导航和整站复查
+
+沿用上述测试依赖。执行 `node navigation-standalone.cjs` 检查不同城市的同名地点、步行/骑行路线终点偏离和浏览器离线失败反馈；`node sw-cache-failure.cjs` 检查缓存不可用时的联网加载和通知目标；`node sql-navigation-test.mjs` 使用独立 PGlite 验证同行迁移、授权、时间边界、解除好友与回滚。配置好隔离 Auth、PostgREST、Realtime 和本次导航迁移后，可运行 `CHATTER_NAV_PREVIEW=http://127.0.0.1:58780 node navigation-browser.cjs`。该脚本只接受环回预览地址，使用三个独立测试账号和浏览器提供的测试坐标。

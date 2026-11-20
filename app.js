@@ -2941,6 +2941,7 @@ async function onInvite(p) {
   // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   $('incoming-name').textContent = peerName(p.from); $('incoming-avatar').innerHTML = avatarHTML(nickOf(p.from), avatarOf(p.from), false, p.from); $('incoming-type').textContent = p.video ? '邀请你视频通话…' : '邀请你语音通话…';
+  if (navPanel) closeNavigation();
   $('incoming-ui').classList.add('active');
   try { if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]); } catch (e) {}
   closeNotes(t => t === 'c:' + p.from);
@@ -7275,7 +7276,7 @@ function openNavigation(peer, invitation) {
   dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
   frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
   navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,id:null,sharing:false,notified:null};
-  frame.src='navigation.html?v=20261120e';
+  frame.src='navigation.html?v=20261120f';
   document.body.append(dialog); dialog.showModal();
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeNavigation(); });
   history.pushState({navigation:true},'');
