@@ -71,7 +71,13 @@ const MAPS = [
   ['Esri 卫星图', '全球卫星图，免费使用条款还要再核实', 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/10/418/857'],
   ['Carto 浅色地图', '基于开源地图的简洁样式', 'https://a.basemaps.cartocdn.com/light_all/10/857/418.png']
 ];
-const MAP_HOSTS = [['天地图（国家地理信息公共服务平台）', '有卫星图，免费，要注册拿一个密钥（只测网络通不通）', 'https://t0.tianditu.gov.cn/']];
+const MAP_HOSTS = [
+  ['天地图（国家地理信息公共服务平台）', '有卫星图，免费，要注册拿一个密钥（只测网络通不通）', 'https://t0.tianditu.gov.cn/'],
+  ['天地图的搜地点、算路线', '同一个密钥就能用（只测网络通不通）', 'https://api.tianditu.gov.cn/'],
+  ['导航的搜地点（photon.komoot.io）', 'GPT 的导航候选版用它搜地点（免费演示服务）', 'https://photon.komoot.io/api/?q=beijing&limit=1'],
+  ['导航的算路线（routing.openstreetmap.de）', 'GPT 的导航候选版用它算路线（志愿者维护）', 'https://routing.openstreetmap.de/about.html'],
+  ['高德（核对地点用）', 'GPT 的导航候选版用它核对入口', 'https://uri.amap.com/']
+];
 const $ = id => document.getElementById(id);
 const results = {};
 function row(i, name, desc) { return '<div class="row"><div class="t"><b>' + name + '</b><small>' + desc + '</small></div><span class="st" id="h' + i + '">—</span></div>'; }
