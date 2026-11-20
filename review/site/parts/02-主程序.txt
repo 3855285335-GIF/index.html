@@ -2067,6 +2067,7 @@ async function warmConvs() {   // 启动后先把最近几个会话的消息拉�
 }
 async function openConv(key, peer) {
   if (!S.me) return;
+  closeNavigation(false);
   const generation = ++chatGeneration;
   cancelMediaPreviews();
   olderCursor = null; S.loadingOlder = false;
@@ -2158,6 +2159,7 @@ async function openConv(key, peer) {
 }
 let lastChat = null;   // 刚关掉的聊天（“前进”手势用）
 function closeChat() {
+  closeNavigation(false);
   ++chatGeneration; cancelMediaPreviews(); olderCursor = null; S.loadingOlder = false;
   const generation = accountGeneration;
   if (S.conv) lastChat = { key: S.conv, peer: S.peer };
@@ -3491,6 +3493,8 @@ function startTimers() {
   }, 3000);
 }
 function teardown() {
+  closeNavigation(false);
+  const outgoingUid = S.uid;
   ++accountGeneration; ++chatGeneration; ++friendSearchSequence;
   iceConfigRequest = null;
   clearTimeout(searchT); clearTimeout(saveMT); clearTimeout(csT);
@@ -3528,7 +3532,7 @@ function teardown() {
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
-  idbClear();                    // 退出登录时把消息缓存也清掉（换人用这台手机不残留）
+  if (outgoingUid) return idbClear(outgoingUid);
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -3570,8 +3574,8 @@ async function start(user) {
   later(loadFriendBgs, 1200);
 }
 async function onAuth(ev, session) {
-  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { teardown(); showAuth(); $('login-pass').value = ''; } return; }
-  if (S.uid && S.uid !== session.user.id) teardown();
+  if (!session) { if (ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') { forgetBrowserData(S.uid); teardown(); showAuth(); $('login-pass').value = ''; } return; }
+  if (S.uid && S.uid !== session.user.id) { forgetBrowserData(S.uid); teardown(); }
   S.token = session.access_token;
   if (ev === 'TOKEN_REFRESHED' && S.started) { try { sb.realtime.setAuth(session.access_token); } catch (e) {} return; }
   if (S.started && S.uid === session.user.id) return;
@@ -6181,18 +6185,38 @@ function onConvChange(row) {
   } catch (e) {}
 }
 let logoutPending = false;
+// 搜索模块可能尚未加载。退出时也要按原账号清理旧版留下的离线文章。
+function forgetBrowserData(uid) {
+  if (!uid) return Promise.resolve();
+  for (const key of ['ch2ws', 'ch2wsHist', 'ch2wsSeen', 'ch2wsPos']) LS.del(key + ':' + uid);
+  if (!window.indexedDB) return Promise.resolve();
+  return new Promise(resolve => {
+    const req = indexedDB.open('chatter-ws');
+    req.onupgradeneeded = () => req.transaction.abort(); // 从未用过浏览器，无需创建空库
+    req.onerror = () => resolve();
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction('art', 'readwrite');
+        tx.objectStore('art').delete(IDBKeyRange.bound(uid + '|', uid + '}', false, true));
+        tx.oncomplete = tx.onabort = tx.onerror = () => { db.close(); resolve(); };
+      } catch (e) { db.close(); resolve(); }
+    };
+  }).catch(e => logErr('清理浏览器数据', e));
+}
 async function logout() {
   if (logoutPending) return;
   logoutPending = true;
   const generation = accountGeneration;
   try { await pushLogout(); } catch (e) {}
   if (generation !== accountGeneration) { logoutPending = false; return; }
-  teardown();
+  const cleanup = forgetBrowserData(S.uid);
+  const messageCleanup = teardown();
   showAuth();
   try { Object.keys(localStorage).forEach(k => {
+    if (/^ch2ws(?:Hist|Seen|Pos)?:/.test(k)) return; // 本账号已单独清理
     if (k.startsWith('ch2') && !/^ch2(?:theme|font|lib4:|lastV|imgq|ice)/.test(k)) localStorage.removeItem(k);
   }); } catch (e) {}
-  try { if (window.indexedDB) indexedDB.deleteDatabase('chatter-ws'); } catch (e) {}   // 网页浏览在手机里存的文章（收藏离线看的）也一起删
   // GoTrue may leave a local token after a network failure during sign-out.
   const afterTeardown = accountGeneration;
   try {
@@ -6205,6 +6229,7 @@ async function logout() {
       try { localStorage.removeItem('sb-' + AUTH_KEY_REF + '-auth-token'); } catch (x) {}
     }
   }
+  await Promise.all([cleanup, messageCleanup]);
   if (!S.uid) location.reload();
   else logoutPending = false;
 }
@@ -6411,6 +6436,8 @@ function convActs(it) {
 /* ---- 文字里的网址变成可以点的链接 ---- */
 const URL_RE = /(https?:\/\/[^\s<>"'，。！？、；：（）【】《》「」]+|www\.[a-z0-9-]+\.[^\s<>"'，。！？、；：（）【】《》「」]+)/gi;
 function linkify(t) {
+  const invitation = /^邀请你一起导航 · ([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.exec(t);
+  if (invitation) return '<button type="button" data-nav-invite="' + invitation[1] + '">查看同行邀请</button>';
   t = String(t == null ? '' : t); let out = '', last = 0;
   String(t).replace(URL_RE, (m, g, off) => {
     const u = m.replace(/[.,!?;:)\]}>]+$/, ''); if (!u) return m;
@@ -7203,6 +7230,58 @@ async function authTry(fn) {   // 登录/注册遇到网络问题自动再试两
   }
   return r;
 }
+// 同源导航面板只取得当前聊天的同行接口；目的地链接可单独打开。
+let navPanel = null;
+function closeNavigation(pop = true) {
+  const n = navPanel;
+  if (!n) return;
+  if (pop && history.state?.navigation) {
+    if (!n.closing) { n.closing=true; history.back(); }
+    return;
+  }
+  n.frame.contentWindow?.stopChatterNavigation?.();
+  if (n.sharing && n.id && S.uid === n.uid) {
+    sb.rpc('chatter_navigation', { p_peer:n.peer, p_action:'end', p_id:n.id }).then(({error}) => { if (error) logErr('结束同行',error); });
+  }
+  navPanel = null; n.dialog.remove();
+}
+function openNavigation(peer, invitation) {
+  if (navPanel) return;
+  const dialog = document.createElement('dialog'), frame = document.createElement('iframe');
+  dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
+  frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
+  navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,id:null,sharing:false,notified:null};
+  frame.src='navigation.html?v=20261120e';
+  document.body.append(dialog); dialog.showModal();
+  dialog.addEventListener('cancel', e => { e.preventDefault(); closeNavigation(); });
+  history.pushState({navigation:true},'');
+}
+window.getChatterNavigation = function (sender) {
+  const n = navPanel;
+  if (!n || n.frame.contentWindow!==sender) return null;
+  const current = () => navPanel===n && n.uid===S.uid && (!n.peer || (n.chat===S.conv && n.peer===S.peer));
+  const style = getComputedStyle(document.body);
+  return {peer:n.peer, me:ME(), invitation:n.invitation, font:style.fontFamily,
+    theme:Object.fromEntries(Object.entries({'--paper':'--bg','--surface':'--surface','--ink':'--ink','--muted':'--muted','--line':'--line','--accent':'--accent'}).map(([key,src])=>[key,style.getPropertyValue(src)])),
+    close:() => { if (current()) closeNavigation(); },
+    async rpc(action,id,value) {
+      if (!current() || !n.peer || !S.friends.includes(n.peer)) throw new Error('好友或登录状态已变化');
+      const result = await sb.rpc('chatter_navigation',{p_peer:n.peer,p_action:action,p_id:id||null,p_value:value||null});
+      if (!current()) throw new Error('已离开原聊天');
+      if (result.error) throw result.error;
+      if (action==='fix' && result.data) n.sharing=true;
+      if (action==='end' || !result.data) n.sharing=false;
+      n.id=result.data?.id||null;
+      return result.data;
+    },
+    shareStarted(id) { if (current() && n.id===id) n.sharing=true; },
+    notify(id) {
+      if (!current() || n.id!==id || n.notified===id || !canSendHere()) return;
+      n.notified=id; addLocal(newMsg('text','邀请你一起导航 · '+id));
+    }
+  };
+};
+
 function bindUI() {
   /* 登录 / 注册 */
   $('tab-login').onclick = () => { $('tab-login').classList.add('active'); $('tab-register').classList.remove('active'); $('login-form').style.display = ''; $('register-form').style.display = 'none'; msgAuth(''); };
@@ -7318,6 +7397,7 @@ function bindUI() {
     document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
   })();
   window.addEventListener('popstate', (e) => {
+    if (navPanel) { closeNavigation(false); return; }
     if (S.call) { armGuard(); return; }   // 通话界面不让滑走
     if (window.ChatterSearch && window.ChatterSearch.onPop(e)) return;   // 搜索里：退一层（结果页 → 首页 → 关掉）
     if (S.conv) { S.hist = false; closeChat(); return; }
@@ -7329,6 +7409,8 @@ function bindUI() {
   });
   const box = $('chat-messages');
   box.addEventListener('click', function (e) {
+    const nav = e.target.closest('[data-nav-invite]');
+    if (nav && S.peer && !isGroupKey(S.conv)) { openNavigation(S.peer,nav.dataset.navInvite); return; }
     const rt = e.target.closest('.gl-retry');
     if (rt) {   // 点“重试”：只把这个群的卡片改回加载中再取一次，不整页重绘（以前会把翻历史的人拽回底部）
       const gid = rt.dataset.gid; delete GL.fail[gid]; delete GL.busy[gid];
@@ -7440,7 +7522,7 @@ function bindUI() {
       ]);
       return;
     }
-    openActs('聊天选项', [{ label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
+    openActs('聊天选项', [{ label:'一起导航', fn:() => openNavigation(S.peer) }, { label: '发送文件', fn: () => $('doc-input').click() }, { label: '查看资料 / 设置备注', fn: () => setTimeout(() => openProfile(S.peer), 50) }, { label: '专属聊天背景', fn: openFriendBgMenu }, { label: '搜索聊天记录', fn: openSearch }, { label: '导出聊天记录', fn: () => exportChat(key) }, { label: isPinned(key) ? '取消置顶' : '置顶聊天', fn: () => togglePin(key) }, { label: isMuted(key) ? '关闭消息免打扰' : '消息免打扰', fn: () => toggleMute(key) }, { label: '清空聊天记录', danger: true, fn: () => setTimeout(() => confirmClear(key, false), 50) }, { label: '取消', fn: null }]);
   };
   $('cs-close').onclick = closeSearch;
   $('cs-input').addEventListener('input', () => { clearTimeout(csT); csT = setTimeout(() => runChatSearch($('cs-input').value), 300); });
@@ -7897,6 +7979,7 @@ $('btn-export').onclick = () => {
   openActs('导出哪个聊天？', list);
 };
 $('btn-msearch').onclick = searchMsgs;
+$('btn-navigation').onclick = () => openNavigation(null);
 $('btn-web').onclick = function () { openWS(); };
 $('msg-menu-multi').onclick = function () { const id = menuId; closeMenu(); startMulti(id); };
 $('multi-del').onclick = multiDel;

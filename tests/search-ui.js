@@ -75,6 +75,7 @@ window.__chWS = {
     if (b.type === 'deep') return DATA.DEEP;
     if (b.type === 'images') return DATA.IMGS;
     if (b.type === 'videos') return DATA.VIDS;
+    if (b.q === 'example 门票') return {ok:true,type:'web',items:[{u:'https://example.org/ticket',t:'示例信息'}]};
     if (b.q === '测官网') return Object.assign({}, DATA.WEB, { q: b.q, wiki: { t: '测试条目', s: '测试用的百科卡片，带官网。', site: 'https://arxiv.org/' } });
     if (/^[\\x00-\\x7f]+$/.test(b.q)) return Object.assign({}, DATA.EN, { q: b.q });
     return b.src === 'tavily' ? Object.assign({}, DATA.TAV, { q: b.q }) : Object.assign({}, DATA.WEB, { q: b.q });
@@ -357,6 +358,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await typeGo('测官网'); await pg.waitForSelector('.ws-r a.t');
       const off2 = await pg.$eval('.ws-r', e => ({ t: e.textContent, h: (e.querySelector('a.t') || {}).href || '' }));
       ok(/官网/.test(off2.t) && /arxiv\.org/.test(off2.h), '维基数据给了官网：结果里那条官网提到第一并标“官网”（排在置顶前面）→ ' + off2.h);
+      await typeGo('example 门票'); await pg.waitForSelector('.ws-r a.t');
+      ok(await pg.locator('.ws-r .ws-tag.off').count()===0,'搜索词碰巧等于域名，缺少可靠出处时不能标成官网');
       await pg.evaluate(() => Object.defineProperty(navigator, 'standalone', { configurable: true, get: () => false }));
       ok(!errs.length, '“什么都能打开”和官网排第一没有报错 ' + errs.join(' | '));
     }
