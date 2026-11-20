@@ -1,5 +1,9 @@
--- 候选版，仅在批准后的目标环境执行。整份启用双人同行，可用的 pg_cron 会一并启用。
--- 部署前将 chatter_navigation_private.trips 排除在数据转储之外。回滚和范围见 docs/导航与整站复查-20261120.md。
+-- 导航“一起走”（两个人实时同行）用的 SQL。整份复制，粘贴到 Supabase 的 SQL 编辑器里运行一次。
+-- 打开：https://supabase.com/dashboard/project/uaoiqbxptnbrvkzjwguc/sql/new
+-- 点右下角“Run”（运行）；如果弹出“Potential issue detected with your query”（检测到查询可能有问题），点“Run this query”（运行此查询）。
+-- 运行完，下面结果表里每一行的“通过”都应该是 true（是）。可以重复运行，不会出错。
+-- 做了什么：建一张只放 30 分钟到 3 小时临时位置的表（只有服务器能读写）、一个只有互为好友的两个人能调用的接口、每分钟自动删掉到期的位置。
+-- 每日备份已经改成不导出这张表（11-20 已改好并跑通）。撤销用 supabase/rollback/20261120024725_chatter_navigation.sql。
 begin;
 create schema if not exists chatter_navigation_private;
 revoke all on schema chatter_navigation_private from public, anon, authenticated;
@@ -131,5 +135,6 @@ select '前端可调用的导航接口' as 项目,has_function_privilege('authen
 union all select '匿名不可调用',not has_function_privilege('anon','public.chatter_navigation(text,text,uuid,jsonb)','execute')
 union all select '前端无临时表读取权',not has_table_privilege('authenticated','chatter_navigation_private.trips','select')
 union all select '前端无临时表写入权',not has_table_privilege('authenticated','chatter_navigation_private.trips','insert')
-union all select '临时表为无日志表且启用行级安全',exists(select 1 from pg_class where oid='chatter_navigation_private.trips'::regclass and relpersistence='u' and relrowsecurity);
+union all select '临时表为无日志表且启用行级安全',exists(select 1 from pg_class where oid='chatter_navigation_private.trips'::regclass and relpersistence='u' and relrowsecurity)
+union all select '每分钟清理到期位置的定时工具（pg_cron）已开',exists(select 1 from pg_extension where extname='pg_cron');
 -- 生产单独检查：select schedule,active from cron.job where jobname='chatter-navigation-expiry'; 应为每分钟、active=true。
