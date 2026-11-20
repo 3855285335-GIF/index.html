@@ -275,10 +275,13 @@ async function loadList(key, more) {   // key：'trend:曲风' 热门 / 'q:搜�
   const L = M.lists[key] = more ? M.lists[key] : { items: [], loading: true, err: '', done: false };
   if (more) { if (L.loading || L.done) return; L.loading = true; L.more = true; }
   const my = ++M.seq, account = acct;
-  let r = null, err = '';
+  let r = null, raw = 0, err = '';
+  const PAGE = 30;
   try {
-    if (key.indexOf('trend:') === 0) { const g = key.slice(6); r = tracksOf(await au('/tracks/trending', Object.assign({ time: 'week', limit: 50 }, g ? { genre: g } : {}))); }
-    else r = tracksOf(await au('/tracks/search', { query: key.slice(2), limit: 30, offset: L.items.length }));
+    let j;
+    if (key.indexOf('trend:') === 0) { const g = key.slice(6); j = await au('/tracks/trending', Object.assign({ time: 'week', limit: 50 }, g ? { genre: g } : {})); }
+    else j = await au('/tracks/search', { query: key.slice(2), limit: PAGE, offset: L.off || 0 });   // 位置按 Audius 给过的条数算（不是能播的条数）
+    raw = ((j && j.data) || []).length; r = tracksOf(j);
   } catch (e) { err = (e && e.message) || '出错了'; }
   if (account !== acct) return;
   L.loading = false; L.more = false;
@@ -286,8 +289,9 @@ async function loadList(key, more) {   // key：'trend:曲风' 热门 / 'q:搜�
   else {
     const seen = new Set(L.items.map(x => x.id));
     const add = r.filter(x => !seen.has(x.id));
-    L.items = L.items.concat(add);
-    L.done = key.indexOf('trend:') === 0 || r.length < 20 || !add.length;   // 热门一次拿 50 首就够；搜索不满一页说明没有了
+    L.items = L.items.concat(add); L.off = (L.off || 0) + raw;
+    L.done = key.indexOf('trend:') === 0 || raw < PAGE;   // 热门一次拿 50 首就够；搜索：Audius 给的不满一页才算到底（能播的少不算）
+    if (!L.done && key.indexOf('q:') === 0 && L.items.length < 10 && (L.pages = (L.pages || 0) + 1) < 4) { L.loading = false; loadList(key, true); return; }   // 能播的太少：自动再取一页（最多几页）
   }
   void my;
   const t = M.on && top(); if (t && (t.v === 'home' || (t.v === 'list' && t.d.key === key))) show();
@@ -342,7 +346,8 @@ function ensureAudio() {
 }
 function playAt(list, i, from) {   // 把这串歌作为播放列表，从第 i 首开始放
   if (!list || !list[i]) return;
-  M.q = list.slice(0, 200); M.i = i; M.order = null; M.from = from || '';
+  const start = Math.max(0, Math.min(i - 100, list.length - 200));   // 播放列表最多 200 首：取所选这首前后的一段（以前只取前 200 首，第 201 首就放不了）
+  M.q = list.slice(start, start + 200); M.i = i - start; M.order = null; M.from = from || '';
   startCur(true);
 }
 function startCur(autoplay, keepPos) {   // keepPos：重开 App 后第一次点播放，从上次的位置接着放
@@ -494,12 +499,20 @@ function restore() {   // 重开 App：把上次的播放列表放回来（不�
 }
 
 /* ---------- 点击 ---------- */
+function playNext(t) {   // 把这首排到正在放的那首后面：先记住正在放的是哪首，再从列表里拿掉重复的、插进去
+  const c = cur(); if (!c || !t) return;
+  if (c.id === t.id) { B.toast('正在放的就是这首'); return; }
+  const q = M.q.filter(x => x.id !== t.id), k = q.findIndex(x => x.id === c.id);
+  if (k < 0) return;
+  q.splice(k + 1, 0, t); M.q = q.slice(0, 200); M.i = k; M.order = null; saveNow();
+  B.toast('下一首放“' + t.t + '”'); show();
+}
 function rowList(from) { return from === 'up' ? M.upList : (listOf(from) || {}).items; }
 function trackActs(t, from, i) {
   const liked = isLiked(t.id);
   B.acts(t.t, [
     { label: liked ? '取消喜欢' : '喜欢', fn: () => { const on = toggleLike(t); B.toast(on ? '已加到“我喜欢”' : '已取消喜欢'); show(); } },
-    cur() && M.q.length ? { label: '下一首播放', fn: () => { M.q = M.q.filter((x, k) => k === M.i || x.id !== t.id); M.i = M.q.findIndex(x => x.id === cur().id); M.q.splice(M.i + 1, 0, t); M.order = null; saveNow(); B.toast('下一首放“' + t.t + '”'); show(); } } : null,
+    cur() && M.q.length ? { label: '下一首播放', fn: () => playNext(t) } : null,
     { label: '发给好友', fn: () => B.forward(t.t + (t.a ? ' — ' + t.a : '') + '\nhttps://audius.co' + (t.p || '')) },
     from === 'recent' ? { label: '从最近播放里删掉', fn: () => { LSs(uidKey('ch2muRecent'), recent().filter(x => x.id !== t.id)); show(); } } : null,
     { label: '取消', fn: null }
@@ -538,8 +551,9 @@ function onClick(e) {
 function resetAccount() {
   acct++;
   if (audio) { try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (e) { /* 没关系 */ } }
-  M.q = []; M.i = -1; M.order = null; M.lists = {}; M.restored = false; M.genre = '';
+  M.q = []; M.i = -1; M.order = null; M.lists = {}; M.restored = false; M.genre = ''; M.upList = []; M.resumeAt = 0;
   close();
+  if (root) { root.remove(); root = null; }   // 页面整个拿掉、下次重建：搜索框、列表里不会留着上一个账号的东西
   if (mini) { mini.remove(); mini = null; }
   try { if (navigator.mediaSession) { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } } catch (e) { /* 不支持就算了 */ }
 }
@@ -548,6 +562,6 @@ window.ChatterMusic = {
   open: open, onPop: onPop, isOpen: () => M.on, closeNow: close, resetAccount: resetAccount, restore: () => { restore(); },
   toggle: () => toggle(), next: () => step(1), pause: () => { if (audio && !audio.paused) audio.pause(); },
   now: () => { const t = cur(); return t ? { t: t.t, a: t.a, art: t.s, playing: !!(audio && !audio.paused) } : null; },
-  _m: M, _toTrack: toTrack, _au: AU, _play: (list, i) => playAt(list, i)
+  _m: M, _toTrack: toTrack, _au: AU, _play: (list, i) => playAt(list, i), _next: t => playNext(t)
 };
 })();
