@@ -1,0 +1,54 @@
+name: check-music
+# 手动运行：在 GitHub 的服务器上直接调一次音乐来源的公开接口，看返回的格式（不用密钥、不存任何东西）
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  audius:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audius 节点列表
+        run: |
+          curl -sS -m 20 https://api.audius.co/ | head -c 600; echo
+      - name: Audius 搜歌（不带密钥）
+        run: |
+          H=$(curl -sS -m 20 https://api.audius.co/ | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(d[0] if d else "https://discoveryprovider.audius.co")')
+          echo "节点：$H"
+          curl -sS -m 20 -w '\nHTTP %{http_code}\n' "$H/v1/tracks/search?query=lofi&app_name=Chatter&limit=2" | python3 -c '
+          import sys, json
+          raw = sys.stdin.read(); body, _, code = raw.rpartition("\nHTTP ")
+          print("状态", code.strip())
+          try:
+              d = json.loads(body)
+          except Exception:
+              print(body[:800]); sys.exit(0)
+          t = (d.get("data") or [{}])[0]
+          print("字段:", sorted(t.keys()))
+          for k in ["id","title","duration","permalink","is_streamable","is_stream_gated","stream_conditions","access","is_delete","is_unlisted","genre","mood","play_count"]:
+              print(k, "=", json.dumps(t.get(k), ensure_ascii=False)[:200])
+          print("artwork =", json.dumps(t.get("artwork"), ensure_ascii=False)[:400])
+          u = t.get("user") or {}
+          print("user 字段:", sorted(u.keys())[:40])
+          print("user.name =", u.get("name"), " handle =", u.get("handle"))
+          '
+      - name: Audius 直接用 api.audius.co/v1（不带密钥）
+        run: |
+          curl -sS -m 20 -o /tmp/a.json -w 'HTTP %{http_code}\n' "https://api.audius.co/v1/tracks/trending?app_name=Chatter&limit=1"; head -c 300 /tmp/a.json; echo
+      - name: Audius 播放地址（只看跳转，不下载）
+        run: |
+          H=$(curl -sS -m 20 https://api.audius.co/ | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(d[0] if d else "https://discoveryprovider.audius.co")')
+          ID=$(curl -sS -m 20 "$H/v1/tracks/trending?app_name=Chatter&limit=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])')
+          curl -sS -m 20 -o /dev/null -D - "$H/v1/tracks/$ID/stream?app_name=Chatter" | grep -iE '^(HTTP|location|content-type|access-control-allow-origin|accept-ranges)' | sed -E 's/(signature|sig)=[^&]*/\1=…/g' | cut -c1-220
+          echo "节点上的 CORS："; curl -sS -m 20 -o /dev/null -D - -H 'Origin: https://3855285335-gif.github.io' "$H/v1/tracks/search?query=a&app_name=Chatter&limit=1" | grep -i 'access-control' || echo 没有
+      - name: Audius 各曲风的热门（看曲风名字对不对）
+        run: |
+          for g in Electronic "Hip-Hop/Rap" Pop Rock Lo-Fi Ambient Jazz Classical "R&B/Soul" Alternative Soundtrack; do
+            n=$(curl -sS -m 20 -G "https://api.audius.co/v1/tracks/trending" --data-urlencode "genre=$g" --data-urlencode "app_name=Chatter" --data-urlencode "limit=5" | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(len(d), "|", "; ".join((t.get("genre") or "") for t in d[:3]))')
+            echo "$g → $n"
+          done
+          for tm in week month year allTime; do
+            n=$(curl -sS -m 20 "https://api.audius.co/v1/tracks/trending?time=$tm&app_name=Chatter&limit=3" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("data") or []))'); echo "time=$tm → $n"
+          done
+          echo "搜索翻页：offset=10"; curl -sS -m 20 "https://api.audius.co/v1/tracks/search?query=piano&app_name=Chatter&limit=5&offset=10" | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(len(d), [t["title"][:30] for t in d])'
+          echo "中文搜索："; curl -sS -m 20 -G "https://api.audius.co/v1/tracks/search" --data-urlencode "query=周杰伦" --data-urlencode "app_name=Chatter" --data-urlencode "limit=5" | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(len(d), [t["title"][:30] for t in d])'
+          echo "可以播放的比例（access.stream）："; curl -sS -m 20 "https://api.audius.co/v1/tracks/trending?app_name=Chatter&limit=50" | python3 -c 'import sys,json; d=json.load(sys.stdin).get("data") or []; print(len(d), "条里 access.stream=true 的", sum(1 for t in d if (t.get("access") or {}).get("stream")), "条；is_stream_gated 的", sum(1 for t in d if t.get("is_stream_gated")), "条")'

@@ -88,12 +88,24 @@ async function read(page, peer, id) {
     assert.ok((await read(c, bob, pending.id)).error);
     assert.equal(await bn.locator('#plan-go').isVisible(), false);
     assert.equal(await bn.locator('#back').innerText(), '返回聊天');
+    const guestFrame = b.frames().find((f) => f.url().includes('/navigation.html'));
+    await guestFrame.evaluate(() => {
+      window.navSpoken = [];
+      Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+        speak: u => navSpoken.push(u.text), cancel() {}, getVoices: () => [{ lang: 'zh-CN', localService: true }]
+      } });
+      Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: class { constructor(text) { this.text = text; } } });
+    });
+    await bn.locator('#open-sound').click();
+    await bn.locator('#sound-options [value=voice]').check();
+    await bn.locator('#close-sound').click();
     await bn.locator('#accept').click();
     await an.locator('#share').click();
     await bn.locator('#share').click();
     await an.locator('#other').filter({ hasText: '好友更新于' }).waitFor();
     await bn.locator('#other').filter({ hasText: '好友更新于' }).waitFor();
     await bn.locator('#separation').filter({ hasText: '直线相距约' }).waitFor();
+    assert.equal(await guestFrame.evaluate(() => navSpoken.filter(s => s === '双方已加入同行。').length), 1);
     const view = (await read(b, alice)).data;
     assert.equal(view.peerFix.lat, 31.21);
     assert.equal(view.peerFix.lon, 121.45);
@@ -105,9 +117,11 @@ async function read(page, peer, id) {
     await offerPoint(an, '南入口', 31.219, 121.452);
     await bn.locator('#agree').waitFor();
     assert.equal(await bn.locator('#dest-name').innerText(), '测试场馆东入口');
+    assert.equal(await guestFrame.evaluate(() => navSpoken.filter(s => s.includes('提议更换')).length), 1);
     await bn.locator('#agree').click();
     await an.locator('#dest-name').filter({ hasText: '南入口' }).waitFor();
     assert.equal((await read(a, bob)).data.destination.lon, 121.452);
+    assert.equal(await guestFrame.evaluate(() => navSpoken.filter(s => s.includes('会合点已更新为南入口')).length), 1);
     const frame = b.frames().find((f) => f.url().includes('/navigation.html'));
     const stale = await frame.evaluate(() => {
       const now = Date.now;
@@ -142,6 +156,30 @@ async function read(page, peer, id) {
     assert.equal(await solo.locator('#together').isVisible(),false);
     assert.equal(await solo.locator('#back').innerText(), '返回应用');
     await solo.locator('#back').click();await b.locator('#btn-navigation').waitFor();
+
+    await b.click('.app-nav [data-tab="convs"]');
+    await b.click('#btn-apps');
+    await b.click('#apps-view [data-app="map"]');
+    await b.frameLocator('iframe[title="导航"]').locator('#back').click();
+    const musicIcon = b.locator('#apps-view.on .ap-grid [data-app="music"]');
+    await musicIcon.click();
+    await b.locator('.mu-v.on[data-v="home"] [data-act="back"]').click();
+    await musicIcon.waitFor();
+    // 播放器使用本地 WAV 夹具，检查两个真实模块的音频协调，无需请求外部歌曲。
+    await b.evaluate(async () => {
+      const audio = document.getElementById('mu-audio');
+      audio.src = 'vendor/navigation-cue.wav'; audio.loop = true; await audio.play();
+    });
+    await b.click('#apps-view .ap-grid [data-app="map"]');
+    await solo.locator('#open-sound').click();
+    assert.equal(await b.evaluate(() => document.getElementById('mu-audio').paused), false);
+    await solo.locator('#try-sound').click();
+    assert.equal(await b.evaluate(() => document.getElementById('mu-audio').paused), true);
+    await solo.locator('#close-sound').click();
+    await solo.locator('#back').click();
+    await musicIcon.waitFor();
+    console.log('真实音乐播放器用本地音频播放；打开静音导航继续播，主动试听后暂停音乐。');
+    console.log('共用应用页的导航可打开并返回格子；搜索、音乐入口仍在。');
     console.log('「我 → 应用 → 导航」可独立打开并返回，不向任何好友广播位置。');
     await a.close();
     await b.close();

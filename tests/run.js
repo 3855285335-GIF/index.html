@@ -532,7 +532,7 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
       }
       return resp({ sent: 1 });
     };
-    w.localStorage.setItem('ch2ws:' + env.T.S.uid, JSON.stringify({ pin: ['pin.dev'], open: 'read' }));   // 这组检查走“先简洁阅读”；“先显示原网页”在 search-ui.js 里用真浏览器测
+    w.localStorage.setItem('ch2ws:' + env.T.S.uid, JSON.stringify({ pin: ['pin.dev'] }));   // 假服务器说所有网站都不让嵌：点结果会在 App 里显示取来的内容；能嵌的原网页在 search-ui.js 里用真浏览器测
     click(env, env.$('btn-web')); await sleep(50);
     const sc = Array.from(w.document.querySelectorAll('script')).find(x => /search\.js\?v=/.test(x.getAttribute('src') || ''));
     ok(sc && !w.ChatterSearch, '点放大镜没有去下载 search.js');
@@ -548,14 +548,14 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
     ok(/隐藏了 1 条营销号/.test(ws.textContent) && ws.querySelector('.ws-kg') && /词条/.test(ws.querySelector('.ws-kg').textContent), '营销号提示或百科卡片没显示');
     const rows = Array.from(ws.querySelectorAll('.ws-r'));
     click(env, rows[3]); await sleep(80);
-    ok(!opened.length && on() === 'web' && /用 Safari 窗口打开/.test(ws.querySelector('.ws-v.on').textContent), '要登录的网站（在 Safari 浏览器里用时）：不该自动跳出去，不让嵌时应该给出“用 Safari 窗口打开”：' + on() + ' ' + opened[0]);
-    click(env, ws.querySelector('.ws-v.on [data-act="web-ext"]')); await sleep(20);
-    ok(opened[0] === 'https://x.com/a/status/1', '点“用 Safari 窗口打开”没打开：' + opened[0]);
+    ok(!opened.length && on() === 'read' && H.state.ws === 3 && /不让别的 App 显示它的原网页/.test(ws.querySelector('.ws-v.on').textContent) && ws.querySelector('[data-r="rorig"]').textContent === '在浏览器打开', '不让嵌的网站：不该自动跳出去，应该在 App 里显示取来的内容、右上角给“在浏览器打开”：' + on() + ' ' + opened[0]);
+    click(env, ws.querySelector('.ws-v.on [data-r="rorig"]')); await sleep(20);
+    ok(opened[0] === 'https://x.com/a/status/1', '点“在浏览器打开”没打开：' + opened[0]);
     H.back(); await sleep(120);
-    ok(on() === 'res' && H.state.ws === 2, '从原网页那一层返回没回到结果页：' + on());
+    ok(on() === 'res' && H.state.ws === 2, '从取来的内容那一层返回没回到结果页：' + on());
     click(env, ws.querySelectorAll('.ws-r')[2]); await sleep(150);   // 返回结果页时列表重画过：重新取
     const rd = calls.filter(x => x.op === 'read').pop();
-    ok(on() === 'read' && H.state.ws === 3 && rd && rd.url === 'https://a.example.com/1', '点结果没进简洁阅读');
+    ok(on() === 'read' && H.state.ws === 3 && rd && rd.url === 'https://a.example.com/1', '点结果没在 App 里显示取来的内容');
     const body = ws.querySelector('.ws-body');
     ok(body && /正文/.test(body.textContent) && !/script|onclick|onerror|javascript:|iframe|alert/.test(body.innerHTML), '正文没洗干净：' + (body && body.innerHTML));
     ok(body.querySelector('img').getAttribute('referrerpolicy') === 'no-referrer', '文章图片没加 no-referrer（会被防盗链拦）');
@@ -828,6 +828,61 @@ test('动态点赞：数据库返回错误时恢复计数，可重新提交', as
   } finally { env.close(); }
 });
 
+test('应用页：右上角“应用”打开小组件 + 图标格子；点“音乐”才下载 music.js；返回一层层退；音乐请求直接发给 Audius（不经过我们的服务器）', async () => {
+  const fs = require('fs'), t = Date.now(), env = makeEnv({ db: baseDb(t) });
+  try {
+    await env.login(); await sleep(200);
+    const w = env.w, H = w.history, d = w.document, calls = [];
+    const resp = j => ({ ok: true, status: 200, json: async () => j });
+    const TR = n => ({ id: 'tr' + n, title: '测试歌 ' + n, duration: 125 + n, permalink: '/u/song-' + n, access: { stream: true }, artwork: { '150x150': 'https://art.example/' + n + '/150.jpg', '480x480': 'https://art.example/' + n + '/480.jpg' }, user: { name: '歌手 ' + n, handle: 'u' + n } });
+    w.fetch = async u => {
+      u = String(u); calls.push(u);
+      if (u === 'https://api.audius.co/') return resp({ data: ['https://api.audius.co'] });
+      if (u.indexOf('https://api.audius.co/v1/tracks/trending') === 0) return resp({ data: [TR(1), TR(2), Object.assign(TR(3), { access: { stream: false } }), Object.assign(TR(4), { stream_conditions: { usdc_purchase: {} } })] });
+      return resp({ sent: 1 });
+    };
+    click(env, env.$('btn-apps')); await sleep(30);
+    const av = env.$('apps-view');
+    ok(av && av.classList.contains('on') && H.state && H.state.apps === 1, '点“应用”没打开应用页：' + JSON.stringify(H.state));
+    const names = Array.from(av.querySelectorAll('.ap-ic')).map(x => x.textContent.trim());
+    ok(names.join(',') === '搜索,音乐,导航' && /音乐[\s\S]*点这里听歌/.test(av.querySelector('.apw').textContent), '应用页应该有音乐小组件和“搜索、音乐、导航”三个图标：' + names.join(','));
+    ok(!Array.from(d.querySelectorAll('script')).some(x => /music\.js/.test(x.getAttribute('src') || '')), '还没点音乐就下载了 music.js');
+    click(env, av.querySelector('[data-app="music"]')); await sleep(30);
+    const sc = Array.from(d.querySelectorAll('script')).find(x => /music\.js\?v=/.test(x.getAttribute('src') || ''));
+    ok(sc && !w.ChatterMusic, '点“音乐”没有去下载 music.js');
+    w.eval(fs.readFileSync(path.join(ROOT, 'music.js'), 'utf8')); sc.onload(); await sleep(200);
+    const mu = env.$('mu');
+    ok(mu && mu.classList.contains('on') && H.state && H.state.mu === 1, '音乐首页没打开：' + JSON.stringify(H.state));
+    const rows = Array.from(mu.querySelectorAll('.mu-row .mu-rt')).map(x => x.textContent);
+    ok(rows.join(',') === '测试歌 1,测试歌 2', '热门列表不对（不能直接播的两首要去掉）：' + rows.join(','));
+    ok(calls.some(u => /^https:\/\/api\.audius\.co\/v1\/tracks\/trending\?app_name=Chatter&time=week&limit=50$/.test(u)) && !calls.some(u => /functions\/v1/.test(u) && /audius/.test(u)), '热门应该直接问 Audius（带 app_name、本周、50 首）：' + calls.filter(u => /audius/.test(u)).join(' | '));
+    H.back(); await sleep(150);
+    ok(!mu.classList.contains('on') && av.classList.contains('on'), '音乐首页返回：应该回到应用页');
+    H.back(); await sleep(150);
+    ok(!av.classList.contains('on'), '应用页返回：应该关掉');
+    ok(d.querySelector('#app-view .app-nav') && !d.getElementById('mu-mini'), '没放过歌：不该出现迷你播放条');
+  } finally { env.close(); }
+});
+test('主题：系统画的部分（键盘、输入框、网页框底色、状态栏）跟着“我”里的主题，不跟手机系统（手机深色、App 浅色时不再先黑一下）', async () => {
+  const t = Date.now(), env = makeEnv({ db: baseDb(t) });
+  try {
+    await env.login(); await sleep(150);
+    const d = env.w.document, cs = () => d.querySelector('meta[name="color-scheme"]').getAttribute('content'), tc = () => Array.from(d.querySelectorAll('meta[name="theme-color"]')).map(m => m.getAttribute('content')).join(',');
+    if (!d.querySelector('meta[name="color-scheme"]')) {   // 测试页面没有 index.html 的 <head>：照着补上这三个标签
+      d.head.insertAdjacentHTML('beforeend', '<meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#12101c" media="(prefers-color-scheme: dark)"><meta name="color-scheme" content="light dark">');
+    }
+    const st = () => env.w.localStorage.getItem('ch2theme');
+    const go = async want => { for (let i = 0; i < 4 && JSON.parse(st() || '"auto"') !== want; i++) { click(env, env.$('btn-theme')); await sleep(10); } };
+    await go('light');
+    ok(d.documentElement.getAttribute('data-theme') === 'light' && cs() === 'light' && tc() === '#f6f3ee,#f6f3ee', '选浅色：color-scheme、状态栏颜色都该是浅色：' + cs() + ' ' + tc());
+    await go('dark');
+    ok(d.documentElement.getAttribute('data-theme') === 'dark' && cs() === 'dark' && tc() === '#12101c,#12101c', '选深色：都该是深色：' + cs() + ' ' + tc());
+    await go('auto');
+    ok(!d.documentElement.hasAttribute('data-theme') && cs() === 'light dark' && tc() === '#f6f3ee,#12101c', '跟随系统：恢复成按系统：' + cs() + ' ' + tc());
+    const html = require('fs').readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    ok(/html\[data-theme="light"\] \{\s*color-scheme: light;/.test(html) && /html\[data-theme="dark"\] \{\s*color-scheme: dark;/.test(html) && /meta\[name="color-scheme"\][\s\S]{0,80}setAttribute\('content', v\)/.test(html), 'index.html 开头没有先按 App 的主题定 color-scheme（重开时会先按系统画一帧）');
+  } finally { env.close(); }
+});
 test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊天图片、文件链接照旧', async () => {
   const fs = require('fs'), t = Date.now(), db = baseDb(t);
   serverInsert(db, msg(1, 'bob', 'bob::me', '看看这个 https://news.example.com/a 不错', t - 500));
@@ -1064,7 +1119,7 @@ async function lint() {
       }
     }]
   });
-  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js']);
+  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js', 'music.js']);
   const errs = [];
   res.forEach(r => r.messages.forEach(m => { if (m.severity === 2) errs.push(path.basename(r.filePath) + ' 第 ' + m.line + ' 行：' + m.message); }));
   return errs;
@@ -1073,7 +1128,7 @@ async function lint() {
 (async () => {
   let bad = 0;
   const t0 = Date.now();
-  process.stdout.write('代码检查（app.js、sw.js、search.js）… ');
+  process.stdout.write('代码检查（app.js、sw.js、search.js、music.js）… ');
   try { const errs = await lint(); if (errs.length) { bad++; console.log('❌'); errs.slice(0, 30).forEach(e => console.log('   ' + e)); } else console.log('✅'); }
   catch (e) { bad++; console.log('❌ 代码检查没跑起来：' + e.message); }
   for (const tc of tests) {

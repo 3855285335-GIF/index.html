@@ -149,7 +149,7 @@ $('go').onclick = async () => {
   $('go').disabled = false; $('go').textContent = '再测一次'; $('copy').disabled = false;
 };
 $('copy').onclick = async () => {
-  const txt = '音乐和地图来源测试结果（' + new Date().toLocaleString('zh-CN') + '，' + (navigator.userAgent.includes('iPhone') ? 'iPhone' : '其他设备') + '）\n' +
+  const txt = '音乐和地图来源测试结果（' + new Date().toLocaleString('zh-CN') + '，' + (/iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? '安卓手机' : '电脑或其他设备') + '）\n' +
     Object.entries(results).map(([k, v]) => k + '：' + v).join('\n');
   try { await navigator.clipboard.writeText(txt); $('copy').textContent = '已复制，发给 Claude 就行'; }
   catch (e) { prompt('复制下面的文字发给 Claude：', txt); }

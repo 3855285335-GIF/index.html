@@ -91,6 +91,14 @@ npm i --no-save @electric-sql/pglite@0.2.17 && node sql-1118-search-test.mjs   #
 
 Deno 没装的话：`npm i --no-save deno@2.5.6`，然后用 `node_modules/.bin/deno`。
 
+## 音乐（11-20）
+
+```bash
+node music-ui.js [截图目录]   # 真 Chromium：音乐 48 项（假的 Audius：热门、曲风、搜歌翻页、播放 / 暂停 / 上一首 / 下一首、放完自动下一首、单曲循环、随机、拖进度条、喜欢、最近播放、
+                              # 放不出来自动换下一首、别的声音开始时停、迷你播放条、重开恢复、换账号停、小屏、封面换备用服务器），浅色深色各截 4 张
+```
+`npm test` 里还有一组“应用页”：点“应用”才出来、点“音乐”才下载 music.js、返回一层层退、热门直接问 Audius。
+
 ## 朋友圈权限（11-19）
 
 ```bash
@@ -122,3 +130,5 @@ cd tests && deno run -A --node-modules-dir=none fn-backup-test.ts   # 23 项：�
 ## 导航和整站复查
 
 沿用上述测试依赖。执行 `node navigation-standalone.cjs` 检查不同城市的同名地点、步行/骑行路线终点偏离和浏览器离线失败反馈；`node sw-cache-failure.cjs` 检查缓存不可用时的联网加载和通知目标；`node sql-navigation-test.mjs` 使用独立 PGlite 验证同行迁移、授权、时间边界、解除好友与回滚。配置好隔离 Auth、PostgREST、Realtime 和本次导航迁移后，可运行 `CHATTER_NAV_PREVIEW=http://127.0.0.1:58780 node navigation-browser.cjs`。该脚本只接受环回预览地址，使用三个独立测试账号和浏览器提供的测试坐标。
+
+导航声音与音乐交叉验收沿用上述两套 Chromium 脚本。单人脚本加载实际提示音文件，使用语音替身检查静音、按需试听、本机普通话缺失回退和逐段预览。三账号脚本检查自动播报不会因定位轮询重复，并验证共用的「应用」格子。运行隔离预览时还需提供 navigation-sound.js、vendor/navigation-cue.wav 和 vendor/earth-relief-50m.webp。真机音色、锁屏和耳机表现需要单独试听。

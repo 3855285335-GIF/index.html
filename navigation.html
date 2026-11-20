@@ -6,11 +6,11 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>导航 · Chatter</title>
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="navigation.css?v=20261120h" />
+  <link rel="stylesheet" href="navigation.css?v=20261120i" />
   <script defer src="vendor/leaflet/leaflet.js"></script>
   <script defer src="vendor/natural-earth-110m.js"></script>
-  <script defer src="navigation-sound.js?v=20261120h"></script>
-  <script defer src="navigation.js?v=20261120h"></script>
+  <script defer src="navigation-sound.js?v=20261120i"></script>
+  <script defer src="navigation.js?v=20261120i"></script>
 </head>
 <body>
   <header class="mast"><div class="mast-inner">
@@ -19,7 +19,7 @@
   </div></header>
   <main>
     <section id="map-section" class="card map-card" aria-labelledby="map-title">
-      <div class="map-head"><div><h2 id="map-title">地图总览</h2><p id="map-caption">拖动或放大地图，查看不同地点。</p></div><span class="north" aria-label="地图上方为北">N</span></div>
+      <div class="map-head"><div><h2 id="map-title">地图总览</h2><p id="map-caption">放大地图可查看街道。</p></div><span class="north" aria-label="地图上方为北">N</span></div>
       <div id="map" aria-label="交互地图" role="region"></div>
       <div class="map-foot"><button id="map-expand" aria-haspopup="dialog">全屏地图</button><button id="map-region" hidden>看区域总览</button><button id="pick">在图上选点</button><button id="recenter" hidden>显示全部位置</button>
       <p id="map-status" role="status"></p></div>
@@ -97,6 +97,7 @@
       <label><input type="radio" name="sound" value="tone" /><span>提示音<small>算好路线或同行有变化时，响一声</small></span></label>
       <label><input type="radio" name="sound" value="voice" /><span>中文播报<small>读出路线摘要和会合点变化</small></span></label>
     </fieldset>
+    <small id="sound-music" hidden>播放导航声音时会暂停 Chatter 音乐。</small>
     <div class="secondary"><button id="try-sound">试听提示音</button><button id="try-voice">试听中文</button></div><p id="sound-status" role="status"></p>
   </dialog>
   <dialog id="map-dialog" aria-labelledby="map-title"></dialog>

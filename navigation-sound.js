@@ -1,5 +1,5 @@
 // 只在内存中保存本次设置。地点、好友和路线文本均不交给远程语音服务。
-function createNavigationSound() {
+function createNavigationSound(beforeSound) {
   const byId = (id) => document.getElementById(id);
   const dialog = byId('sound-dialog');
   let mode = 'off', audio = null, utterance = null, sequence = 0, closed = false;
@@ -29,13 +29,18 @@ function createNavigationSound() {
   function play(kind, message, target) {
     if (closed || document.hidden || kind === 'off') return;
     stop();
+    if (!beforeSound()) {
+      target.textContent = '通话或录音期间，导航只显示文字。';
+      return;
+    }
     const seq = sequence;
     if (kind === 'tone') {
       tone('正在播放提示音。', target, seq);
       return;
     }
     const synth = window.speechSynthesis;
-    const voice = synth?.getVoices().find((v) => v.localService && /^(zh([-_](CN|Hans|SG))?($|[-_])|cmn)/i.test(v.lang));
+    const voices = (synth?.getVoices() || []).filter((v) => v.localService && /^(?:cmn(?:[-_]|$)|zh(?:$|[-_](?:CN|SG|Hans|TW)(?:[-_]|$)))/i.test(v.lang));
+    const voice = voices.find((v) => /^zh[-_]CN$/i.test(v.lang)) || voices[0];
     if (!voice || typeof window.SpeechSynthesisUtterance !== 'function') {
       tone('设备未提供本机普通话语音，已改用提示音。', target, seq);
       return;

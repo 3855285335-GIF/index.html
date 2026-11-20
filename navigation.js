@@ -1,14 +1,14 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const sound = window.createNavigationSound?.();
+  let bridge = null;
+  const sound = window.createNavigationSound?.(() => bridge?.beforeSound?.() !== false);
   if (!sound) {
     $('open-sound').hidden = true;
     $('hear-route').hidden = true;
   }
   const recents = [];
   let routeSpeech = '';
-  let bridge = null;
   try {
     if (parent !== window) bridge = parent.getChatterNavigation?.(window);
   } catch {
@@ -18,6 +18,7 @@
     for (const [key, value] of Object.entries(bridge.theme))
       if (value) document.documentElement.style.setProperty(key, value);
     document.body.style.fontFamily = bridge.font;
+    $('sound-music').hidden = !bridge.beforeSound;
     $('back').textContent = bridge.peer ? '返回聊天' : '返回应用';
     $('back').hidden = false;
     $('back').onclick = () => bridge.close();
@@ -73,7 +74,7 @@
     if (map || !window.L) return;
     map = L.map('map', { minZoom: 2, maxZoom: 19, scrollWheelZoom: false, worldCopyJump: true });
     map.zoomControl.setPosition('topright');
-    L.control.scale({ imperial: false, maxWidth: 70 }).addTo(map);
+    L.control.scale({ position: 'bottomright', imperial: false, maxWidth: 70 }).addTo(map);
     map.attributionControl.setPrefix(false);
     map.zoomControl.getContainer().querySelectorAll('a').forEach((el, i) => {
       el.title = i === 0 ? '放大地图' : '缩小地图';
@@ -176,7 +177,7 @@
     $('recenter').hidden = !points.length;
     $('map-title').textContent = trip ? '会合地图' : dest ? '目的地地图' : mapAnchor ? '附近地图' : '地图总览';
     $('map-caption').textContent = choosing ? '放大到具体入口，然后轻点地图。'
-      : routeLine ? '已绘制所选路线。' : dest ? dest.name : '拖动或放大地图，查看不同地点。';
+      : routeLine ? '已绘制所选路线。' : dest ? dest.name : '放大地图可查看街道。';
     createMap();
     if (!map) {
       $('map-status').textContent = '地图组件暂不可用，仍可使用上方已核对的地点。';
