@@ -175,7 +175,10 @@ async function read(page, peer, id) {
     assert.equal(await b.evaluate(() => document.getElementById('mu-audio').paused), false);
     await solo.locator('#try-sound').click();
     assert.equal(await b.evaluate(() => document.getElementById('mu-audio').paused), true);
-    await solo.locator('#close-sound').click();
+    // 子框架消费本次返回，主文档不会重新触发 load。
+    await b.evaluate(() => history.back());
+    await solo.locator('#sound-dialog').waitFor({ state: 'hidden' });
+    assert.ok(await solo.locator('#query').isVisible());
     await solo.locator('#back').click();
     await musicIcon.waitFor();
     console.log('真实音乐播放器用本地音频播放；打开静音导航继续播，主动试听后暂停音乐。');

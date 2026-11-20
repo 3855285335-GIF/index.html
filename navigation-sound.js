@@ -1,5 +1,5 @@
 // 只在内存中保存本次设置。地点、好友和路线文本均不交给远程语音服务。
-function createNavigationSound(beforeSound) {
+function createNavigationSound(beforeSound, bindLayer) {
   const byId = (id) => document.getElementById(id);
   const dialog = byId('sound-dialog');
   let mode = 'off', audio = null, utterance = null, sequence = 0, closed = false;
@@ -65,11 +65,11 @@ function createNavigationSound(beforeSound) {
   }
   const sample = '这是 Chatter 导航的声音。算好路线后，你会听到预计用时和距离。';
   const status = byId('sound-status');
-  byId('open-sound').onclick = () => {
+  byId('open-sound').onclick = bindLayer('sound', dialog, () => {
     window.speechSynthesis?.getVoices();
     status.textContent = '';
     dialog.showModal();
-  };
+  });
   byId('close-sound').onclick = () => dialog.close();
   dialog.addEventListener('close', () => { stop(); });
   byId('sound-options').onchange = (e) => {

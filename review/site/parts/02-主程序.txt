@@ -7367,7 +7367,7 @@ function openNavigation(peer, invitation) {
   dialog.className = 'navigation-dialog'; dialog.setAttribute('aria-label','导航');
   frame.title='导航'; frame.allow='geolocation'; dialog.append(frame);
   navPanel = {dialog,frame,peer,invitation,uid:S.uid,chat:S.conv,id:null,sharing:false,notified:null};
-  frame.src='navigation.html?v=20261120i';
+  frame.src='navigation.html?v=20261120j';
   document.body.append(dialog); dialog.showModal();
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeNavigation(); });
   history.pushState({navigation:true},'');

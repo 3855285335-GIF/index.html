@@ -1,8 +1,36 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  const layers = new Map();
+  let returning = false;
+  function bindLayer(name, dialog, show) {
+    layers.set(name, { dialog, show });
+    dialog.addEventListener('close', () => {
+      if (!dialog.open && history.state?.chatterNavLayer === name && !returning) {
+        returning = true;
+        history.back();
+      }
+    });
+    return () => {
+      if (returning || dialog.open) return;
+      if (history.state?.chatterNavLayer !== name) {
+        try { history.pushState({ ...history.state, chatterNavLayer: name }, ''); }
+        catch { /* 系统限制历史记录时仍可用页面按钮关闭。 */ }
+      }
+      show();
+    };
+  }
+  window.addEventListener('popstate', (event) => {
+    returning = false;
+    const selected = event.state?.chatterNavLayer;
+    for (const [name, layer] of layers) {
+      if (name !== selected && layer.dialog.open) layer.dialog.close();
+    }
+    const target = layers.get(selected);
+    if (target && !target.dialog.open) target.show();
+  });
   let bridge = null;
-  const sound = window.createNavigationSound?.(() => bridge?.beforeSound?.() !== false);
+  const sound = window.createNavigationSound?.(() => bridge?.beforeSound?.() !== false, bindLayer);
   if (!sound) {
     $('open-sound').hidden = true;
     $('hear-route').hidden = true;
@@ -227,14 +255,14 @@
     focusPlaceName = toName;
     mapDialog.close();
   }
-  $('map-expand').onclick = () => {
-    if (mapDialog.open) return closeMap();
+  const openMap = bindLayer('map', mapDialog, () => {
     mapDialog.append($('map-section'));
     $('map-expand').textContent = '收起地图';
     mapDialog.showModal();
     map?.invalidateSize();
     $('map-expand').focus();
-  };
+  });
+  $('map-expand').onclick = () => mapDialog.open ? closeMap() : openMap();
   mapDialog.addEventListener('close', () => {
     mapSlot.after($('map-section'));
     $('map-expand').textContent = '全屏地图';
@@ -932,5 +960,6 @@
   window.addEventListener('hashchange', openSharedPlace);
   openSharedPlace();
   render();
+  layers.get(history.state?.chatterNavLayer)?.show();
   poll();
 })();
