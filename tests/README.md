@@ -112,3 +112,9 @@ deno run -A --node-modules-dir=none fn-push-test.ts
 ```
 
 SQL 测试沿用 PGlite，创建独立的合成用户、表和会话。它检查迁移、越权拒绝及逆序回滚，不连接生产数据库；最后再把交给用户运行的合并版（`review/site/parts/04-新增SQL-20261119-安全修复.sql`）连跑两遍，检查表要全是“是”。这组只跑 11-19 修复版那 6 份迁移，之后新增的迁移各有自己的检查。推送测试用假的 Auth、会话检查和推送 RPC。
+
+## 备份服务器函数
+
+```bash
+cd tests && deno run -A --node-modules-dir=none fn-backup-test.ts   # 23 项：只有私有仓库主分支上的“每日备份”任务能拿到数据库连接；别的仓库、分支、任务、过期、伪造签名一律拒绝
+```
