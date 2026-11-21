@@ -209,7 +209,7 @@
 4. 规则里的 `my_acc()` 以后改成 `(select my_acc())` 写法，数据多了更快（现在每行都会查一次会话）。
 5. 数据库性能建议（11-21 检查）：重复索引 `conversations_owner_conv_uniq`、`friendships_owner_friend_uniq`（和主键一样）、`friend_requests_to_idx`（和 `req_to_idx` 一样）；`group_notices.group_id`、`moment_mentions.moment_id` 外键没索引；`profiles_insert`、`profiles_update`、`search_prefs_own` 里 `auth.uid()` 改成 `(select auth.uid())`；`messages` 有多条同类规则。注意 `friendships` 被导航表的外键引用，删索引前先查依赖。
 6. 中文歌：11-21 已加 B 站（用户选的）。网易云官方外链播放器（只能放版权允许的歌）以后可以作第三栏。
-7. 导航以后可以加：收藏的地点跨设备同步、搜索框输入提示（高德 `AMap.AutoComplete`）。高德 11-21 已打开。**高德免费额度 2027-11-21 到期**（用户 11-21 做的个人认证，数据库 `amap.until`）：2027-11 月初提醒用户，选“自动换回天地图”或“买流量包”。高德的标志和审图号那一行按协议不能去掉或盖住。
+7. 导航以后可以加：收藏的地点跨设备同步、搜索框输入提示（高德 `AMap.AutoComplete`）。高德 11-21 已打开。**高德免费额度 2027-11-21 到期**（用户 11-21 做的个人认证，数据库 `amap.until`）：2027-11 月初提醒用户，选“自动换回天地图”或“买流量包”。高德的标志和审图号那一行按协议不能去掉或盖住。几家地图（高德、腾讯、百度、天地图）的官网额度对比在 `docs/产品方案.md` 第 6.x 节（11-21 列的），到时候先按它给用户选。
 
 ## 8. 两个 AI 怎么配合（Claude + ChatGPT）
 
