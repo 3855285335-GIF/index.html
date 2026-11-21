@@ -14,7 +14,7 @@
 import { Readability } from 'npm:@mozilla/readability@0.6.0';
 import { parseHTML } from 'npm:linkedom@0.18.12';
 
-const VER = '20261121-2';
+const VER = '20261121-3';
 const env = (k: string) => (Deno.env.get(k) || '').trim();
 const SB_URL = env('SUPABASE_URL').replace(/\/$/, '');
 const SB_HOST = (() => { try { return new URL(SB_URL).hostname; } catch { return ''; } })();
@@ -875,6 +875,32 @@ async function doBili(uid: string, b: Any, c: Any) {
   return json({ ok: true, cached: false, ...v });
 }
 
+/* ---------- 自检：高德（密钥在数据库 app_config.navigation.amap，两串先不分哪个是密钥、哪个是安全密钥，两种都试；只回状态，不回密钥） ---------- */
+let AMAPP: Any = null, AMAPP_AT = 0;
+async function probeAmap() {
+  if (AMAPP && Date.now() - AMAPP_AT < 600000) return { cached: true, ...AMAPP };
+  const r = await tfetch(SB_URL + '/rest/v1/app_config?key=eq.navigation&select=value', { headers: dbh() }, 6000);
+  const rows = await r.json().catch(() => null);
+  const am = (Array.isArray(rows) && rows[0]?.value?.amap) || {};
+  const a = String(am.a || am.key || ''), b = String(am.b || am.sec || '');
+  const out: Any = { have: !!(a && b) };
+  if (!a || !b) { AMAPP = out; AMAPP_AT = Date.now(); return out; }
+  const REF = 'https://3855285335-gif.github.io/';
+  const one = async (k: string, sc: string) => {
+    try {
+      const u = 'https://restapi.amap.com/v3/place/text?keywords=' + encodeURIComponent('天安门') + '&city=' + encodeURIComponent('北京') + '&offset=1&page=1&extensions=base&key=' + k + '&jscode=' + sc + '&platform=JS&s=rsv3&logversion=2.0&sdkversion=2.0&appname=' + encodeURIComponent(REF);
+      const res = await tfetch(u, { headers: { Referer: REF, Origin: 'https://3855285335-gif.github.io', 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' } }, 8000);
+      const j: Any = await res.json().catch(() => null);
+      return { http: res.status, status: j?.status, info: j?.info, infocode: j?.infocode, count: j?.count, first: j?.pois?.[0] ? { name: j.pois[0].name, loc: j.pois[0].location } : null };
+    } catch (e) { return { err: String((e as Any)?.message || e).slice(0, 120) }; }
+  };
+  out.ab = await one(a, b);   // 第一串当密钥
+  out.ba = await one(b, a);   // 第二串当密钥
+  try { const lr = await tfetch('https://webapi.amap.com/maps?v=2.0&key=' + a, { headers: { Referer: REF } }, 8000); out.loader = { http: lr.status, n: (await lr.text()).length }; } catch (e) { out.loader = { err: String((e as Any)?.message || e).slice(0, 80) }; }
+  AMAPP = out; AMAPP_AT = Date.now();
+  return out;
+}
+
 /* ---------- 自检：天地图（只读，返回状态码和前几百个字，密钥打码；10 分钟内只真查一次） ---------- */
 let MAPP: Any = null, MAPP_AT = 0;
 async function probeMap() {
@@ -930,6 +956,7 @@ export async function handle(req: Request): Promise<Response> {
       if (!BILIP || Date.now() - BILIP_AT > 600000) { try { const v = await biliSearch('晴天 周杰伦', 1); BILIP = { n: v.list.length, pages: v.pages, first: v.list[0] ? { bv: v.list[0].bv, d: v.list[0].d, pic: !!v.list[0].pic } : null }; } catch (e) { BILIP = { err: String((e as Any)?.message || e).slice(0, 120) }; } BILIP_AT = Date.now(); }
       out.bili = BILIP;
     }
+    if (b.probe === 'amap') { try { out.amap = await probeAmap(); } catch (e) { out.amap = { err: String((e as Any)?.message || e).slice(0, 160) }; } }
     if (b.probe === 'map') { try { out.map = await probeMap(); } catch (e) { out.map = { err: String((e as Any)?.message || e).slice(0, 160) }; } }
     return json(out);
   }

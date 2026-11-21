@@ -21,6 +21,9 @@ jobs:
           d=json.load(open("p.json")); print("版本", d.get("v")); m=d.get("map") or {}
           for k,v in m.items(): print(k, "=>", json.dumps(v, ensure_ascii=False)[:900])
           '
+      - name: 服务器（东京）上试高德（自检接口，只回状态）
+        run: |
+          curl -sS -m 60 -X POST "$SB/functions/v1/chatter-search" -H 'Content-Type: application/json' -d '{"op":"ping","probe":"amap"}' | python3 -c 'import sys,json; d=json.load(sys.stdin); print("版本", d.get("v")); print(json.dumps(d.get("amap"), ensure_ascii=False, indent=1))'
       - name: 服务器（东京）上搜 B 站（自检接口）
         run: |
           curl -sS -m 60 -X POST "$SB/functions/v1/chatter-search" -H 'Content-Type: application/json' -d '{"op":"ping","probe":"bili"}' | python3 -c 'import sys,json; d=json.load(sys.stdin); print("版本", d.get("v"), "B 站：", json.dumps(d.get("bili"), ensure_ascii=False))'
