@@ -305,6 +305,8 @@
     if (lateSvc) lateSvc.then((g) => {   // 晚到的配置：存起来；这次缺的（卫星图、搜地点的密钥）补上
       if (!g || typeof g !== 'object') return;
       LSset('ch2navSvc', g);
+      const ga = g.amap && typeof g.amap === 'object' ? g.amap : null;
+      if (!AM && ga && ga.on !== false && /^[0-9a-f]{32}$/i.test(String(ga.key || '')) && viewNow === 'home' && !nav && !place && !location.hash) { location.reload(); return; }   // 手机里存的是“没有高德 / 高德关着”的旧配置，新配置说高德开了：还没开始用就刷新一下换成高德
       const st = layerList(g.tiles), sa = layerList(g.sat);
       if (!sets.street && st) sets.street = makeSet(st, 'street');
       if (!sets.sat && sa) sets.sat = makeSet(sa, 'sat');
@@ -1171,7 +1173,8 @@
         const r = await amapReason();
         if (!r.ok) return r;
         if (!AM) return { ok: true, note: '密钥能用（导航里还没打开高德）' };
-        return V.kind === 'amap' ? { ok: true } : { ok: false, why: amapWhy || '这次没加载出来，重开导航再试' };
+        const until = typeof AMC.until === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(AMC.until) ? AMC.until : '';
+        return V.kind === 'amap' ? { ok: true, note: '正常' + (until ? '（免费额度到 ' + until + '）' : '') } : { ok: false, why: amapWhy || '这次没加载出来，重开导航再试' };
       }]);
       items.push(['amapSearch', '高德搜地点', AS ? timed(() => amCall(() => new AS.PlaceSearch({ pageSize: 1 }), 'searchNearBy', ['公园', GL(c0.lat, c0.lon), 3000])) : () => Promise.resolve({ ok: false, why: AM ? '高德没加载出来' : '导航里还没打开高德' })]);
     }

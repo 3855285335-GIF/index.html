@@ -429,6 +429,13 @@ const shot = async (s, name) => { await s.pg.screenshot({ path: path.join(OUT, n
     for (let i = 0; i < 100 && !(await s.f.evaluate(() => !!window.__nav).catch(() => false)); i++) await sleep(100);
     ok(await s.f.evaluate(() => window.__nav && window.__nav.kind) === 'street' && await s.f.evaluate(() => window.__am.destroyed === true) && s.log.tiles.includes('vec'), '高德地图 7 秒没出来：拆掉，换天地图');
     await s.ctx.close();
+
+    /* 9f. 手机里存的是“没有高德”的旧配置，新配置晚到说高德开了：还没开始用就自动刷新换成高德 */
+    s = await setup(br, { svc: ASVC, svcDelay: 2500, saved: { tiles: SVC.tiles, sat: SVC.sat, tdt: KEY } });
+    for (let i = 0; i < 80; i++) { const k = await s.pg.frame({ url: /navigation\.html/ }).evaluate(() => window.__nav && window.__nav.kind).catch(() => null); if (k === 'amap') break; await sleep(100); }
+    s.f = s.pg.frame({ url: /navigation\.html/ });
+    ok(await s.f.evaluate(() => window.__nav && window.__nav.kind) === 'amap' && s.log.amapLoads === 1, '旧配置先用天地图，新配置晚到说高德开了：自动刷新换成高德 → ' + await s.f.evaluate(() => window.__nav && window.__nav.kind));
+    await s.ctx.close();
   } finally { await br.close(); srv.close(); }
   console.log('\n截图在：' + OUT);
   console.log(bad ? '有 ' + bad + ' 项没通过' : '全部通过');

@@ -4,7 +4,7 @@
   --paper: #f4f4f6; --surface: #fff; --ink: #1d1b26; --muted: #6b6878; --line: #e1dfe7; --accent: #07c160;
   --shadow: 0 6px 24px rgba(0,0,0,.14); --route: #1a73e8; --route-edge: #0b4fae; --me: #1a73e8; --peer: #e8710a;
 }
-:root[data-dark] { color-scheme: dark; --shadow: 0 6px 24px rgba(0,0,0,.5); --route: #5b9cff; --route-edge: #2c66c7; }
+:root[data-dark] { color-scheme: dark; --paper: #12101c; --surface: #1c1a2b; --ink: #f1eefb; --muted: #8f8ba6; --line: rgba(255,255,255,.12); --shadow: 0 6px 24px rgba(0,0,0,.5); --route: #5b9cff; --route-edge: #2c66c7; }   /* 深色：和 Chatter 的深色一样（在 Chatter 里打开时用 Chatter 传来的颜色） */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); font: 16px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; -webkit-text-size-adjust: 100%; }
@@ -26,6 +26,7 @@ svg .fill { fill: currentColor; stroke: none; }
 #map, #map * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }   /* iPhone 长按地图不弹“存储图像”菜单（长按是用来选点的） */
 :root[data-dark] #map { background: #20262b; }
 :root[data-dark] #map.street .leaflet-tile-pane { filter: invert(.92) hue-rotate(180deg) brightness(.9) contrast(.9); }   /* 街道图跟着深色主题变暗，卫星图不动 */
+.leaflet-bottom.leaflet-right { bottom: calc(var(--sheet-h, 180px) + 2px); transition: bottom .2s; }   /* 天地图 / 备用图的署名也放在卡片上面，不被挡住 */
 .leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted); }
 .leaflet-control-attribution a { color: var(--muted); }
 .leaflet-container { font: inherit; }
@@ -118,7 +119,7 @@ ol#n-list li.cur { font-weight: 700; }
 
 /* 高德（11-21 晚） */
 #traffic.on { color: var(--accent); }
-#map.amap .amap-logo, #map.amap .amap-copyright { opacity: .8; bottom: calc(var(--sheet-h, 180px) + 4px) !important; transition: bottom .2s; }   /* 高德的标志和版权放在底部卡片上面，不被挡住 */
+#map.amap .amap-logo, #map.amap .amap-copyright { bottom: calc(var(--sheet-h, 180px) + 4px) !important; transition: bottom .2s; }   /* 高德的标志、版权和审图号：协议第 7.7 条不许删除、掩藏、修改，只把位置挪到底部卡片上面（不被挡住），样子不动 */
 #map.amap .amap-marker-label { border: 0; background: none; padding: 0; }
 .mk-label { background: var(--surface); color: var(--ink); border-radius: 8px; padding: 3px 8px; font-size: .78rem; box-shadow: var(--shadow); white-space: nowrap; }
 .plans { display: grid; gap: 6px; margin-top: 6px; }
