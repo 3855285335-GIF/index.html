@@ -566,19 +566,20 @@ test('网页搜索：点放大镜才下载；结果按规则排（营销号隐�
     ok(/隐藏了 1 条营销号/.test(ws.textContent) && ws.querySelector('.ws-kg') && /词条/.test(ws.querySelector('.ws-kg').textContent), '营销号提示或百科卡片没显示');
     const rows = Array.from(ws.querySelectorAll('.ws-r'));
     click(env, rows[3]); await sleep(80);
-    ok(!opened.length && on() === 'read' && H.state.ws === 3 && /不让别的 App 显示它的原网页/.test(ws.querySelector('.ws-v.on').textContent) && ws.querySelector('[data-r="rorig"]').textContent === '在浏览器打开', '不让嵌的网站：不该自动跳出去，应该在 App 里显示取来的内容、右上角给“在浏览器打开”：' + on() + ' ' + opened[0]);
-    click(env, ws.querySelector('.ws-v.on [data-r="rorig"]')); await sleep(20);
-    ok(opened[0] === 'https://x.com/a/status/1', '点“在浏览器打开”没打开：' + opened[0]);
+    const cardTxt = () => (ws.querySelector('.ws-v.on .ws-err') || {}).textContent || '';
+    ok(!opened.length && on() === 'web' && H.state.ws === 3 && /不让别的 App 显示它的原网页/.test(cardTxt()) && !calls.some(x => x.op === 'read') && (ws.querySelector('.ws-v.on [data-act="web-ext"]') || {}).textContent === '用手机浏览器打开', '不让嵌的网站：不该自动跳出去，也不自动换成文字版（用户：不要阅读模式了），给说明和“用手机浏览器打开”：' + on() + ' ' + opened[0]);
+    click(env, ws.querySelector('.ws-v.on [data-act="web-ext"]')); await sleep(20);
+    ok(opened[0] === 'https://x.com/a/status/1', '点“用手机浏览器打开”没打开：' + opened[0]);
     H.back(); await sleep(120);
-    ok(on() === 'res' && H.state.ws === 2, '从取来的内容那一层返回没回到结果页：' + on());
-    click(env, ws.querySelectorAll('.ws-r')[2]); await sleep(150);   // 返回结果页时列表重画过：重新取
+    ok(on() === 'res' && H.state.ws === 2, '从说明那一层返回没回到结果页：' + on());
+    env.w.ChatterSearch._read('https://a.example.com/1', '普通'); await sleep(150);   // 文字版只在用户自己选“翻成中文看”时打开；这里检查文字版洗得干不干净
     const rd = calls.filter(x => x.op === 'read').pop();
-    ok(on() === 'read' && H.state.ws === 3 && rd && rd.url === 'https://a.example.com/1', '点结果没在 App 里显示取来的内容');
+    ok(on() === 'read' && H.state.ws === 3 && rd && rd.url === 'https://a.example.com/1', '文字版没打开');
     const body = ws.querySelector('.ws-body');
     ok(body && /正文/.test(body.textContent) && !/script|onclick|onerror|javascript:|iframe|alert/.test(body.innerHTML), '正文没洗干净：' + (body && body.innerHTML));
     ok(body.querySelector('img').getAttribute('referrerpolicy') === 'no-referrer', '文章图片没加 no-referrer（会被防盗链拦）');
     H.back(); await sleep(80);
-    ok(on() === 'res' && ws.querySelectorAll('.ws-r').length === 4, '从阅读页返回没回到结果页');
+    ok(on() === 'res' && ws.querySelectorAll('.ws-r').length === 4, '从文字版返回没回到结果页');
     click(env, ws.querySelector('.ws-r .ws-more')); await sleep(30);
     const blockBtn = Array.from(env.$('as-items').querySelectorAll('button')).find(b => /^不看 /.test(b.textContent));
     ok(blockBtn, '“⋯”菜单里没有“不看这个网站”');

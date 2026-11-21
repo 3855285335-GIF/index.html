@@ -60,8 +60,9 @@ window.__chWS = {
       const blk = x => /BLOCKME/.test(x);
       return { ok: true, items: b.items.map(x => blk(x) ? null : '译：' + x), failed: b.items.filter(blk).length, why: b.items.some(blk) ? ['blocked'] : [] };
     }
-    if (b.op === 'frame') { if (window.__frameDelay) await new Promise(r => setTimeout(r, window.__frameDelay)); return window.__frame ? window.__frame(b) : { ok: true, frame: false, why: 'xfo', url: b.url }; }
-    if (b.op === 'frames') return { ok: true, list: b.urls.map(u => Object.assign({ u: u }, window.__frame ? window.__frame({ url: u }) : { ok: true, frame: false, why: 'xfo', url: u })) };
+    const dflt = (u) => /bilibilii\.com/.test(u) ? { ok: true, frame: null, code: 'nohost', url: u } : { ok: true, frame: false, why: 'xfo', url: u };   // 服务器问不到域名的网站回 nohost
+    if (b.op === 'frame') { if (window.__frameDelay) await new Promise(r => setTimeout(r, window.__frameDelay)); return window.__frame ? window.__frame(b) : dflt(b.url); }
+    if (b.op === 'frames') return { ok: true, list: b.urls.map(u => Object.assign({ u: u }, window.__frame ? window.__frame({ url: u }) : dflt(u))) };
     if (b.op === 'versions') return { ok: true, url: b.url, list: ['20240501000000', '20190302000000', '20150101000000'] };
     if (b.op === 'read') {
       if (window.__readFail) return { ok: false, code: 'net', msg: '网络不好' };
@@ -134,13 +135,15 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await tgl();
       const nf0 = await pg.evaluate(() => __log.filter(x => x.op === 'frame').length);
       await pg.click('.ws-r a.t >> text=如何通俗地解释量子计算？');
-      ok(await on() === 'read', '预先问过的网站：一点就直接打开内容，中间不再出现“正在打开”再跳一次 → ' + await on());
-      await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p');
+      await pg.waitForSelector('.ws-v.on[data-v="web"] .ws-err', { timeout: 5000 }).catch(() => {});
+      ok(await on() === 'web' && !(await pg.$('.ws-v.on .ws-wload')), '预先问过的网站：一点就直接出结果，中间不再出现“正在打开”再跳一次 → ' + await on());
       ok(await pg.evaluate(() => __log.filter(x => x.op === 'frame').length) === nf0, '点的时候没有再问服务器');
-      ok(!(await pg.evaluate(() => __opened.length)) && /不让别的 App 显示它的原网页[\s\S]*Chatter 取来的内容/.test(await pg.$eval('.ws-v.on [data-r="read"]', e => e.textContent)) && await pg.$eval('[data-r="rorig"]', e => e.textContent) === '在浏览器打开', '知乎这类不让嵌的：不跳出去，在 App 里显示取来的内容并说清原因；右上角是“在浏览器打开”');
-      await shot('14-不让嵌（取来的内容）');
-      await pg.click('.ws-v.on [data-r="rorig"]');
-      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com'), '点了“在浏览器打开”才打开');
+      const fc = await pg.$eval('.ws-v.on .ws-err', e => e.textContent);
+      ok(!(await pg.evaluate(() => __opened.length)) && !(await pg.evaluate(() => __log.some(x => x.op === 'read'))) && /不让别的 App 显示它的原网页/.test(fc) && /做成装在手机上的 Chatter App|能用你的登录/.test(fc) && /用手机浏览器打开会离开 Chatter/.test(fc),
+        '知乎这类不让嵌的：不自动换成文字版（用户：不要阅读模式了）、不自动跳出去；说清原因（网站自己设的、做成手机 App 才能打开），给按钮让用户自己选 → ' + fc.slice(0, 80));
+      await shot('14-不让嵌（说明和按钮）');
+      await pg.click('.ws-v.on [data-act="web-ext"]');
+      ok((await pg.evaluate(() => __opened.slice(-1)[0])).includes('zhihu.com'), '点了“用手机浏览器打开”才打开');
       await pg.goBack(); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'res');
       ok(await pg.$eval('[data-act="src"]', e => e.textContent.trim() === 'Exa'), '结果页标出这次是用 Exa 搜的');
       await pg.click('[data-act="swap"]'); await pg.waitForSelector('.ws-r a.t >> text=量子计算科普合集');
@@ -149,7 +152,10 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(/Exa（本月用了 120 次，免费约 2500 次）/.test(lab) && /Tavily（本月用了 31 次，免费约 1000 次） ✓/.test(lab), '来源菜单里写着每家这个月用了多少次 → ' + lab.slice(0, 60));
       await pg.evaluate(() => __acts[0].fn()); await pg.waitForSelector('.ws-r a.t >> text=qiskit/qiskit：开源的量子计算工具包');
     }
-    await pg.click('.ws-r a.t >> text=量子计算入门：从量子比特到量子门'); await pg.waitForSelector('.ws-body p');
+    {   // 文字版只在自己选的时候打开：结果的“⋯”里点“翻成中文看（只有文字）”
+      const qi = await pg.$$eval('.ws-r a.t', (a) => a.findIndex((x) => x.textContent === '量子计算入门：从量子比特到量子门'));
+      await pg.click('.ws-r [data-act="r-more"][data-i="' + qi + '"]'); await pg.evaluate(() => __acts.find((x) => /翻成中文看/.test(x.label)).fn()); await pg.waitForSelector('.ws-body p');
+    }
     await shot('3-阅读页');
     if (theme === 'light') {
       ok(await pg.evaluate(() => history.state.ws === 3), '进入阅读页加了一层历史');
@@ -183,13 +189,13 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok((await pg.$$eval('.ws-gh b', a => a.map(x => x.textContent))).join(',') === '维基百科,互联网档案馆,论文,Hacker News 讨论' && /这次没连上：GitHub/.test(await pg.$eval('[data-r="res"]', e => e.textContent)), '深挖：按来源分组，连不上的说明一下');
       ok(!(await pg.$('[data-act="src"]')), '深挖不显示来源和时间筛选（它不花 Exa、Tavily 的次数）');
       const op2 = await pg.evaluate(() => __opened.length);
-      await pg.click('.ws-r a.t >> text=量子计算导论（扫描版）'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
+      await pg.click('.ws-r a.t >> text=量子计算导论（扫描版）'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'web');
       ok((await pg.evaluate(() => __opened.length)) === op2, '档案馆的书：也先在 App 里打开，不跳出去');
       await pg.goBack(); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'res');
     }
-    await pg.click('.ws-r a.t >> text=Quantum computing, explained simply'); await pg.waitForSelector('[data-act="rd-arch"]');
-    if (theme === 'light') ok(/已经不存在了/.test(await pg.$eval('[data-r="read"]', e => e.textContent)) && await pg.$eval('.ws-err .ws-btn.pri', e => e.dataset.act === 'rd-arch'), '网页没了：说清楚，“看存档”是第一个按钮');
-    await pg.click('[data-act="rd-arch"]'); await pg.waitForSelector('.ws-arch'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+    await pg.click('.ws-r a.t >> text=Quantum computing, explained simply'); await pg.waitForSelector('.ws-v.on .ws-err [data-act="web-arch"]');
+    if (theme === 'light') ok(!(await pg.evaluate(() => __log.some(x => x.op === 'read' && x.url === 'https://old.example.com/qc' && !x.at))), '原网页显示不了：不自动换文字版，给“看互联网档案馆存的这一页”');
+    await pg.click('.ws-v.on .ws-err [data-act="web-arch"]'); await pg.waitForSelector('.ws-arch'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
     await shot('8-存档（自动翻译）');
     if (theme === 'light') {
       const b = await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0]);
@@ -231,20 +237,23 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     // ---- 这次新加的：仿冒网址提醒、按原因的出错页、链接列表、外文结果翻译、翻成英文再搜、没填翻译密钥 ----
     const typeGo = async q => { await pg.fill('.ws-v.on input[type="search"]', q); await pg.press('.ws-v.on input[type="search"]', 'Enter'); await pg.evaluate(() => document.activeElement && document.activeElement.blur()); };
     const readTxt = () => pg.$eval('[data-r="read"]', e => e.textContent);
+    const readGo = async (u) => { await pg.evaluate((u) => ChatterSearch._read(u), u); };   // 文字版只在用户自己选的时候打开（翻成中文看、看存档）；这里直接打开来检查文字版本身
     await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch._w.type = 'web'; ChatterSearch.open(); }); await pg.waitForTimeout(80);
-    await typeGo('www.blilblil.com'); await pg.waitForSelector('.ws-warn');
+    await typeGo('www.blilblil.com'); await pg.waitForSelector('.ws-v.on .ws-err .warn');
     await shot('9-仿冒网址提醒');
     if (theme === 'light') {
-      const w = await readTxt();
-      ok(/blilblil\.com 和「哔哩哔哩」（bilibili\.com）只差几个字母/.test(w) && /跳转到了另一个网站：gotowww\.aipages\.dev/.test(w), '输入 www.blilblil.com：提醒可能是仿冒的哔哩哔哩，并说跳到了 gotowww.aipages.dev');
-      ok(await pg.$eval('.ws-warn [data-act="rd-goto"]', e => e.dataset.u === 'https://bilibili.com/' && /去真的哔哩哔哩/.test(e.textContent)), '提醒里有“去真的哔哩哔哩（bilibili.com）”');
-      const eb = await pg.$$eval('.ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
-      ok(eb[0] === '★去真的哔哩哔哩（bilibili.com）' && eb.indexOf('仍然打开原网页（小心）') > 0 && !eb.some(x => x === '★仍然打开原网页（小心）'), '疑似仿冒：第一个按钮是去真的网站，“打开原网页”放后面并提醒小心 → ' + eb.join(' / '));
+      const w = await pg.$eval('.ws-v.on .ws-err', e => e.textContent);
+      ok(/blilblil\.com 很像「哔哩哔哩」（bilibili\.com），但不是它/.test(w) && !(await pg.$('.ws-v.on iframe')), '输入 www.blilblil.com：先红色提醒可能是仿冒的哔哩哔哩，还没打开原网页');
+      const eb = await pg.$$eval('.ws-v.on .ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
+      ok(eb[0] === '★去真的哔哩哔哩' && eb[1] === '仍然打开（小心）', '疑似仿冒：第一个按钮是去真的网站，“仍然打开”放后面并提醒小心 → ' + eb.join(' / '));
+      await pg.click('.ws-v.on [data-act="fake-ok"]'); await pg.waitForSelector('.ws-v.on iframe, .ws-v.on .ws-err:not(:has(.warn))', { timeout: 5000 }).catch(() => {});
+      ok(!(await pg.$('.ws-v.on .ws-err .warn')), '点“仍然打开（小心）”：才去打开原网页');
       const la = await pg.evaluate(() => ['https://www.blilblil.com/', 'https://gitlab.com/', 'https://www.bilibili.com/video/x', 'https://githud.com/', 'https://apple.com.cn/', 'https://twitch.tv/', 'https://goggle.com/', 'https://taobaoo.com/', 'https://zhibo.tv/', 'https://example.org/', 'https://space.bilibili.com/1'].map(u => (ChatterSearch._lookAlike(u) || {}).n || '-'));
       ok(la.join(',') === '哔哩哔哩,-,-,GitHub,-,-,Google,淘宝,-,-,-', '仿冒判断：只提醒真像的，不误伤正规网站 → ' + la.join(','));
     }
     await pg.goBack(); await pg.waitForTimeout(120);
-    await typeGo('www.bilibilii.com'); await pg.waitForSelector('.ws-err .ws-btn');
+    await typeGo('www.bilibilii.com'); await pg.waitForSelector('.ws-v.on .ws-err .warn');
+    await pg.click('.ws-v.on [data-act="fake-ok"]'); await pg.waitForSelector('.ws-err [data-act="rd-search"]');   // 像仿冒的先提醒；点“仍然打开”以后发现网站根本不存在
     if (theme === 'light') {
       const bs = await pg.$$eval('.ws-err .ws-btn', a => a.map(x => (x.classList.contains('pri') ? '★' : '') + x.textContent));
       ok(/找不到 bilibilii\.com 这个网站/.test(await readTxt()) && bs[0] === '★你要找的是哔哩哔哩吗？去 bilibili.com' && bs[1] === '搜索「bilibilii」', '网站不存在：先问“你要找的是不是哔哩哔哩”，再给搜索 → ' + bs.join(' / '));
@@ -253,7 +262,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.goBack(); await pg.waitForTimeout(120);
     }
     await pg.goBack(); await pg.waitForTimeout(120);
-    await typeGo('busyarch.example.com/p'); await pg.waitForSelector('.ws-err [data-act="rd-arch"]');
+    await readGo('https://busyarch.example.com/p'); await pg.waitForSelector('.ws-err [data-act="rd-arch"]');
     await pg.click('.ws-err [data-act="rd-arch"]'); await pg.waitForFunction(() => /太忙/.test((document.querySelector('[data-r="read"]') || {}).textContent || ''));
     await shot('10-档案馆限流');
     if (theme === 'light') {
@@ -261,14 +270,14 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(/互联网档案馆现在太忙/.test(t) && /已经自动重试过一次/.test(t) && pri === '重试' && !/可能要登录/.test(t), '档案馆限流（就是截图那种情况）：说清楚是档案馆太忙、已经自动重试过，第一个按钮是“重试”');
     }
     await pg.goBack(); await pg.goBack(); await pg.waitForTimeout(150);
-    await typeGo('portal.example.com'); await pg.waitForSelector('.ws-lks'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+    await readGo('https://portal.example.com'); await pg.waitForSelector('.ws-lks'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
     await shot('11-链接列表');
     if (theme === 'light') {
       const lt = await pg.$$eval('.ws-lks .lt', a => a.map(x => x.textContent));
       ok(lt[0] === '译：First big headline today' && lt[3] === 'BLOCKME sensitive headline' && await pg.$eval('.ws-art h1', e => e.textContent === '译：Portal Home'), '首页这类：列出页面上的链接，外文的自动翻成中文');
       ok(/有 1 段没翻成：翻译服务按国内规定拒绝翻译这些内容/.test(await pg.$eval('.ws-trb', e => e.textContent)) && await pg.$('.ws-trb [data-act="tr-go"]'), '有一段被拒绝翻译：说清楚原因，显示原文，可以再试');
-      await pg.click('.ws-lks [data-i="1"]'); await pg.waitForSelector('.ws-body p');
-      ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://portal.example.com/story/1', '点列表里的链接：接着在 App 里打开');
+      await pg.click('.ws-lks [data-i="1"]'); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'web');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'frame').slice(-1)[0].url)) === 'https://portal.example.com/story/1', '点列表里的链接：接着在 App 里打开原网页（不是文字版）');
       await pg.goBack(); await pg.waitForTimeout(120);
     }
     await pg.goBack(); await pg.waitForTimeout(120);
@@ -287,7 +296,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('[data-act="q-back"]'); await pg.waitForFunction(() => (document.querySelector('.ws-r a.t') || {}).textContent === 'qiskit/qiskit：开源的量子计算工具包');
       ok(true, '点“搜回中文”：回到中文结果');
       await pg.evaluate(() => { window.__trMode = 'nokey'; });
-      await typeGo('en.example.com/a'); await pg.waitForFunction(() => /翻译还没开通/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+      await readGo('https://en.example.com/a'); await pg.waitForFunction(() => /翻译还没开通/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
       ok(!(await pg.$('.ws-trb [data-act="tr-go"]')), '还没填翻译密钥：说清楚，不给没用的“重试”');
       await pg.evaluate(() => { window.__trMode = ''; });
       await pg.goBack(); await pg.waitForTimeout(120);
@@ -295,7 +304,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(/外文自动翻译成中文[\s\S]*智谱（免费）[\s\S]*已开通[\s\S]*Groq（备用，可不填）[\s\S]*没填/.test(await pg.$eval('[data-r="rules"]', e => e.textContent)), '规则页：有翻译开关和两家翻译服务的状态');
       await pg.click('.ws-sw[data-act="tgl-tr"]'); const n0 = await pg.evaluate(() => __log.filter(x => x.op === 'translate').length);
       await pg.goBack(); await pg.waitForTimeout(120);
-      await typeGo('en.example.com/b'); await pg.waitForFunction(() => /这是外文网页/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
+      await readGo('https://en.example.com/b'); await pg.waitForFunction(() => /这是外文网页/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
       ok(await pg.evaluate(() => __log.filter(x => x.op === 'translate').length) === n0 && await pg.$('.ws-trb [data-act="tr-go"]'), '关掉自动翻译：外文网页不自动翻，顶部给一个“翻译成中文”按钮');
       await pg.click('.ws-trb [data-act="tr-go"]'); await pg.waitForFunction(() => /已翻译成中文/.test((document.querySelector('.ws-trb') || {}).textContent || ''));
       ok(true, '点“翻译成中文”：照样能翻');
@@ -329,19 +338,20 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(!(await pg.evaluate(() => ChatterSearch.isOpen())) || (await pg.evaluate(() => history.state && history.state.ws)) !== depth0, '再返回一次就离开这一页（中间没有要多按几次的空记录）');
       await pg.evaluate(() => ChatterSearch.open()); await pg.waitForTimeout(80);
       await typeGo('https://frame.test/a'); await pg.waitForSelector('.ws-v.on iframe');
-      await pg.click('.ws-v.on [data-act="web-more"]'); await pg.evaluate(() => __acts.find(x => /阅读模式/.test(x.label)).fn()); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
-      ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://frame.test/a', '原网页里点“阅读模式”：换成阅读模式（能翻译、调字号）');
+      await pg.click('.ws-v.on [data-act="web-more"]'); ok(!(await pg.evaluate(() => __acts.some(x => /阅读模式/.test(x.label)))), '原网页的“更多”里不再有“阅读模式”（用户：不要阅读模式了）');
+      await pg.evaluate(() => __acts.find(x => /翻成中文看/.test(x.label)).fn()); await pg.waitForFunction(() => (document.querySelector('.ws-v.on') || {}).dataset.v === 'read');
+      ok((await pg.evaluate(() => __log.filter(x => x.op === 'read').slice(-1)[0].url)) === 'https://frame.test/a', '只有自己点“翻成中文看（只有文字）”才换成文字版');
       await pg.goBack(); await pg.waitForTimeout(200);
-      ok(await on() === 'home', '从阅读模式返回：回到进来之前那一页');
+      ok(await on() === 'home', '从文字版返回：回到进来之前那一页');
       const rd0 = await pg.evaluate(() => __log.filter(x => x.op === 'read').length);
       const op3 = await pg.evaluate(() => window.__opened.length);
-      await typeGo('https://deny.test/x'); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p');
-      ok(/不让别的 App 显示它的原网页/.test(await readTxt()) && (await pg.evaluate(() => __log.filter(x => x.op === 'read').length)) === rd0 + 1 && (await pg.evaluate(() => window.__opened.length)) === op3, '不让嵌的网站：不跳出去，在 App 里显示服务器取来的内容，说清原因');
-      await pg.click('.ws-v.on [data-r="rorig"]');
-      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://deny.test/x', '点“在浏览器打开”：才打开原网站');
+      await typeGo('https://deny.test/x'); await pg.waitForSelector('.ws-v.on .ws-err');
+      ok(/不让别的 App 显示它的原网页/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)) && (await pg.evaluate(() => __log.filter(x => x.op === 'read').length)) === rd0 && (await pg.evaluate(() => window.__opened.length)) === op3, '不让嵌的网站：不自动跳出去、不自动换成文字版，说清原因');
+      await pg.click('.ws-v.on [data-act="web-ext"]');
+      ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://deny.test/x', '点“用手机浏览器打开”：才打开原网站');
       await pg.goBack(); await pg.waitForTimeout(200);
       await typeGo('https://x.com/someone'); await pg.waitForSelector('.ws-v.on .ws-err .ws-btn.pri');
-      ok(await pg.$eval('.ws-v.on .ws-err .ws-btn.pri', e => e.textContent) === '在浏览器打开（能用你的登录）', '要登录的网站（推特等）：取不到内容时，第一个按钮是“在浏览器打开（能用你的登录）”');
+      ok(await pg.$eval('.ws-v.on .ws-err .ws-btn.pri', e => e.textContent) === '用手机浏览器打开' && /能用你的登录/.test(await pg.$eval('.ws-v.on .ws-err', e => e.textContent)), '要登录的网站（推特等）：说明在手机浏览器里能用你的登录，按钮写清会离开 Chatter');
       await pg.click('.ws-v.on .ws-err .ws-btn.pri');
       ok((await pg.evaluate(() => window.__opened.slice(-1)[0])) === 'https://x.com/someone', '点了才打开');
       await pg.goBack(); await pg.waitForTimeout(200);
@@ -349,12 +359,12 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(true, '找不到网站：交给阅读模式那边按原因提示');
       await pg.goBack(); await pg.waitForTimeout(150);
       await typeGo('https://unsure.test/p'); await pg.waitForSelector('.ws-v.on iframe'); await pg.waitForSelector('[data-r="wtip"]:not([hidden])');
-      ok(/没能确认[\s\S]*用阅读模式看/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示，下面提示“看不到内容？用阅读模式看”');
+      ok(/没能确认/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)) && !/阅读模式/.test(await pg.$eval('[data-r="wtip"]', e => e.textContent)), '服务器取不到（可能不让国外服务器访问）：照样在 App 里试着显示原网页，提示一句，不推阅读模式');
       // 记住网站的结论：deny.test 问过一次以后，它的别的网页直接显示内容
       await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(200);
       const nf1 = await pg.evaluate(() => __log.filter(x => x.op === 'frame').length);
-      await typeGo('https://deny.test/other'); ok(await on() === 'read', '同一个网站的别的网页：直接打开内容，不用等');
-      await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p');
+      await typeGo('https://deny.test/other'); await pg.waitForSelector('.ws-v.on .ws-err', { timeout: 3000 }).catch(() => {});
+      ok(await on() === 'web' && !!(await pg.$('.ws-v.on .ws-err')), '同一个网站的别的网页：直接给说明和按钮，不用等');
       ok(await pg.evaluate(() => __log.filter(x => x.op === 'frame').length) === nf1 && await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsFrm:u1') || '{}')['deny.test'].f === 0), '网站的结论记在手机里（7 天），不再问服务器');
       await pg.goBack(); await pg.waitForTimeout(150);
       // 问服务器的同时就开始加载网页
@@ -366,8 +376,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(!(await pg.$('[data-r="wbox"] .ws-wload')) && await pg.$eval('[data-r="wbox"] iframe', e => e.getAttribute('src')) === 'https://newframe.test/new1', '问完能放进来：直接用已经加载好的网页，不重新加载');
       await pg.click('.ws-v.on [data-act="web-close"]'); await pg.waitForTimeout(200);
       await typeGo('https://deny2.test/x'); await pg.waitForSelector('.ws-v.on [data-r="wbox"] iframe');
-      await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p');
-      ok(!(await pg.$('[data-r="wbox"] iframe')), '问完不能放进来：后面那个网页框拿掉，换成取来的内容');
+      await pg.waitForSelector('.ws-v.on .ws-err');
+      ok(!(await pg.$('[data-r="wbox"] iframe')), '问完不能放进来：后面那个网页框拿掉，换成说明和按钮');
       await pg.evaluate(() => { window.__frameDelay = 0; });
       await pg.goBack(); await pg.waitForTimeout(150);
       // 慢网站：1.5 秒后“正在打开”换成顶上的细进度条，能先看到出来的部分
@@ -459,7 +469,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       // 不记浏览记录时：网站结论、窗口都不写进手机
       await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
       const tabsLS = await pg.evaluate(() => localStorage.getItem('ch2wsTabs:u1'));
-      await typeGo('https://deny9.test/x'); await pg.waitForSelector('.ws-v.on[data-v="read"]'); await pg.waitForTimeout(200);
+      await typeGo('https://deny9.test/x'); await pg.waitForSelector('.ws-v.on .ws-err'); await pg.waitForTimeout(200);
       ok(!(await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2wsFrm:u1') || '{}')['deny9.test'])) && (await pg.evaluate(() => localStorage.getItem('ch2wsTabs:u1'))) === tabsLS, '不记浏览记录时：去过的网站、窗口都不写进手机');
       await pg.goBack(); await pg.waitForTimeout(150);
       await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('[data-act="tgl-nohist"]'); await pg.click('.ws-sw[data-act="tgl-nohist"]'); await pg.goBack(); await pg.waitForTimeout(150);
@@ -474,8 +484,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       });
       await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(80);
       const nav = () => pg.evaluate(() => __nav.slice());
-      await typeGo('https://deny.test/y'); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(300);
-      ok(!(await nav()).length, '桌面图标版：不让嵌的网站也不自动跳到系统浏览器，在 App 里显示取来的内容');
+      await typeGo('https://deny.test/y'); await pg.waitForSelector('.ws-v.on .ws-err'); await pg.waitForTimeout(300);
+      ok(!(await nav()).length, '桌面图标版：不让嵌的网站也不自动跳到系统浏览器，给说明和按钮');
       await pg.goBack(); await pg.waitForTimeout(150);
       await typeGo('https://desk.test/p'); await pg.waitForSelector('.ws-v.on[data-v="web"] iframe'); await pg.waitForSelector('[data-r="wtip"]:not([hidden])');
       const dk = await pg.$eval('.ws-v.on iframe', e => ({ w: e.style.width, tf: e.style.transform }));
@@ -521,7 +531,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const toasts = () => pg.evaluate(() => __log.filter(x => x.toast).map(x => x.toast));
       const reads = () => pg.evaluate(() => __log.filter(x => x.op === 'read').length);
       const fresh = async () => { await pg.evaluate(() => { if (ChatterSearch.isOpen()) ChatterSearch.closeNow(); ChatterSearch.open(); }); await pg.waitForTimeout(120); await pg.evaluate(() => document.activeElement && document.activeElement.blur()); };
-      const openArt = async () => { await pg.evaluate(() => ChatterSearch.openPage('https://example.org/quantum-intro', '量子计算入门：从量子比特到量子门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150); };
+      const openArt = async () => { await pg.evaluate(() => ChatterSearch._read('https://example.org/quantum-intro', '量子计算入门：从量子比特到量子门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150); };
       await pg.evaluate(() => { window.__frame = b => /frame\.test/.test(b.url) ? { ok: true, frame: true, why: '', url: b.url } : { ok: true, frame: false, why: 'xfo', url: b.url }; });
       const e0 = errs.length;
       await fresh();
@@ -668,7 +678,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(await pg.evaluate(() => { const n = ChatterSearch._w.tabs.list.length, b = document.querySelector('.ws-v.on .ws-tabsb'); return n > 1 ? !b.hidden : getComputedStyle(b).display === 'none'; }), '只有一个窗口时：首页不显示窗口按钮（不占地方）');
       await pg.fill('[data-form="home"] input', '量子计算'); await pg.press('[data-form="home"] input', 'Enter'); await pg.waitForSelector('.ws-r a.t'); await pg.waitForTimeout(150);
       const b2 = await wide();
-      await pg.evaluate(() => ChatterSearch.openPage('https://example.org/quantum-intro', '量子计算入门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150);
+      await pg.evaluate(() => ChatterSearch._read('https://example.org/quantum-intro', '量子计算入门')); await pg.waitForSelector('.ws-v.on[data-v="read"] .ws-body p'); await pg.waitForTimeout(150);
       const b3 = await wide();
       await pg.goBack(); await pg.waitForTimeout(150); await pg.click('.ws-v.on [data-act="rules"]'); await pg.waitForSelector('.ws-rules .ws-sw'); await pg.waitForTimeout(150);
       const b4 = await wide();

@@ -791,7 +791,8 @@ function openBrowser(u, t) { addVisit({ u: u, t: t || '', s: host(u), m: 'web' }
 function openUrl(u, t) {
   const vid = vidOf(u);
   if (vid) { go('vid', { u: u, t: t, vid: vid }); return; }
-  if (lookAlike(u)) { go('read', { u: u, t: t }); return; }   // 像仿冒网站：阅读模式那边有红色提醒
+  const fake = lookAlike(u);
+  if (fake) { go('web', { u: u, t: t, fake: fake }); return; }   // 像仿冒网站：先红色提醒，用户点“仍然打开”才打开原网页
   go('web', { u: u, t: t });
 }
 /* 网站能不能放进 App 的结论按网站记在手机里（7 天）：同一个网站的规矩基本一样，下次点它的网页直接打开，不用再问服务器 */
@@ -946,6 +947,7 @@ function renderPage(t) {   // 原网页这一层
   const d = t.d, box = R('wbox');
   const wu = d.fin || d.src || d.u;
   R('wsite').innerHTML = (/^https:/i.test(wu) ? ico(I.lock, 13) : '<span class="warn">' + ico(I.warn, 13) + '</span>') + esc(host(wu));   // 加密连接显示小锁；不加密的显示红色提醒
+  if (d.fake && !d.fakeOk) { unmountWeb(); box.innerHTML = fakeCard(d); return; }
   if (d.fail) { unmountWeb(); box.innerHTML = webFail(d); return; }
   if (d.src) { if (box.dataset.src !== d.src) mountWeb(t); return; }
   if (box.dataset.src || !box.querySelector('.ws-wload')) { unmountWeb(); box.innerHTML = '<div class="ws-wload"><div class="sp"></div><div>正在打开 ' + esc(host(d.u)) + '…</div></div>'; }
@@ -980,10 +982,9 @@ async function probeWeb(t) {
     const url = f.url || d.u;
     drop();
     addVisit({ u: d.u, t: d.t, s: host(url), m: 'web' });
-    // 视频网站、文件、从阅读模式点过来的：给按钮（在浏览器打开），不变成文字
-    if (d.fromRead || hit(url, CFG.video) || hit(d.u, CFG.video) || f.why === 'pdf' || f.why === 'file') { d.fail = { why: why, url: url, vid: hit(url, CFG.video) || hit(d.u, CFG.video) }; show(); return; }
-    replaceTop(t, 'read', { u: d.u, t: d.t, noFrame: true, note: why + '，下面是 Chatter 取来的内容' });   // 其余：服务器取来内容，在 App 里看
-    return;
+    // 11-21 用户：“不要阅读模式了”（原网站变成文字就看不懂了）：不再自动换成文字版，说清原因、给按钮，用户自己选
+    d.fail = { why: why, url: url, vid: hit(url, CFG.video) || hit(d.u, CFG.video), noEmbed: f.frame === false && f.why !== 'pdf' && f.why !== 'file' };
+    show(); return;
   }
   d.desk = f.mobile === false;   // 电脑版网页（没做手机适配）：按电脑的宽度排版，再缩小到整页能看全
   d.unsure = f.frame === null;
@@ -1034,7 +1035,7 @@ function webReady(t) {   // 网页加载好了、也确认能放进来：拿掉�
   if (d.tipped) return;
   d.tipped = true;
   if (d.desk) webTip(t, '电脑版网页，已缩小到整页能看全。', 8000, 'zoom');
-  else webTip(t, d.unsure ? '服务器没能确认这个网站让不让在 App 里显示。' : '', d.unsure ? 0 : 6000);
+  else if (d.unsure) webTip(t, '服务器没能确认这个网站让不让在 App 里显示。', 0);
 }
 function fitDesk() {   // 电脑版网页：按 980 像素宽排版，再整体缩小到屏幕宽（手机浏览器打开电脑版网页也是这样）；“放大”以后按原大小显示，可以左右拖
   if (!root) return;
@@ -1046,18 +1047,25 @@ function fitDesk() {   // 电脑版网页：按 980 像素宽排版，再整体�
   if (sc < 1) { fr.style.width = '980px'; fr.style.height = (100 / sc) + '%'; fr.style.transform = 'scale(' + sc + ')'; }   // 高度按百分比：下面的提示条出现、收起时自动跟着变
   else { fr.style.width = ''; fr.style.height = ''; fr.style.transform = ''; }
 }
-function webTip(t, msg, hideMs, kind) {   // 网页下面的小提示。kind：'tr' 外文（翻成中文看）、'zoom' 电脑版网页（放大），其余：看不到内容就换阅读模式
+function webTip(t, msg, hideMs, kind) {   // 网页下面的小提示。kind：'tr' 外文（翻成中文看）、'zoom' 电脑版网页（放大），其余只有一句话
   const tip = R('wtip'); if (!tip || top() !== t) return;
-  const btn = kind === 'tr' ? ['web-read', '翻成中文看'] : kind === 'zoom' ? ['web-zoom', t.d.zoom ? '缩小到整页' : '放大'] : kind === 'none' ? null : ['web-read', '用阅读模式看'];
-  tip.innerHTML = '<span>' + esc(msg + (kind ? '' : '看不到内容？')) + '</span>' + (btn ? '<button type="button" class="ws-chip" data-act="' + btn[0] + '">' + btn[1] + '</button>' : '') + '<button type="button" class="ws-x" data-act="web-tipx" aria-label="关掉提示">' + ico(I.x, 14) + '</button>';
+  const btn = kind === 'tr' ? ['web-read', '翻成中文看'] : kind === 'zoom' ? ['web-zoom', t.d.zoom ? '缩小到整页' : '放大'] : null;   // 不再推“阅读模式”（11-21 用户：不要阅读模式了）
+  tip.innerHTML = '<span>' + esc(msg) + '</span>' + (btn ? '<button type="button" class="ws-chip" data-act="' + btn[0] + '">' + btn[1] + '</button>' : '') + '<button type="button" class="ws-x" data-act="web-tipx" aria-label="关掉提示">' + ico(I.x, 14) + '</button>';
   tip.hidden = false;
   clearTimeout(W.tipT); if (hideMs) W.tipT = setTimeout(() => { if (top() === t) tip.hidden = true; }, hideMs);
 }
-function webFail(d) {   // 原网页显示不了、又不适合换成文字（视频网站、文件、从阅读模式点过来的）：只给按钮，用户自己选
+function webFail(d) {   // 原网页显示不了：说清原因，只给按钮，用户自己选（不自动换成文字版、不自动跳出去）
   const b = (act, label, pri) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '">' + esc(label) + '</button>';
-  const sub = d.fail.vid ? '这个视频网站不让别的 App 播放它的视频。' : hit(d.u, CFG.direct) ? '这类网站要登录才能看，在浏览器里能用你的登录。' : '';
-  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p>' + (sub ? '<small>' + esc(sub) + '</small>' : '') +
-    b('web-ext', '在浏览器打开', true) + (d.fail.vid && d.t && !/^https?:/i.test(d.t) ? b('web-vsearch', '找能直接播放的', false) : '') + (d.fromRead ? b('back', '返回', false) : '') + '</div></div></div>';
+  const sub = d.fail.vid ? '这个视频网站不让别的 App 播放它的视频。' : hit(d.u, CFG.direct) ? '这类网站要登录才能看，在手机浏览器里能用你的登录。'
+    : d.fail.noEmbed ? '这是网站自己设的。网页做的 Chatter 打不开这类网站的原网页；做成装在手机上的 Chatter App 以后就能在里面打开。' : '';
+  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p>' + esc(d.fail.why) + '</p>' + '<small>' + esc((sub ? sub + '' : '') + '用手机浏览器打开会离开 Chatter。') + '</small>' +
+    b('web-ext', '用手机浏览器打开', true) + (d.fail.vid && d.t && !/^https?:/i.test(d.t) ? b('web-vsearch', '找能直接播放的', false) : '') +
+    (!d.fail.vid && d.fail.why !== WHY.pdf && d.fail.why !== WHY.file ? b('web-arch', '看互联网档案馆存的这一页', false) : '') + b('web-close', '返回', false) + '</div></div></div>';
+}
+function fakeCard(d) {   // 像仿冒网站：先提醒
+  const b = (act, label, pri) => '<button type="button" class="ws-btn' + (pri ? ' pri' : '') + '" data-act="' + act + '">' + esc(label) + '</button>';
+  return '<div class="ws-sc"><div class="ws-list" style="padding-top:18px"><div class="ws-card ws-err"><p class="warn">小心：' + esc(host(d.u)) + ' 很像「' + esc(d.fake.n) + '」（' + esc(d.fake.d) + '），但不是它，可能是仿冒的网站。</p><small>不要在里面输入密码、验证码、银行卡。</small>' +
+    b('fake-real', '去真的' + d.fake.n, true) + b('fake-ok', '仍然打开（小心）', false) + b('web-close', '返回', false) + '</div></div></div>';
 }
 function unwind(toDepth, next) {   // 退回到第 toDepth 层：画面马上换，网页框留下的历史在后面悄悄退；next：退完以后要去的页面
   const depth = W.stack.length;
@@ -1094,7 +1102,8 @@ function itemActs(it) {
   const fv = isFav(it.u, '');
   items.push({ label: fv ? '取消收藏' : '收藏', fn: () => { const on = toggleFav({ u: it.u, t: it.t, s: h }); renderTop(); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } });
   items.push({ label: '在新窗口打开', fn: () => { newTab({}); openUrl(it.u, it.t); } });
-  items.push({ label: '在浏览器打开', fn: () => openBrowser(it.u, it.t) });
+  items.push({ label: '翻成中文看（只有文字）', fn: () => go('read', { u: it.u, t: it.t }) });
+  items.push({ label: '用手机浏览器打开（会离开 Chatter）', fn: () => openBrowser(it.u, it.t) });
   if (navigator.share) items.push({ label: '分享到其他 App', fn: () => share(it.u, it.t) });
   items.push({ label: '看互联网档案馆的存档', fn: () => go('read', { u: it.u, t: it.t, at: 'latest' }) });
   items.push({ label: '复制链接', fn: () => B.copy(it.u) });
@@ -1858,11 +1867,14 @@ function onClick(e) {
     case 'web-ext': if (t && t.d.u) openBrowser((t.d.fail && t.d.fail.url) || t.d.src || t.d.u, t.d.t); break;
     case 'web-vsearch': if (t && t.d.t) search(t.d.t, 'videos'); break;
     case 'web-zoom': if (t && t.v === 'web' && t.d.desk) { t.d.zoom = !t.d.zoom; fitDesk(); webTip(t, t.d.zoom ? '原大小，可以上下左右拖。' : '已缩小到整页。', 6000, 'zoom'); } break;
+    case 'web-arch': if (t && t.v === 'web' && t.d.fail) go('read', { u: t.d.u, t: t.d.t, at: 'latest' }); break;   // 说明卡片上点的（没有网页框）：存档盖在上面，返回回到卡片
+    case 'fake-ok': if (t && t.v === 'web') { t.d.fakeOk = true; show(); } break;
+    case 'fake-real': if (t && t.v === 'web' && t.d.fake) { const real = 'https://' + t.d.fake.d + '/'; replaceTop(t, 'web', { u: real, t: t.d.fake.n }); } break;
     case 'web-read': if (t && t.v === 'web') { const d = t.d; leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })); } break;
     case 'web-more': if (t && t.v === 'web') {
       const d = t.d, u = d.src || d.u;
       B.acts(host(u), [
-        { label: '阅读模式（能翻译、调字号）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
+        { label: '翻成中文看（只有文字）', fn: () => leaveWeb(() => go('read', { u: d.u, t: d.t, noFrame: !!d.fail })) },
         d.src ? { label: d.desk ? '换成手机版网页' : '换成电脑版网页', fn: () => { d.desk = !d.desk; d.zoom = false; fitDesk(); webTip(t, d.desk ? '按电脑的宽度显示，已缩小到整页。' : '按手机的宽度显示。', 6000, d.desk ? 'zoom' : 'none'); } } : null,
         d.desk ? { label: d.zoom ? '缩小到整页' : '放大（原大小）', fn: () => { d.zoom = !d.zoom; fitDesk(); } } : null,
         { label: isFav(d.u, '') ? '取消收藏' : '收藏这个网页', fn: () => { const on = toggleFav({ u: d.u, t: d.t || host(u), s: host(u) }); B.toast(on ? '已收藏，在搜索首页的“收藏”里' : '已取消收藏'); } },
@@ -1915,5 +1927,5 @@ function onClick(e) {
   }
 }
 
-window.ChatterSearch = { open: open, openPage: openPage, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit, _sugList: sugList, _oftenSites: oftenSites, _artGet: artGet };
+window.ChatterSearch = { open: open, openPage: openPage, _read: (u, t, at) => { if (!W.on) open(); go('read', { u: u, t: t || '', at: at || '' }); }, onPop: onPop, isOpen: () => W.on, closeNow: close, resetAccount, _w: W, _hit: hit, _arrange: arrange, _sanitize: sanitize, _vidOf: vidOf, _lookAlike: lookAlike, _foreign: foreign, _jumped: jumped, _unpack: unpack, _pack: packUnit, _sugList: sugList, _oftenSites: oftenSites, _artGet: artGet };
 })();
