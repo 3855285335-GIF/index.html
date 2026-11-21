@@ -206,15 +206,15 @@ const shot = async (s, name) => { await s.pg.screenshot({ path: path.join(OUT, n
     await s.f.click('#banner [data-act="check"]'); await sleep(1500);
     const chk = await s.f.$$eval('#check-list li', (a) => a.map((e) => e.textContent));
     ok(/天地图街道图✗/.test(chk[0]) && /备用卫星图（Esri）✓/.test(chk[3]) && /路线.*✓/.test(chk[5]), '地图服务检查：天地图 ✗、备用图 ✓、路线 ✓ → ' + chk.join(' / '));
-    ok(/VPN/.test(await txt(s, '#check-tip')) && /直连/.test(await txt(s, '#check-tip')) && /浏览器端/.test(await txt(s, '#check-tip')), '检查页说清原因：先说开着 VPN（天地图只让国内网络用，关掉或设直连），再说密钥类型');
-    ok(/VPN/.test(await txt(s, '#banner')), '顶上的提示也说“开着 VPN 时会这样”');
+    ok(/网络出口不在国内/.test(await txt(s, '#check-tip')) && /国内的普通网络/.test(await txt(s, '#check-tip')) && /浏览器端/.test(await txt(s, '#check-tip')), '检查页说清原因：先说网络出口不在国内（天地图只认国内的网络），再说密钥类型');
+    ok(/只认国内的网络/.test(await txt(s, '#banner')), '顶上的提示也说“天地图只认国内的网络”');
     await s.f.click('#check-show'); await sleep(500);
     ok(/tianditu\.gov\.cn\/vec_w/.test(await s.f.$eval('#check-raw', (e) => e.src)) && await vis(s, '#check-raw-wrap'), '“看天地图返回的原文”：在页面里直接显示天地图的回答（能截图发给 AI）');
     await shot(s, '5-天地图不行时的检查');
     await s.f.click('#check-close');
-    s.log.tdtBad = false;   // 关掉了 VPN：天地图又能用了
+    s.log.tdtBad = false;   // 网络换回国内了：天地图又能用了
     await s.f.evaluate(() => window.dispatchEvent(new Event('online'))); await sleep(1500);
-    ok(await s.f.evaluate(() => window.__nav.kind) === 'street' && /换回来/.test(await txt(s, '#banner')) && !(await s.f.$eval('#layer', (e) => e.hidden)), '关掉 VPN 以后：自动试一下天地图，通了就换回天地图（不用重开），图层按钮回来');
+    ok(await s.f.evaluate(() => window.__nav.kind) === 'street' && /换回来/.test(await txt(s, '#banner')) && !(await s.f.$eval('#layer', (e) => e.hidden)), '网络换回国内以后：自动试一下天地图，通了就换回天地图（不用重开），图层按钮回来');
     await s.ctx.close();
 
     /* 2b. 数据库的配置来晚了（手机里存的是旧配置，没有卫星图）：先用旧的，新的到了补上卫星图，并存起来 */

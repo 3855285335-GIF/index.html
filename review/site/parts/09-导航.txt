@@ -1,3 +1,4 @@
+/* global L */
 /* Chatter 导航（11-21 重写）：全屏地图、搜地点、路线、跟着走的导航（语音、走错自动重算、到达提醒）、和好友一起去。
    全部在 App 里完成，不跳到别的软件。
    - 地图：天地图（街道 / 卫星 + 中文注记，地址和密钥在数据库 app_config.navigation）。天地图出不来时自动换成 Esri 卫星图 + 道路 + 地名，不会一片空白，
@@ -156,9 +157,9 @@
     ['street', 'sat'].forEach((k) => { const o = sets[k]; if (set.name !== 'backup' && o && o !== set && o.ok === 0) o.failed = true; });   // 天地图两种图用同一个密钥：一种不给，另一种多半也不给
     if (set.name === 'backup') { banner('地图加载不出来：手机网络可能连不上地图服务器。<br><button data-act="check">检查原因</button>', true); return; }
     showLayers();
-    banner('天地图没有给地图（开着 VPN 时会这样：天地图只让国内网络用），先换成了卫星图。关掉 VPN 后会自动换回来。<br><button data-act="check">检查原因</button>', true);
+    banner('天地图没有给地图（它只认国内的网络，现在的网络它不认），先换成了卫星图。网络换回国内后会自动换回来。<br><button data-act="check">检查原因</button>', true);
   }
-  function tryRecover(manual) {   // 用的是备用图时：每 30 秒、联网、回到前台时试一块天地图，通了就换回来（比如刚关掉 VPN）
+  function tryRecover(manual) {   // 用的是备用图时：每 30 秒、联网、回到前台时试一块天地图，通了就换回来（比如网络刚换回国内）
     const bad = ['street', 'sat'].map((k) => sets[k]).filter((x) => x && x.failed);
     if (!bad.length) return Promise.resolve(false);
     return imgOk(tileUrlOf(bad[0], 12), 6000).then((r) => {
@@ -818,7 +819,7 @@
     const tdtTile = res[0].ok || res[1].ok;
     if (tdtTile) tryRecover(true);   // 天地图又通了：马上换回来
     if (!tdtTile && (res[3].ok || res[5].ok)) {
-      tip.innerHTML = '天地图不给图，但别的服务都通。最常见的原因是<b>开着 VPN</b>：天地图只让国内的网络用，VPN 的出口在国外就会被拒。关掉 VPN（或者在 VPN 里设置 tianditu.gov.cn 走直连），地图会自动换回天地图。没开 VPN 还这样，再看天地图密钥的“应用类型”是不是“浏览器端”、“域名白名单”是不是空的。';
+      tip.innerHTML = '天地图不给图，但别的服务都通。最常见的原因是<b>手机现在的网络出口不在国内</b>：天地图只认国内的网络。换回国内的普通网络，地图会自动换回天地图。网络是国内的还这样，再看天地图密钥的“应用类型”是不是“浏览器端”、“域名白名单”是不是空的。';
       rawUrl = tileUrlOf(sets.street, 15); $('check-show').hidden = !rawUrl;
     } else if (!tdtTile && !res[3].ok) tip.textContent = '地图服务都连不上：手机网络可能有问题，换个网络试试。';
     else if (!res[2].ok && tdtTile) tip.textContent = '天地图的地图正常，但搜地点不让手机直接问，现在用开源地图数据搜（中文地点会少一些）。';

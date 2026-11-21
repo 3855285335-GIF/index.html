@@ -1673,7 +1673,7 @@ function paintPush() {
   $('nt-pv').textContent = '通知显示内容：' + (st.pv === false ? '关' : '开');
   const tips = [];
   if (isIOS()) tips.push('iPhone：需要 iOS 16.4 以上，并且要从主屏幕的图标打开 Chatter。');
-  else if (isAndroid()) tips.push('安卓：网页通知要经过谷歌的推送服务，国内网络一般收不到（手机没装谷歌服务的，开 VPN 也收不到）。');
+  else if (isAndroid()) tips.push('安卓：网页通知要经过谷歌的推送服务，国内网络一般收不到（手机没装谷歌服务的也收不到）。');
   tips.push('App 开着的时候，别的聊天来了消息会在屏幕顶部弹横幅，不开通知也有。');
   $('nt-tip').textContent = tips.join('\n');
 }

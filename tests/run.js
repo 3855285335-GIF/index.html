@@ -1152,16 +1152,26 @@ async function lint() {
       }
     }]
   });
-  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js', 'music.js']);
+  const res = await eslint.lintFiles(['app.js', 'sw.js', 'search.js', 'music.js', 'navigation.js']);
   const errs = [];
   res.forEach(r => r.messages.forEach(m => { if (m.severity === 2) errs.push(path.basename(r.filePath) + ' 第 ' + m.line + ' 行：' + m.message); }));
+  // 用户要求：App 里、给用户看的页面和文档里，不出现绕过网络限制的工具的名字、“翻墙”这类词（AGENTS.md 第 3 节第 13 条）
+  const BAN = new RegExp(['V', 'P', 'N'].join('') + '|' + ['翻', '墙'].join(''), 'i');
+  const fs = require('fs');
+  const look = ['app.js', 'sw.js', 'search.js', 'music.js', 'navigation.js', 'navigation.html', 'navigation.css', 'index.html', 'AGENTS.md', 'docs/产品方案.md', 'docs/完整交接.md']
+    .concat(fs.readdirSync(path.join(ROOT, 'tools')).filter(f => /\.html$/.test(f)).map(f => 'tools/' + f))
+    .concat(fs.readdirSync(path.join(ROOT, 'review/site/parts')).map(f => 'review/site/parts/' + f));
+  // 导航页里程序文件的版本号要和 App 一样：不然手机上的后台小助手会一直给旧的导航程序
+  const appV = (/app\.js\?v=([0-9a-z]+)/.exec(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')) || [])[1];
+  (fs.readFileSync(path.join(ROOT, 'navigation.html'), 'utf8').match(/\?v=[0-9a-z]+/g) || []).forEach(v => { if (v !== '?v=' + appV) errs.push('navigation.html 里的 ' + v + ' 和 App 版本 ' + appV + ' 不一样：改了导航要一起改'); });
+  look.forEach(f => { let t = ''; try { t = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch (e) { return; } t.split('\n').forEach((line, i) => { if (BAN.test(line)) errs.push(f + ' 第 ' + (i + 1) + ' 行：出现了不该出现的词（见 AGENTS.md 第 3 节第 13 条）'); }); });
   return errs;
 }
 
 (async () => {
   let bad = 0;
   const t0 = Date.now();
-  process.stdout.write('代码检查（app.js、sw.js、search.js、music.js）… ');
+  process.stdout.write('代码检查（app.js、sw.js、search.js、music.js、navigation.js，和不该出现的词）… ');
   try { const errs = await lint(); if (errs.length) { bad++; console.log('❌'); errs.slice(0, 30).forEach(e => console.log('   ' + e)); } else console.log('✅'); }
   catch (e) { bad++; console.log('❌ 代码检查没跑起来：' + e.message); }
   for (const tc of tests) {

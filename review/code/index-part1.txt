@@ -1269,7 +1269,7 @@ const TURN_DEFAULT = [
   { name: 'Metered', username: '[redacted]', credential: '[redacted]', urls: ['turns:global.relay.metered.ca:443?transport=tcp'] }
 ];
 // 注意：浏览器（WebRTC）选中转时按协议定优先级：UDP 2 > TCP 1 > TLS 0，列表顺序只在同一种协议之间起作用。
-// 国内不开 VPN 时 ExpressTURN 的 UDP 不通、TCP 通；如果 Metered 留着 UDP，手机会优先走 Metered（每月只有 500MB）。
+// 国内用国内普通网络时 ExpressTURN 的 UDP 不通、TCP 通；如果 Metered 留着 UDP，手机会优先走 Metered（每月只有 500MB）。
 // 所以 Metered 只留 TLS 443：国内顺序变成 ExpressTURN TCP（1）> Metered TLS（0）。
 const RECALL_MS = 2 * 60 * 1000;
 const PAGE = 40;
