@@ -98,6 +98,16 @@ async function setup(br, o) {
     const m = /driving\/([\d.]+),([\d.]+);/.exec(u);
     rt.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(ROUTE([+m[2], +m[1]])) });
   });
+  log.amapLoads = 0; log.amapReason = 0;
+  await ctx.route(/webapi\.amap\.com\/maps/, (rt) => {   // 假高德：加载地图程序（带 plugin=）、查原因（不带）
+    const u = rt.request().url(), withPlugin = /[?&]plugin=/.test(u);
+    if (withPlugin) log.amapLoads++; else log.amapReason++;
+    if (o.amapBad) return rt.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ info: 'INVALID_USER_DOMAIN', infocode: '10006', status: '0' }) });
+    if (!withPlugin) return rt.fulfill({ contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' }, body: '(function(config){})({})' });
+    rt.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(__dirname, 'fake-amap.js')) });
+  });
+  await ctx.route(/(amap|autonavi)\.com/, (rt) => { if (/webapi\.amap\.com\/maps/.test(rt.request().url())) return rt.fallback(); rt.abort(); });   // 别的高德地址一律不出去
+  if (o.amErr) await ctx.addInitScript((e) => { window.__amErr = e; }, o.amErr);
   await ctx.route(/arcgisonline\.com/, (rt) => { log.esri++; rt.fulfill({ contentType: 'image/png', body: PNG }); });
   const pg = await ctx.newPage();
   const errs = []; pg.on('pageerror', (e) => errs.push(String(e)));
@@ -289,6 +299,135 @@ const shot = async (s, name) => { await s.pg.screenshot({ path: path.join(OUT, n
     ok(await s.f.evaluate(() => document.documentElement.hasAttribute('data-dark')), '跟着 Chatter 的深色主题');
     ok(await s.f.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.getElementById('search').getBoundingClientRect().right <= innerWidth), '320 宽小屏：不溢出');
     await shot(s, '7-深色小屏');
+    await s.ctx.close();
+
+    /* 9. 高德（数据库里有高德密钥）：地图、卫星图、路况、搜地点、查地址、驾车 / 骑行 / 步行 / 公交、导航、检查页 */
+    const AKEY = 'fedcba9876543210fedcba9876543210';
+    const ASVC = Object.assign({}, SVC, { amap: { key: AKEY, sec: 'sec-test-123' } });
+    const near = (a, b, m) => { const R = 6371008.8, r = (d) => d * Math.PI / 180; const h = Math.sin(r(b[0] - a[0]) / 2) ** 2 + Math.cos(r(a[0])) * Math.cos(r(b[0])) * Math.sin(r(b[1] - a[1]) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) <= m; };
+    s = await setup(br, { svc: ASVC, shot: true });
+    await sleep(600);
+    const am = () => s.f.evaluate(() => { const a = window.__am; return { calls: a.calls, layers: a.layers.slice(), lines: a.lines.map((l) => ({ style: l.o.strokeStyle || 'solid', n: l.o.path.length })), markers: a.markers, opts: a.opts, ps: a.ps, transfer: a.transfer, sec: a.sec }; });
+    let A1 = await am();
+    ok(await s.f.evaluate(() => window.__nav.kind) === 'amap' && s.log.amapLoads === 1 && s.log.tiles.length === 0, '有高德密钥：用高德地图，天地图一块都没加载 → ' + s.log.tiles.length);
+    ok(A1.sec === 'sec-test-123', '安全密钥在加载高德之前就设好了（官网要求）');
+    ok(A1.opts && A1.opts.rotateEnable === false && A1.opts.pitchEnable === false && A1.opts.viewMode === '2D', '地图不让转、不让斜（自己算的位置都按正北朝上）');
+    ok(await s.f.evaluate(() => !!window.__nav.me) && A1.markers >= 1, '定位后画出我的位置');
+    ok(await vis(s, '#traffic') && await vis(s, '#layer') && !(await s.f.$eval('[data-mode="bus"]', (e) => e.hidden)), '高德有：路况按钮、图层按钮、公交');
+    await shot(s, '9-高德首页');
+    await s.f.click('#layer'); await sleep(100);
+    A1 = await am();
+    ok(A1.layers.includes('sat') && A1.layers.includes('road'), '点图层按钮：高德卫星图 + 路网 → ' + A1.layers.join(','));
+    await s.f.click('#layer'); await sleep(100);
+    ok(!(await am()).layers.includes('sat'), '再点：换回街道图');
+    await s.f.click('#traffic'); await sleep(100);
+    ok((await am()).layers.includes('traffic') && await s.f.evaluate(() => localStorage.getItem('ch2navTraffic')) === 'true', '点路况按钮：显示实时路况，并记在手机里');
+    // 搜地点
+    await s.f.fill('#q', '咖啡'); await s.f.press('#q', 'Enter');
+    await s.f.waitForSelector('#v-list:not([hidden]) [data-res]', { timeout: 5000 }).catch(() => {});
+    const arows = await s.f.$$eval('[data-res] .r-name', (a) => a.map((e) => e.textContent));
+    const ares = await s.f.evaluate(() => window.__nav.results);
+    A1 = await am();
+    ok(A1.calls.some((c) => c[0] === 'searchInBounds' && c[1] === '咖啡') && s.log.tdtSearch === 0 && arows.join('|') === '咖啡一号店|咖啡二号店' && /高德/.test(await txt(s, '#list-note')), '搜“咖啡”：问高德（先搜周围），不问天地图，写着来自高德 → ' + arows.join('|'));
+    ok(ares[0] && near([ares[0].lat, ares[0].lon], C, 1), '高德给的坐标（加偏的）换回手机定位用的坐标，误差不到 1 米 → ' + (ares[0] && [ares[0].lat.toFixed(6), ares[0].lon.toFixed(6)]));
+    ok(ares[1] && ares[1].addr === '北京市东城区' && /咖啡厅/.test(ares[0].addr), '地址是空的（高德给空数组）时用省市区；类型只取最后一级 → ' + (ares[1] && ares[1].addr) + ' / ' + (ares[0] && ares[0].addr));
+    await s.f.click('[data-back]').catch(() => {}); await sleep(150);
+    await s.f.click('[data-chip="咖啡"]'); await sleep(300);
+    ok((await am()).calls.some((c) => c[0] === 'searchNearBy' && c[1] === '咖啡' && c[3] === 3000), '点“附近 · 咖啡”：用高德的周边搜，3 公里内');
+    await s.f.click('#v-list [data-back]').catch(() => {}); await sleep(150);
+    await s.f.fill('#q', '没有'); await s.f.press('#q', 'Enter'); await sleep(400);
+    ok(/北京市/.test(await txt(s, '#list')) && /这些地方有/.test(await txt(s, '#list-note')), '周围和全国都没有、只给了城市：列出城市');
+    await s.f.click('[data-city="0"]'); await sleep(400);
+    A1 = await am();
+    ok(A1.ps.some((o) => o.city === '110000' && o.citylimit === true) && (await s.f.$$('[data-res]')).length === 2, '点城市：只在那个城市里搜');
+    // 长按选点：高德查地址
+    await s.f.click('#v-list [data-back]').catch(() => {}); await sleep(150);
+    await s.f.evaluate(() => document.getElementById('map').dispatchEvent(new MouseEvent('contextmenu', { clientX: 200, clientY: 300, bubbles: true, cancelable: true }))); await sleep(400);
+    ok(await txt(s, '#p-name') === '测试大厦' && /测试北路 5 号/.test(await txt(s, '#p-addr')), '长按地图：高德查地址（60 米内的地点名 + 完整地址）→ ' + await txt(s, '#p-name'));
+    await s.f.click('#v-place [data-back]'); await sleep(150);
+    // 路线：驾车
+    await s.f.evaluate((c) => window.__nav.openPlace({ name: '测试终点', addr: '测试东路', lat: c[0], lon: c[1] }), C);
+    await s.f.click('#p-route');
+    await s.f.waitForFunction(() => !document.getElementById('go').disabled, null, { timeout: 5000 }).catch(() => {});
+    let ap = await s.f.evaluate(() => { const p = window.__nav.plan; return p && { src: p.src, mode: p.mode, dist: p.dist, time: p.time, first: p.line[0], turn: p.steps[1] && p.steps[1].loc, steps: p.steps.map((x) => x.type + ':' + (x.mod || '') + ':' + (x.name || '')) }; });
+    A1 = await am();
+    ok(ap && ap.src === 'amap' && ap.mode === 'car' && s.log.route.length === 0 && A1.calls.some((c) => c[0] === 'driving'), '驾车路线问高德，不问开源路线服务');
+    ok(ap && near(ap.first, A, 1) && near(ap.turn, B, 3), '路线的起点、转弯点换回来和实际位置差不到几米 → 起点 ' + (ap && ap.first.map((x) => x.toFixed(6))));
+    ok(ap && ap.steps.join('|') === 'depart::测试北路|turn:right:测试东路|arrive::', '高德“这段走完右转”换成“在转弯点右转进入测试东路” → ' + (ap && ap.steps.join('|')));
+    ok(/右转进入测试东路/.test(await txt(s, '#r-steps')) && /高德/.test(await txt(s, '#r-credit')) && !/不堵车/.test(await txt(s, '#r-sum')), '路线详情是中文说法，写着路线来自高德');
+    await shot(s, '9-高德驾车');
+    // 骑行（高德骑行的每段叫 rides）、步行（带“通过人行横道”）
+    await s.f.click('[data-mode="bike"]');
+    await s.f.waitForFunction(() => window.__nav.plan && window.__nav.plan.mode === 'bike', null, { timeout: 5000 }).catch(() => {});
+    ap = await s.f.evaluate(() => window.__nav.plan && { src: window.__nav.plan.src, n: window.__nav.plan.steps.length });
+    ok(ap && ap.src === 'amap' && ap.n === 3, '骑行：高德的结果（每段叫 rides）也能读');
+    await s.f.click('[data-mode="foot"]');
+    await s.f.waitForFunction(() => window.__nav.plan && window.__nav.plan.mode === 'foot', null, { timeout: 5000 }).catch(() => {});
+    ok(/右转进入测试东路，通过人行横道/.test(await txt(s, '#r-steps')), '步行：高德说的“通过人行横道”也说出来 → ' + (await txt(s, '#r-steps')).slice(0, 40));
+    // 公交
+    await s.f.click('[data-mode="bus"]');
+    await s.f.waitForSelector('#r-sum [data-plan="1"]', { timeout: 5000 }).catch(() => {});
+    A1 = await am();
+    ok(A1.transfer && A1.transfer.city === '010' && (await s.f.$$('#r-sum [data-plan]')).length === 2, '公交：先查我在哪个城市（010），再问高德，给出 2 个方案');
+    ok(/测试1路 → /.test(await txt(s, '#r-sum')) === false && /测试1路/.test(await txt(s, '#r-sum')) && /2 元/.test(await txt(s, '#r-sum')) && /步行 300 米/.test(await txt(s, '#r-sum')), '方案上写着坐哪路车、多少钱、走多少路 → ' + (await txt(s, '#r-sum')).slice(0, 60));
+    ok(/在「北站」上车，坐测试1路（或测试9路），坐 3 站，到「东站」下车/.test(await txt(s, '#r-steps')), '每一步说清：哪站上车、坐哪路、几站、哪站下车 → ' + (await txt(s, '#r-steps')).slice(0, 60));
+    A1 = await am();
+    ok(A1.lines.some((l) => l.style === 'dashed') && A1.lines.some((l) => l.style === 'solid'), '地图上：走路的部分是虚线，坐车的部分是实线');
+    await shot(s, '9-高德公交');
+    await s.f.click('#r-sum [data-plan="1"]'); await sleep(150);
+    ok(await s.f.evaluate(() => window.__nav.plan === window.__nav.busPlans[1]) && /地铁测试线/.test(await txt(s, '#r-steps')), '点第二个方案：换成地铁那条');
+    // 开始导航（驾车）
+    await s.f.click('[data-mode="car"]');
+    await s.f.waitForFunction(() => window.__nav.plan && window.__nav.plan.mode === 'car', null, { timeout: 5000 }).catch(() => {});
+    await s.f.click('#go'); await sleep(300);
+    ok(await vis(s, '#guide') && /测试/.test(await txt(s, '#g-text')) && (await s.f.evaluate(() => window.__said.join('|'))).includes('开始导航'), '用高德的路线开始导航：顶上转向提示，说“开始导航” → ' + await txt(s, '#g-text'));
+    await geo(s, B[0] - 0.0004, B[1]); await sleep(900);
+    ok(/右转/.test(await txt(s, '#g-text')) && /米/.test(await txt(s, '#g-dist')), '快到路口：提示右转进入测试东路 → ' + await txt(s, '#g-dist') + ' ' + await txt(s, '#g-text'));
+    await s.f.click('#n-end'); await sleep(200);
+    // 检查页
+    await s.f.evaluate(() => document.querySelector('[data-act="check"]') ? document.querySelector('[data-act="check"]').click() : null); await sleep(900);
+    const ack = await txt(s, '#check-list');
+    ok(/高德地图✓/.test(ack.replace(/\s/g, '')) && /高德搜地点✓/.test(ack.replace(/\s/g, '')) && !/天地图街道图/.test(ack), '地图服务检查：高德地图、高德搜地点都正常；用着高德时不查天地图的图 → ' + ack.replace(/\s+/g, ' ').slice(0, 80));
+    ok(s.errs.length === 0, '高德这一轮没有页面错误 ' + s.errs.join(' | '));
+    await s.ctx.close();
+
+    /* 9b. 高德今天的次数用完了：搜地点换天地图，路线换开源路线 */
+    s = await setup(br, { svc: ASVC, amErr: { searchInBounds: 'USER_DAILY_QUERY_OVER_LIMIT' } });
+    await sleep(500);
+    await s.f.fill('#q', '咖啡'); await s.f.press('#q', 'Enter');
+    await s.f.waitForSelector('#v-list:not([hidden]) [data-res]', { timeout: 6000 }).catch(() => {});
+    ok(s.log.tdtSearch === 1 && /天地图/.test(await txt(s, '#list-note')) && /次数用完/.test(await s.f.evaluate(() => window.__nav.amDown)), '高德说次数用完：换天地图搜，这次不再问高德 → ' + await txt(s, '#list-note'));
+    await s.f.click('[data-res="0"]'); await sleep(200); await s.f.click('#p-route');
+    await s.f.waitForFunction(() => !document.getElementById('go').disabled, null, { timeout: 6000 }).catch(() => {});
+    ok(s.log.route.length >= 1 && await s.f.evaluate(() => window.__nav.plan && window.__nav.plan.src) === 'osm' && /OpenStreetMap/.test(await txt(s, '#r-credit')), '路线也换开源路线服务，写着来源');
+    await s.ctx.close();
+
+    /* 9c. 高德的密钥“域名白名单”不对（现在线上就是这样）：马上换天地图，说清原因和怎么改 */
+    s = await setup(br, { svc: ASVC, amapBad: true, shot: true });
+    await sleep(900);
+    ok(await s.f.evaluate(() => window.__nav.kind) === 'street' && s.log.tiles.includes('vec'), '高德不给地图程序：换天地图街道图');
+    ok(/绑定域名无效/.test(await txt(s, '#banner')) && /3855285335-gif\.github\.io/.test(await txt(s, '#banner')), '顶上提示高德说的原因（绑定域名无效、要填的网址） → ' + (await txt(s, '#banner')).slice(0, 60));
+    ok(await s.f.$eval('[data-mode="bus"]', (e) => e.hidden) && !(await vis(s, '#traffic')), '没有高德：不显示公交、路况');
+    await shot(s, '9c-高德白名单不对');
+    await s.f.click('#banner [data-act="check"]'); await sleep(1200);
+    ok(/绑定域名无效/.test(await txt(s, '#check-list')) && /域名白名单/.test(await txt(s, '#check-tip')) && /天地图街道图/.test(await txt(s, '#check-list')), '检查页：高德那一行写原因，下面写怎么改（域名白名单填什么），天地图照常检查');
+    await shot(s, '9c-检查页');
+    const errs9c = s.errs.filter((e) => !/Unexpected token ':'/.test(e));   // 高德回的是一段文字（不是程序），浏览器当程序跑会报这一条：预料之中，页面接着换天地图
+    ok(errs9c.length === 0, '这一轮除了高德那段文字，没有别的页面错误 ' + errs9c.join(' | '));
+    await s.ctx.close();
+
+    /* 9d. 数据库里高德先关着（on: false）：不加载高德，检查页能看到密钥能不能用 */
+    s = await setup(br, { svc: Object.assign({}, SVC, { amap: { key: AKEY, sec: 'x', on: false } }) });
+    await sleep(500);
+    ok(s.log.amapLoads === 0 && await s.f.evaluate(() => window.__nav.kind) === 'street', '高德关着：不加载高德，用天地图');
+    await s.f.evaluate(() => document.querySelector('[data-act="check"]').click()); await sleep(900);
+    ok(/密钥能用/.test(await txt(s, '#check-list')), '检查页：高德“密钥能用（导航里还没打开高德）”');
+    await s.ctx.close();
+
+    /* 9e. 高德地图程序来了但地图一直不出来：7 秒后拆掉换天地图 */
+    s = await setup(br, { svc: ASVC, amErr: { noComplete: true } });
+    for (let i = 0; i < 100 && !(await s.f.evaluate(() => !!window.__nav).catch(() => false)); i++) await sleep(100);
+    ok(await s.f.evaluate(() => window.__nav && window.__nav.kind) === 'street' && await s.f.evaluate(() => window.__am.destroyed === true) && s.log.tiles.includes('vec'), '高德地图 7 秒没出来：拆掉，换天地图');
     await s.ctx.close();
   } finally { await br.close(); srv.close(); }
   console.log('\n截图在：' + OUT);

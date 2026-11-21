@@ -6,9 +6,9 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>导航 · Chatter</title>
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
-  <link rel="stylesheet" href="navigation.css?v=20261121d" />
+  <link rel="stylesheet" href="navigation.css?v=20261121e" />
   <script defer src="vendor/leaflet/leaflet.js"></script>
-  <script defer src="navigation.js?v=20261121d"></script>
+  <script defer src="navigation.js?v=20261121e"></script>
 </head>
 <body>
   <div id="map" aria-label="地图"></div>
@@ -30,6 +30,7 @@
   <!-- 右侧按钮 -->
   <div id="side">
     <button id="layer" class="round" aria-label="换成卫星图"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/></svg></button>
+    <button id="traffic" class="round" aria-label="显示实时路况" aria-pressed="false" hidden><svg viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.6" class="fill"/><circle cx="12" cy="12" r="1.6" class="fill"/><circle cx="12" cy="17" r="1.6" class="fill"/></svg></button>
     <button id="locate" class="round" aria-label="回到我的位置"><svg viewBox="0 0 24 24"><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" class="fill"/></svg></button>
   </div>
   <p id="banner" role="status" hidden></p>
@@ -55,12 +56,12 @@
     <div id="v-route" class="v" hidden>
       <div class="v-head"><b id="r-to"></b><button class="bare" data-back>关闭</button></div>
       <div class="modes" id="modes" role="tablist">
-        <button data-mode="car" role="tab">驾车</button><button data-mode="bike" role="tab">骑行</button><button data-mode="foot" role="tab">步行</button>
+        <button data-mode="car" role="tab">驾车</button><button data-mode="bus" role="tab" hidden>公交</button><button data-mode="bike" role="tab">骑行</button><button data-mode="foot" role="tab">步行</button>
       </div>
       <div id="r-sum"></div>
       <div class="acts"><button id="go" class="solid">开始导航</button><button id="r-steps-btn">路线详情</button></div>
       <ol id="r-steps" hidden></ol>
-      <p class="credit">路线：<a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">FOSSGIS</a>，道路数据 © OpenStreetMap 贡献者</p>
+      <p class="credit" id="r-credit"></p>
     </div>
     <div id="v-nav" class="v" hidden>
       <div class="nav-sum"><div><b id="n-left"></b><span id="n-eta" class="note"></span></div>
@@ -70,7 +71,7 @@
     </div>
   </section>
 
-  <!-- 地图服务检查：天地图出不来时一眼看到原因 -->
+  <!-- 地图服务检查：高德、天地图出不来时一眼看到原因 -->
   <div id="check" class="over" hidden role="dialog" aria-labelledby="check-title">
     <div class="over-box">
       <div class="v-head"><b id="check-title">地图服务检查</b><button class="bare" id="check-close">关闭</button></div>

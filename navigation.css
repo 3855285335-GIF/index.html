@@ -115,3 +115,15 @@ ol#n-list li.cur { font-weight: 700; }
 #check-list li .bad { color: #e5484d; }
 #check-list li small { display: block; color: var(--muted); }
 #check-raw { width: 100%; height: 150px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+
+/* 高德（11-21 晚） */
+#traffic.on { color: var(--accent); }
+#map.amap .amap-logo, #map.amap .amap-copyright { opacity: .8; bottom: calc(var(--sheet-h, 180px) + 4px) !important; transition: bottom .2s; }   /* 高德的标志和版权放在底部卡片上面，不被挡住 */
+#map.amap .amap-marker-label { border: 0; background: none; padding: 0; }
+.mk-label { background: var(--surface); color: var(--ink); border-radius: 8px; padding: 3px 8px; font-size: .78rem; box-shadow: var(--shadow); white-space: nowrap; }
+.plans { display: grid; gap: 6px; margin-top: 6px; }
+.plans button { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: baseline; text-align: left; padding: 8px 12px; min-height: 0; }
+.plans button b { font-size: 1.05rem; }
+.plans button span { overflow-wrap: anywhere; font-weight: 500; }
+.plans button small { grid-column: 2; color: var(--muted); font-weight: 400; }
+.plans button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
