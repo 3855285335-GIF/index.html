@@ -54,7 +54,7 @@
 
 ### 2.4 其他（计划中，还没开始）
 - 音乐：通过自己的搜索找免费、公开的音频。
-- 导航：自己的界面，最好有卫星图。**11-21：天地图卫星图十几年前、搜出来还在建 → 换高德（数据最新，有实时路况）。20261121e 已接上高德（地图、卫星、路况、搜地点、路线、公交），数据库里先关着：等用户把高德密钥的域名白名单改成 `3855285335-gif.github.io`，Claude 用真高德核对后打开**。
+- 导航：自己的界面，最好有卫星图。**11-21：天地图卫星图十几年前、搜出来还在建 → 换高德（数据最新，有实时路况）。20261121e 已接上高德（地图、卫星、路况、搜地点、路线、公交），20261121f 用真高德核对后已打开（用户 11-21 改好了白名单）**。
 - “今天去哪”：挑废弃的、小众的地方。
 
 ## 3. 工作规矩（用户明确要求过的，必须遵守）
@@ -105,7 +105,9 @@
 
 ## 6. 现在的状态（2026-11-19）
 
-**已上线 `20261121e`（11-21 深夜，Claude）：导航接上高德（先关着，等用户改好密钥的域名白名单、Claude 用真高德核对后再打开）**。用户选了高德（数据最新、有实时路况），11-21 发来 Web端(JS API) 的密钥和安全密钥，只存在数据库 `app_config.navigation.amap = {key, sec, on}`。
+**已上线 `20261121f`（11-21 深夜，Claude）：高德已打开（真高德核对过）**。用户改好了密钥的域名白名单（Claude 核对：带 Chatter 网址的来源拿到地图程序，别的网址仍然 `INVALID_USER_DOMAIN`）。Claude 用浏览器把仓库里的导航页放在 `https://3855285335-gif.github.io/index.html/` 下、连真高德走了一遍（电脑、模拟苹果手机、模拟安卓、深色）：地图 / 卫星 / 路况 / 搜周围 / 搜全国 / 附近 / 长按查地址 / 驾车 / 骑行 / 步行 / 公交全部正常，路线压在路上（坐标换算对），自己算的屏幕位置和高德 `lngLatToContainer` 逐点一致、比例尺一致。真高德的格式：骑行每段叫 `rides`；驾车、步行每步的附加动作叫 `assistant_action`（手册写的是 `assist_action`），公交步行段里叫 `assist_action`，两个都认；公交 `on_station`/`off_station` 是对象（`name`）、`via_num` 是途经站数（0 = 下一站下）。改了：`isHotspot:false`（电脑模式下高德自己取“可点地名”数据时报“调用层数太深”，手机模式本来就不取）、公交“坐 1 站”、步行骑行“向左前方”用高德原话、地图移动动画定 0.45 秒。然后 `app_config.navigation.amap.on = true`。运行环境“Chatter（含高德）”放行的高德网址：lbs/webapi/restapi/jsapi/cache/a/tm.amap.com、vdata(01-04).amap.com、jsapi-data1-5.amap.com、custyle.amap.com、webrd/webst/wprd01-04.is.autonavi.com（还缺 o4.amap.com 地图小图标，不影响）。**一年以后**：官网只写“个人认证开发者享有 1 年的免费月配额（自认证之日起）”，之后怎么算没写（没核实）；到时候高德不给用，Chatter 自动换回天地图和开源数据；想继续用高德可以买流量包（官网价：打开地图 3 元 / 万次，路线和查地址 30 元 / 万次，搜索 30 元 / 万次，有效期 1 年）。要问用户认证日期记下到期日。
+
+**已上线 `20261121e`（11-21 深夜，Claude）：导航接上高德（先关着，等用户改好密钥的域名白名单、Claude 用真高德核对后再打开；20261121f 已打开）**。用户选了高德（数据最新、有实时路况），11-21 发来 Web端(JS API) 的密钥和安全密钥，只存在数据库 `app_config.navigation.amap = {key, sec, on}`。
 - `navigation.js`：地图换成统一接口 `V`（`amapView` / `leafletView`，标记、线、圆、定位、跟随、长按都走它）；有高德且 `amap.on !== false` 时先加载高德（安全密钥在加载前设好，官网要求），地图 7 秒没 `complete` 就拆掉换天地图；高德回文字（如 `INVALID_USER_DOMAIN`）时马上换天地图，顶上提示原因。搜地点 / 查地址 / 驾车 / 骑行 / 步行：高德 → 天地图 / Photon / 开源路线，前一家出错换下一家；高德说密钥不对、次数用完等就记在 `amDown`，这次不再问。新增：公交（`AMap.Transfer`，先用逆地理编码查城市 `citycode`，最多 3 个方案可点选，走路虚线、坐车实线，每步写哪站上车、坐哪路、几站、哪站下车）、实时路况按钮（`#traffic`，记在 `ch2navTraffic`）、卫星图（高德卫星 + 路网）。坐标一律存 WGS84，和高德之间用 `w2g`/`g2w` 换算（公式和常用开源换算库逐项一致，来回误差 0）。“地图服务检查”加高德两行，白名单不对时写清怎么改。
 - 高德接口格式按官网参考手册（`a.amap.com/jsapi/static/doc/20230922/index.html`，从 `lbs.amap.com` 的文档页找到的）核对：`PlaceSearch` 的 `poiList.pois`、`Geocoder` 的 `regeocode`、`Driving`/`Walking` 的 `routes[0].steps`（`assist_action`）；**骑行、公交的结果手册只写“查阅 rest 接口”，按常见格式写并两种都兼容（`rides`/`steps`），没用真高德核对过**。
 - **现在的问题**：这个密钥对任何网址都回 `INVALID_USER_DOMAIN`（绑定域名无效，Claude 11-21 用请求头试过 github.io 和别的写法都一样），官网错误码说明：“开发者绑定的域名无效，需要在官网控制台重新设置”。所以数据库里先设了 `amap.on = false`（导航照旧用天地图，检查页能看到密钥状态）。**要用户在高德控制台把这个密钥的域名白名单改成 `3855285335-gif.github.io`**；改好后 Claude 用浏览器假装在这个网址上（运行环境“Chatter（含高德）”已放行高德的网址）把搜地点、查地址、四种路线真跑一遍，核对骑行 / 公交格式，没问题再 `update app_config set value = jsonb_set(value,'{amap,on}','true') where key='navigation'`。
@@ -201,7 +203,7 @@
 4. 规则里的 `my_acc()` 以后改成 `(select my_acc())` 写法，数据多了更快（现在每行都会查一次会话）。
 5. 数据库性能建议（11-21 检查）：重复索引 `conversations_owner_conv_uniq`、`friendships_owner_friend_uniq`（和主键一样）、`friend_requests_to_idx`（和 `req_to_idx` 一样）；`group_notices.group_id`、`moment_mentions.moment_id` 外键没索引；`profiles_insert`、`profiles_update`、`search_prefs_own` 里 `auth.uid()` 改成 `(select auth.uid())`；`messages` 有多条同类规则。注意 `friendships` 被导航表的外键引用，删索引前先查依赖。
 6. 中文歌：11-21 已加 B 站（用户选的）。网易云官方外链播放器（只能放版权允许的歌）以后可以作第三栏。
-7. 导航以后可以加：收藏的地点跨设备同步、搜索框输入提示（高德 `AMap.AutoComplete`）。**高德打开前要做**：用户改好白名单 → Claude 用真高德核对骑行、公交的返回格式（手册没写清）→ 数据库 `amap.on` 改成 `true`。
+7. 导航以后可以加：收藏的地点跨设备同步、搜索框输入提示（高德 `AMap.AutoComplete`）。高德 11-21 已打开。**高德免费额度到期前**（个人认证之日起 1 年，日期要问用户）：提前提醒用户，选“自动换回天地图”或“买流量包”。
 
 ## 8. 两个 AI 怎么配合（Claude + ChatGPT）
 

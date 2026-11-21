@@ -184,11 +184,11 @@
   }
   function amapView(A) {
     const c0 = w2g(view0 ? view0[0] : 35, view0 ? view0[1] : 105);
-    const m = new A.Map('map', { zoom: view0 ? view0[2] : 4, center: [c0.lon, c0.lat], viewMode: '2D', resizeEnable: true, zooms: [3, 20], showIndoorMap: false, rotateEnable: false, pitchEnable: false, mapStyle: DARK ? 'amap://styles/dark' : 'amap://styles/normal' });
+    const m = new A.Map('map', { zoom: view0 ? view0[2] : 4, center: [c0.lon, c0.lat], viewMode: '2D', resizeEnable: true, zooms: [3, 20], showIndoorMap: false, rotateEnable: false, pitchEnable: false, isHotspot: false, mapStyle: DARK ? 'amap://styles/dark' : 'amap://styles/normal' });
     const el = $('map'), sz = () => ({ x: el.clientWidth, y: el.clientHeight });
     const G = (lat, lon) => { const g = w2g(lat, lon); return new A.LngLat(g.lon, g.lat); };
     const ctrG = () => llOf(m.getCenter());
-    const setCZ = (glat, glon, z, anim) => m.setZoomAndCenter(z, new A.LngLat(glon, glat), !anim);
+    const setCZ = (glat, glon, z, anim) => m.setZoomAndCenter(z, new A.LngLat(glon, glat), !anim, anim ? 450 : undefined);   // 动画定成 0.45 秒（官方参数），慢设备上也不拖
     const sat = [new A.TileLayer.Satellite(), new A.TileLayer.RoadNet()];
     let satOn = false, trf = null;
     const V = {
@@ -462,6 +462,7 @@
       const mod = fk || ((ACT.find((a) => a[0].test(act)) || [])[1] || '');
       const type = !prev ? 'depart' : /环岛/.test(act) ? (/离开|出/.test(act) ? 'exit roundabout' : 'roundabout') : fk ? 'fork' : mod && mod !== 'straight' ? 'turn' : 'new name';
       const s = { d: +x.distance || 0, t: +x.time || 0, name: road, type, mod, loc: p[0] };
+      if (/前方|后方/.test(act)) s.txt = act + (road ? '，进入' + road : '');   // 高德自己的说法：步行“向左前方行走”、骑行“向右前方骑行”，比统一说“行驶”准
       const extra = asst && !/到达/.test(asst) ? asst : '';
       if (extra) s.txt = act && !/直行/.test(act) ? stepText(s) + '，' + extra : extra + (road ? '，沿' + road : '');
       st.push(s);
@@ -494,10 +495,10 @@
         const k = TMODE[str(sg.transit_mode).toUpperCase()] || 'walk', tr = sg.transit || {};
         const ln = pathOf(tr.path).length ? pathOf(tr.path) : joinLine(((tr.steps || [])).map((x) => pathOf(x.path)));
         const lines = (tr.lines || []).map((x) => str(x.name).replace(/\(.*?\)|（.*?）/g, '')).filter(Boolean);
-        const on = str(tr.on_station), off = str(tr.off_station), via = +tr.via_num || 0;
+        const on = str(tr.on_station), off = str(tr.off_station), via = tr.via_num === '' || tr.via_num == null || !Number.isFinite(+tr.via_num) ? -1 : +tr.via_num;   // 途经几站（不算上下车的站）；0 = 下一站就下
         let text = str(sg.instruction);
         if (k === 'walk') text = '步行 ' + fmtDist(+sg.distance || 0);
-        else if (k === 'bus' || k === 'subway') text = (on ? '在「' + on + '」上车，' : '') + '坐' + (lines[0] || (k === 'subway' ? '地铁' : '公交')) + (lines.length > 1 ? '（或' + lines.slice(1, 3).join('、') + '）' : '') + (via ? '，坐 ' + (via + 1) + ' 站' : '') + (off ? '，到「' + off + '」下车' : '');
+        else if (k === 'bus' || k === 'subway') text = (on ? '在「' + on + '」上车，' : '') + '坐' + (lines[0] || (k === 'subway' ? '地铁' : '公交')) + (lines.length > 1 ? '（或' + lines.slice(1, 3).join('、') + '）' : '') + (via >= 0 ? '，坐 ' + (via + 1) + ' 站' : '') + (off ? '，到「' + off + '」下车' : '');
         else if (k === 'rail') text = '坐火车' + (str(tr.name) ? '「' + str(tr.name) + '」' : '') + (str(tr.departure_stop) ? '，从' + str(tr.departure_stop) : '') + (str(tr.arrival_stop) ? '到' + str(tr.arrival_stop) : '');
         else if (k === 'taxi') text = '打车 ' + fmtDist(+sg.distance || 0);
         return { k, text: text || '继续', d: +sg.distance || 0, t: +sg.time || 0, line: ln, name: lines[0] || '' };
