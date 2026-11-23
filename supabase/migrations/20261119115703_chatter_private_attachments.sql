@@ -122,4 +122,6 @@ create policy chatter_private_attachment_delete_operations on storage.objects as
   )
 );
 
+-- Force PostgREST to pick up messages.private_attachment_path and newly added functions.
+notify pgrst, 'reload schema';
 commit;
