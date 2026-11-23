@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const contentType = f => f.endsWith('.html') ? 'text/html; charset=utf-8' : f.endsWith('.js') ? 'text/javascript; charset=utf-8' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream';
 const load = pathname => {
   let name;
-  try { name = decodeURIComponent(pathname).replace(/^\\/+/, ''); } catch { return null; }
+  try { name = decodeURIComponent(pathname); while (name.startsWith('/')) name = name.slice(1); } catch { return null; }
   if (!name || name === 'index.html') name = 'index.html';
   const file = path.resolve(ROOT, name);
   if (!file.startsWith(ROOT + path.sep)) return null;
