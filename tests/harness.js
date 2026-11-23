@@ -18,7 +18,7 @@ const iso = t => new Date(t).toISOString();
 function makeEnv(opts) {
   opts = opts || {};
   const dom = new JSDOM('<!doctype html><html><head></head><body>' + BODY + '</body></html>', {
-    url: 'https://example.test/app/', pretendToBeVisual: true, runScripts: 'outside-only'
+    url: opts.url || 'https://example.test/app/', pretendToBeVisual: true, runScripts: 'outside-only'
   });
   const w = dom.window;
   w.indexedDB = opts.idb || new IDBFactory(); w.IDBKeyRange = IDBKeyRange;   // 每个测试一个全新的本机数据库（要模拟“重开 App”就把上一个的 env.idb 传进来）

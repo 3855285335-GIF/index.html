@@ -8763,6 +8763,16 @@ function verBoot() {
 
 /* ================= 启动 ================= */
 function boot() {
+  // A Vercel PR/branch preview currently embeds the production Supabase URL.
+  // Disable the app until a separate test backend is configured.
+  const previewHost = (window.location.hostname || '').toLowerCase();
+  if (previewHost.endsWith('.vercel.app') && previewHost !== 'chatterapphtml.vercel.app') {
+    ready = Promise.resolve(null);
+    showAuth('此预览版本尚未配置隔离测试后端，为保护正式聊天数据，已禁止登录及收发消息。');
+    hideSplash();
+    window.__chBooted = true;
+    return;
+  }
   ready = (window.__lib || Promise.reject(new Error('依赖库加载失败'))).then(initClient);
   ready.then(() => { hideSplash(); if (/^⏳/.test($('auth-msg').textContent)) msgAuth(''); }, () => {});
   window.addEventListener('pageshow', function () { try { hideSplash(); } catch (e) {} });

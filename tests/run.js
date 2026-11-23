@@ -1235,6 +1235,26 @@ test('退出登录会清除本账号的离线文章和浏览记录，保留另�
   } finally { env.close(); }
 });
 
+test('候选 Vercel 预览禁止连接正式 Supabase，正式域名仍允许初始化', async () => {
+  const preview = makeEnv({ url: 'https://chatter-feature-candidate.vercel.app/' });
+  try {
+    ok(preview.T.getSb() == null, '预览版不应建立正式数据库客户端');
+    ok(preview.$('auth-msg').textContent.includes('已禁止登录及收发消息'), '预览版没有给出禁止连接提示');
+    ok(preview.w.__chBooted, '阻止预览时仍要解除启动画面');
+    ok(preview.fetchLog.length === 0, '预览版不应发起任何外部请求');
+  } finally { preview.close(); }
+  const official = makeEnv({ url: 'https://chatterapphtml.vercel.app/' });
+  try {
+    await official.T.getReady();
+    ok(!!official.T.getSb(), '正式 Vercel 入口仍应初始化数据库客户端');
+  } finally { official.close(); }
+  const githubPages = makeEnv({ url: 'https://3855285335-gif.github.io/index.html/' });
+  try {
+    await githubPages.T.getReady();
+    ok(!!githubPages.T.getSb(), '正式 GitHub Pages 入口仍应允许连接');
+  } finally { githubPages.close(); }
+});
+
 // ---------------- 代码检查 ----------------
 async function lint() {
   const { ESLint } = require('eslint');
