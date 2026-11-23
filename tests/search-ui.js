@@ -102,6 +102,10 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
   for (const theme of ['light', 'dark']) {
     const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: theme, hasTouch: true });
     await ctx.route(/img\.test/, rt => { const u = new URL(rt.request().url()); rt.fulfill({ contentType: 'image/svg+xml', body: SVG(u.searchParams.get('a'), u.searchParams.get('b')) }); });
+    // x.com is intentionally treated as non-embeddable by the mocked backend;
+    // never fetch the real third-party site in an isolated browser test.
+    await ctx.route(/^https?:\/\/(?:www\.)?x\.com\//, rt => rt.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>模拟外部网站</title>' }));
+
     await ctx.route(/youtube|bilibili|vimeo/, rt => rt.fulfill({ contentType: 'text/html', body: '<body style="margin:0;background:#000"></body>' }));
     await ctx.route(/slow\.test/, async rt => { await new Promise(r => setTimeout(r, 2600)); rt.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><meta name="viewport" content="width=device-width"><body style="background:#fff">慢网站</body>' }); });
     await ctx.route(/frame\.test|unsure\.test|desk\.test/, rt => { const u = new URL(rt.request().url()), n = u.pathname.slice(1) || 'a';   // 假的“能嵌的网站”：a → b → c 三页
