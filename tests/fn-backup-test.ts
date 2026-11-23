@@ -10,7 +10,7 @@ const ok = (c: boolean, m: string) => { n++; if (!c) bad++; console.log((c ? '�
 const kp = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
 const other = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
 const pub = await crypto.subtle.exportKey('jwk', kp.publicKey) as Any;
-let jwksCalls = 0, storageCalls = 0, corruptStorageResult = false;
+let jwksCalls = 0, storageCalls = 0, corruptStorageResult = false, wrongSignedPath = false;
 globalThis.fetch = ((u: string, init?: RequestInit) => {
   if (String(u) === 'https://token.actions.githubusercontent.com/.well-known/jwks') { jwksCalls++; return Promise.resolve(new Response(JSON.stringify({ keys: [{ kty: 'RSA', kid: 'k1', n: pub.n, e: pub.e, alg: 'RS256', use: 'sig' }] }))); }
   if (String(u) === 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/sign/chatter-private') {
@@ -22,7 +22,7 @@ globalThis.fetch = ((u: string, init?: RequestInit) => {
     if (body.expiresIn !== 900 || !Array.isArray(body.paths)) throw Error('Invalid signing payload');
     const result = body.paths.map((path: string) => ({ path, signedURL: corruptStorageResult
       ? 'https://evil.example.com/steal?token=x'
-      : '/object/sign/chatter-private/' + encodeURIComponent(path) + '?token=temporary-test-token' }));
+      : '/object/sign/chatter-private/' + encodeURIComponent(wrongSignedPath ? 'someone-else/private.png' : path) + '?token=temporary-test-token' }));
     return Promise.resolve(new Response(JSON.stringify(result), { status: 200 }));
   }
   return Promise.reject(new Error('不该访问 ' + u));
@@ -68,6 +68,15 @@ corruptStorageResult = true;
 r = await call(await sign(good),'POST',privateRequest);
 ok(r.st === 502 && !r.j.items, '拒绝外部域名伪造的 Storage 签名结果');
 corruptStorageResult = false;
+wrongSignedPath = true;
+r = await call(await sign(good),'POST',privateRequest);
+ok(r.st === 502 && !r.j.items, '拒绝签名结果指向其他文件，避免备份错对象');
+wrongSignedPath = false;
+for (const path of ['alice/%2e%2e/private.png', 'alice/\\\\private.png']) {
+  const before = storageCalls;
+  r = await call(await sign(good),'POST',{...privateRequest,paths:[path]});
+  ok(r.st === 400 && storageCalls === before, '拒绝含歧义编码或反斜线的私有对象路径');
+}
 Deno.env.delete('SUPABASE_SERVICE_ROLE_KEY');
 r = await call(await sign(good),'POST',privateRequest);
 ok(r.st === 503 && !r.j.items, '没有 Storage 管理密钥时安全失败');
