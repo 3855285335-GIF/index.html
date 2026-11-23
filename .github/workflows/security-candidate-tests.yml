@@ -129,3 +129,30 @@ jobs:
       - name: Safari 内核的移动端启动、布局与隔离检查
         working-directory: tests
         run: node webkit-smoke.cjs
+
+  local-supabase-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: 使用 Docker 启动完全隔离的本地 Supabase 与 SQL 迁移
+        run: bash tests/start-local-storage.sh
+      - name: 安装隔离存储测试客户端
+        working-directory: tests
+        run: npm install --no-save --no-audit --no-fund @supabase/supabase-js
+      - name: 真实服务端三账号存储访问回归
+        working-directory: tests
+        run: node local-storage-real.cjs
+      - name: 清理临时本地服务
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/chatter-isolated-supabase/supabase" ]; then
+            cd "$RUNNER_TEMP/chatter-isolated-supabase"
+            supabase stop --no-backup || true
+          fi
