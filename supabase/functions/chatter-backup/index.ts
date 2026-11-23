@@ -81,7 +81,7 @@ export async function handle(req: Request): Promise<Response> {
     if (input.bucket !== 'chatter-private' || !Array.isArray(input.paths) ||
         input.paths.length < 1 || input.paths.length > 50 ||
         input.paths.some((p: Any) => typeof p !== 'string' || !p || p.length > 512 ||
-          p.startsWith('/') || p.includes(String.fromCharCode(0)) || p.split('/').some((part: string) => !part || part === '.' || part === '..')) ||
+          p.startsWith('/') || p.includes('\\') || p.includes('%') || p.includes(String.fromCharCode(0)) || p.split('/').some((part: string) => !part || part === '.' || part === '..')) ||
         new Set(input.paths).size !== input.paths.length) {
       return out({ ok: false, code: 'paths' }, 400);
     }
@@ -114,7 +114,8 @@ export async function handle(req: Request): Promise<Response> {
       const parsed = new URL(target);
       if (parsed.origin !== base ||
           !parsed.pathname.startsWith('/storage/v1/object/sign/chatter-private/') ||
-          !parsed.searchParams.has('token')) return out({ ok: false, code: 'storage-result' }, 502);
+          decodeURIComponent(parsed.pathname.slice('/storage/v1/object/sign/chatter-private/'.length)) !== input.paths[i] ||
+          !parsed.searchParams.has('token') || parsed.hash || parsed.username || parsed.password) return out({ ok: false, code: 'storage-result' }, 502);
       items.push({ path: input.paths[i], signedUrl: target });
     }
     return out({ ok: true, expiresIn: 900, items });
