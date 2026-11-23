@@ -96,3 +96,18 @@ jobs:
         run: |
           node music-ui.js
           node navigation-ui.cjs
+
+  edge-functions-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: 服务器函数隔离测试（供应商、推送和数据库均使用测试替身）
+        working-directory: tests
+        run: |
+          deno run -A --node-modules-dir=none fn-search-test.ts
+          deno run -A --node-modules-dir=none fn-push-test.ts
+          deno run -A --node-modules-dir=none fn-backup-test.ts
