@@ -8,6 +8,7 @@ on:
       - 'navigation.html'
       - 'tests/**'
       - 'supabase/migrations/**'
+      - 'supabase/functions/**'
       - 'supabase/rollback/**'
       - 'review/security/**'
       - '.github/workflows/security-candidate-tests.yml'
