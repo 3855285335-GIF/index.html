@@ -21,7 +21,14 @@ const srv = http.createServer((q, r) => {
   if (mode === 'noapp' && f === '/app.js') { r.writeHead(404); return r.end(); }
   if (mode === 'throw' && f === '/app.js') { r.writeHead(200, { 'content-type': 'text/javascript' }); return r.end('window.__lib=Promise.resolve();\nfoo.bar.baz();'); }
   if (mode === 'hang' && f === '/app.js') { return; }   // 一直不回
-  if (mode === 'bootfail' && f === '/app.js') { r.writeHead(200, { 'content-type': 'text/javascript' }); return r.end(fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8').replace('window.__chBooted = true;', "throw new Error('boot-x');")); }
+  if (mode === 'bootfail' && f === '/app.js') {
+    const code = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+    // Only simulate a crash at the end of the real boot path; preview guards also set __chBooted.
+    const marker = "  window.__chBooted = true;   // 告诉页面里的白屏保护";
+    if (!code.includes(marker)) throw new Error('Cannot find canonical boot completion marker');
+    r.writeHead(200, { 'content-type': 'text/javascript' });
+    return r.end(code.replace(marker, "  throw new Error('boot-x');   // 告诉页面里的白屏保护"));
+  }
   if (mode === 'nolib' && f.startsWith('/vendor/')) { r.writeHead(404); return r.end(); }
   const p = path.join(ROOT, f); if (!fs.existsSync(p)) { r.writeHead(404); return r.end(); }
   r.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream' });
