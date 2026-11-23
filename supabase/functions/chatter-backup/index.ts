@@ -111,10 +111,14 @@ export async function handle(req: Request): Promise<Response> {
         ? base + '/storage/v1' + relative
         : relative.startsWith('/storage/v1/object/sign/') ? base + relative : '';
       if (!target) return out({ ok: false, code: 'storage-result' }, 502);
-      const parsed = new URL(target);
+      let parsed: URL, signedPath: string;
+      try {
+        parsed = new URL(target);
+        signedPath = decodeURIComponent(parsed.pathname.slice('/storage/v1/object/sign/chatter-private/'.length));
+      } catch { return out({ ok: false, code: 'storage-result' }, 502); }
       if (parsed.origin !== base ||
           !parsed.pathname.startsWith('/storage/v1/object/sign/chatter-private/') ||
-          decodeURIComponent(parsed.pathname.slice('/storage/v1/object/sign/chatter-private/'.length)) !== input.paths[i] ||
+          signedPath !== input.paths[i] ||
           !parsed.searchParams.has('token') || parsed.hash || parsed.username || parsed.password) return out({ ok: false, code: 'storage-result' }, 502);
       items.push({ path: input.paths[i], signedUrl: target });
     }
