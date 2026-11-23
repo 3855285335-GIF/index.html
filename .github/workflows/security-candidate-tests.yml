@@ -138,9 +138,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
-          version: latest
+          version: 3.0.0
       - name: 使用 Docker 启动完全隔离的本地 Supabase 与 SQL 迁移
         run: bash tests/start-local-storage.sh
       - name: 安装隔离存储测试客户端
