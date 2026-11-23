@@ -2,6 +2,7 @@
 // 用法：cd tests && deno run -A --node-modules-dir=none fn-backup-test.ts
 Deno.env.set('CHATTER_TEST', '1');
 Deno.env.set('SUPABASE_DB_URL', 'postgresql://postgres:p%40ss%2Fword@db.uaoiqbxptnbrvkzjwguc.supabase.co:5432/postgres');
+Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'only-an-isolated-test-secret');
 // deno-lint-ignore no-explicit-any
 type Any = any;
 let n = 0, bad = 0;
@@ -9,9 +10,21 @@ const ok = (c: boolean, m: string) => { n++; if (!c) bad++; console.log((c ? '�
 const kp = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
 const other = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
 const pub = await crypto.subtle.exportKey('jwk', kp.publicKey) as Any;
-let jwksCalls = 0;
-globalThis.fetch = ((u: string) => {
+let jwksCalls = 0, storageCalls = 0, corruptStorageResult = false;
+globalThis.fetch = ((u: string, init?: RequestInit) => {
   if (String(u) === 'https://token.actions.githubusercontent.com/.well-known/jwks') { jwksCalls++; return Promise.resolve(new Response(JSON.stringify({ keys: [{ kty: 'RSA', kid: 'k1', n: pub.n, e: pub.e, alg: 'RS256', use: 'sig' }] }))); }
+  if (String(u) === 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/sign/chatter-private') {
+    storageCalls++;
+    const headers = new Headers(init?.headers);
+    if (headers.get('apikey') !== 'only-an-isolated-test-secret' ||
+        headers.get('Authorization') !== 'Bearer only-an-isolated-test-secret') throw Error('Storage request missing service authentication');
+    const body = JSON.parse(String(init?.body));
+    if (body.expiresIn !== 900 || !Array.isArray(body.paths)) throw Error('Invalid signing payload');
+    const result = body.paths.map((path: string) => ({ path, signedURL: corruptStorageResult
+      ? 'https://evil.example.com/steal?token=x'
+      : '/object/sign/chatter-private/' + encodeURIComponent(path) + '?token=temporary-test-token' }));
+    return Promise.resolve(new Response(JSON.stringify(result), { status: 200 }));
+  }
   return Promise.reject(new Error('不该访问 ' + u));
 }) as Any;
 const { handle, poolerUrl } = await import('../supabase/functions/chatter-backup/index.ts');
@@ -23,13 +36,43 @@ async function sign(claims: Any, head: Any = { alg: 'RS256', kid: 'k1', typ: 'JW
   const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(data)));
   return data + '.' + btoa(String.fromCharCode(...sig)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-const call = async (tok: string | null, method = 'POST') => { const r = await handle(new Request('https://x/functions/v1/chatter-backup', { method, headers: tok ? { authorization: 'Bearer ' + tok } : {} })); return { st: r.status, j: await r.json() }; };
+const call = async (tok: string | null, method = 'POST', body?: Any) => { const r = await handle(new Request('https://x/functions/v1/chatter-backup', { method, headers: tok ? { authorization: 'Bearer ' + tok } : {}, body: method === 'POST' && body ? JSON.stringify(body) : undefined })); return { st: r.status, j: await r.json() }; };
 
 let r = await call(await sign(good));
 ok(r.st === 200 && r.j.url === 'postgresql://postgres.uaoiqbxptnbrvkzjwguc:p%40ss%2Fword@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres', '私有仓库主分支上的每日备份任务（定时触发）：拿到会话池地址，密码原样保留编码');
 r = await call(await sign({ ...good, event_name: 'workflow_dispatch' }));
 ok(r.st === 200, '手动点“运行”也可以');
 ok(poolerUrl('postgresql://postgres@db.x.supabase.co:5432/postgres') === '', '连接里没有密码：不给');
+const privateRequest = { op:'sign-private', bucket:'chatter-private', paths:['alice/private-1.png','bob/原图 2.png'] };
+r = await call(await sign(good),'POST',privateRequest);
+ok(r.st === 200 && r.j.expiresIn === 900 && r.j.items?.length === 2 &&
+   r.j.items.every((item: Any) => item.signedUrl.startsWith('https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/sign/chatter-private/')) &&
+   !JSON.stringify(r.j).includes('only-an-isolated-test-secret'),
+   '备份专用 OIDC 可取得短时私有文件链接，绝不交出长期 service role 密钥');
+const countBeforeDenied = storageCalls;
+r = await call(await sign({...good,repository:'untrusted/repo'}),'POST',privateRequest);
+ok(r.st === 403 && storageCalls === countBeforeDenied, '无权仓库无法触发私有媒体签名');
+for (const [name, payload] of [
+  ['错误桶', {...privateRequest,bucket:'chat-media'}],
+  ['路径越界', {...privateRequest,paths:['../private.png']}],
+  ['重复文件', {...privateRequest,paths:['alice/a.png','alice/a.png']}],
+  ['空清单', {...privateRequest,paths:[]}],
+  ['过多路径', {...privateRequest,paths:Array.from({length:51},(_,i)=>'a/'+i+'.png')}],
+  ['未知操作', {op:'read-secret'}],
+]) {
+  const before = storageCalls;
+  r = await call(await sign(good),'POST',payload);
+  ok(r.st === 400 && storageCalls === before, '拒绝：' + name);
+}
+corruptStorageResult = true;
+r = await call(await sign(good),'POST',privateRequest);
+ok(r.st === 502 && !r.j.items, '拒绝外部域名伪造的 Storage 签名结果');
+corruptStorageResult = false;
+Deno.env.delete('SUPABASE_SERVICE_ROLE_KEY');
+r = await call(await sign(good),'POST',privateRequest);
+ok(r.st === 503 && !r.j.items, '没有 Storage 管理密钥时安全失败');
+Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'only-an-isolated-test-secret');
+
 const deny: [string, Any, Any?, CryptoKey?][] = [
   ['别的仓库', { ...good, repository: 'someone/chatter-keepalive' }],
   ['同名仓库但主人编号不对（账号被抢注）', { ...good, repository_owner_id: '1' }],
