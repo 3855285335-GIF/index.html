@@ -50,7 +50,11 @@ async function main(){
   await deny(await bob.storage.from(bucket).createSignedUrl(path,60),'recipient signed URL');
   const list=await must(await bob.storage.from(bucket).list('alice'),'recipient list');
   assert.ok(!list.some(f=>f.name===id+'.png'),'recipient bucket enumeration');
-  await deny(await bob.storage.from(bucket).remove([path]),'recipient delete');
+  // Storage may return 200 with an empty list when RLS silently filters deletion.
+  // The security condition is that the object still exists and the owner can read it.
+  await bob.storage.from(bucket).remove([path]);
+  const afterStrangerDelete=await must(await alice.storage.from(bucket).download(path),'owner content after unauthorized deletion attempt');
+  assert.deepEqual(Buffer.from(await afterStrangerDelete.arrayBuffer()),png,'recipient must not delete the private object');
   await must(await admin.from('app_config').update({value:{enabled:false}}).eq('key','private_chat_attachments'),'disable local uploads');
   await deny(await alice.storage.from(bucket).upload('alice/'+randomUUID()+'.png',png,{contentType:'image/png'}),'uploads after disable');
   await must(await bob.storage.from(bucket).download(path),'previously uploaded image remains accessible');
