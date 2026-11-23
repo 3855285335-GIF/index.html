@@ -45,6 +45,7 @@ jobs:
           node sql-private-attachments-test.mjs
           node sql-contacts-only-test.mjs
           node security-anon-check.cjs
+          node sql-anon-function-grants-test.mjs
 
   sql-regressions:
     runs-on: ubuntu-latest
