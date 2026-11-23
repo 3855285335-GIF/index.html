@@ -111,3 +111,21 @@ jobs:
           deno run -A --node-modules-dir=none fn-search-test.ts
           deno run -A --node-modules-dir=none fn-push-test.ts
           deno run -A --node-modules-dir=none fn-backup-test.ts
+
+  webkit-safety-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装 WebKit 及依赖
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps webkit
+      - name: Safari 内核的移动端启动、布局与隔离检查
+        working-directory: tests
+        run: node webkit-smoke.cjs
