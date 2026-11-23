@@ -12,6 +12,9 @@ on:
       - 'supabase/rollback/**'
       - 'review/security/**'
       - '.github/workflows/security-candidate-tests.yml'
+concurrency:
+  group: chatter-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
