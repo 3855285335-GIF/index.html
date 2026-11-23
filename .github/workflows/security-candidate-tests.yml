@@ -45,3 +45,53 @@ jobs:
           node sql-private-attachments-test.mjs
           node sql-contacts-only-test.mjs
           node security-anon-check.cjs
+
+  sql-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装数据库模拟依赖
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund @electric-sql/pglite@0.2.17
+      - name: 旧版数据库迁移与权限回归
+        working-directory: tests
+        run: |
+          node sql-1117-test.mjs
+          node sql-1118-search-test.mjs
+          node sql-moment-privacy-test.mjs
+          node sql-revoke-old-rpcs-test.mjs
+          node sql-chatter-repair-test.mjs
+          node sql-navigation-test.mjs
+
+  chromium-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装浏览器测试依赖
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+      - name: 启动、离线缓存、浏览器回归
+        working-directory: tests
+        run: |
+          node start-test.js
+          node sw-test.js
+          node sw-cache-failure.cjs
+          node search-ui.js
+      - name: 音乐和导航模拟浏览器回归
+        working-directory: tests
+        run: |
+          node music-ui.js
+          node navigation-ui.cjs
