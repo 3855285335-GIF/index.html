@@ -68,6 +68,58 @@ export async function handle(req: Request): Promise<Response> {
   let why = '';
   try { why = await verify(m[1]); } catch { return out({ ok: false, code: 'jwks' }, 503); }
   if (why) { console.warn('chatter-backup rejected', why); return out({ ok: false, code: 'denied', why }, 403); }
+  // The OIDC-verified private backup workflow may request short-lived links,
+  // but NEVER receives the long-lived Storage service key. Only this private
+  // bucket is eligible, and the signed URLs expire after 15 minutes.
+  let input: Any = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > 32768) return out({ ok: false, code: 'body-size' }, 413);
+    if (raw.trim()) input = JSON.parse(raw);
+  } catch { return out({ ok: false, code: 'body' }, 400); }
+  if (input && input.op === 'sign-private') {
+    if (input.bucket !== 'chatter-private' || !Array.isArray(input.paths) ||
+        input.paths.length < 1 || input.paths.length > 50 ||
+        input.paths.some((p: Any) => typeof p !== 'string' || !p || p.length > 512 ||
+          p.startsWith('/') || p.includes('\\0') || p.split('/').some((part: string) => !part || part === '.' || part === '..')) ||
+        new Set(input.paths).size !== input.paths.length) {
+      return out({ ok: false, code: 'paths' }, 400);
+    }
+    const secret = env('SUPABASE_SERVICE_ROLE_KEY');
+    if (!secret) return out({ ok: false, code: 'storage-config' }, 503);
+    const base = 'https://' + PROJECT + '.supabase.co';
+    let signed: Any;
+    try {
+      const response = await fetch(base + '/storage/v1/object/sign/chatter-private', {
+        method: 'POST',
+        headers: { apikey: secret, Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: input.paths, expiresIn: 900 }),
+      });
+      if (!response.ok) return out({ ok: false, code: 'storage-sign' }, 502);
+      signed = await response.json();
+    } catch { return out({ ok: false, code: 'storage-sign' }, 502); }
+    if (!Array.isArray(signed) || signed.length !== input.paths.length) {
+      return out({ ok: false, code: 'storage-result' }, 502);
+    }
+    const items = [];
+    for (let i = 0; i < signed.length; i++) {
+      const item = signed[i], relative = item?.signedURL || item?.signedUrl;
+      if (item?.error || item?.path !== input.paths[i] || typeof relative !== 'string') {
+        return out({ ok: false, code: 'storage-result' }, 502);
+      }
+      const target = relative.startsWith('/object/sign/')
+        ? base + '/storage/v1' + relative
+        : relative.startsWith('/storage/v1/object/sign/') ? base + relative : '';
+      if (!target) return out({ ok: false, code: 'storage-result' }, 502);
+      const parsed = new URL(target);
+      if (parsed.origin !== base ||
+          !parsed.pathname.startsWith('/storage/v1/object/sign/chatter-private/') ||
+          !parsed.searchParams.has('token')) return out({ ok: false, code: 'storage-result' }, 502);
+      items.push({ path: input.paths[i], signedUrl: target });
+    }
+    return out({ ok: true, expiresIn: 900, items });
+  }
+  if (input && input.op && input.op !== 'database') return out({ ok: false, code: 'operation' }, 400);
   const url = poolerUrl(env('SUPABASE_DB_URL'));
   if (!url) return out({ ok: false, code: 'nodb' }, 500);
   return out({ ok: true, url });
