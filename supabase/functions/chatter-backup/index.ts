@@ -81,7 +81,7 @@ export async function handle(req: Request): Promise<Response> {
     if (input.bucket !== 'chatter-private' || !Array.isArray(input.paths) ||
         input.paths.length < 1 || input.paths.length > 50 ||
         input.paths.some((p: Any) => typeof p !== 'string' || !p || p.length > 512 ||
-          p.startsWith('/') || p.includes('\\0') || p.split('/').some((part: string) => !part || part === '.' || part === '..')) ||
+          p.startsWith('/') || p.includes(String.fromCharCode(0)) || p.split('/').some((part: string) => !part || part === '.' || part === '..')) ||
         new Set(input.paths).size !== input.paths.length) {
       return out({ ok: false, code: 'paths' }, 400);
     }
