@@ -52,6 +52,8 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const L = theme === 'light'; let likedT = '';
     const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: theme, hasTouch: true });
     const reqs = [];
+    // 模拟独立 B 站播放器，避免第三方网站的脚本错误污染隔离测试。
+    await ctx.route(/player\.bilibili\.com/, rt => rt.fulfill({ contentType: 'text/html', body: '<!doctype html><body>本地视频播放器替身</body>' }));
     await ctx.route(/art\.test|mirror\.test/, rt => { const u = rt.request().url(), id = (/\/(t\d+)\//.exec(u) || [])[1] || 't0', c = COLORS[(+id.slice(1)) % COLORS.length];
       if (/art\.test\/t3\//.test(u)) return rt.fulfill({ status: 404, body: '' });   // 第 3 首的封面服务器坏了：要换备用服务器
       rt.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#${c}"/><stop offset="1" stop-color="#1d1b2e"/></linearGradient></defs><rect width="300" height="300" fill="url(#g)"/><circle cx="210" cy="90" r="40" fill="#fff" fill-opacity=".25"/></svg>` }); });
@@ -131,8 +133,9 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const seen = new Set(); for (let k = 0; k < 11; k++) { await pg.click('[data-act="next"]'); await pg.waitForTimeout(40); seen.add(await pg.evaluate(() => ChatterMusic._m.i)); }
       ok(seen.size === 11, '随机播放：每首都轮到一次才重复 → 轮到了 ' + seen.size + ' 首');
       await pg.click('[data-act="mode"]'); ok((await toasts()).slice(-1)[0] === '列表循环', '→ 回到列表循环');
-      // 拖进度条
-      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});   // 刚在随机里连点了下一首：等这首加载好再拖
+      // 拖进度条：固定选择 5 秒的音频，避免随机播放最后停在 0.6 秒样本上。
+      await pg.evaluate(() => ChatterMusic._play(ChatterMusic._m.q, 2));
+      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a && /\/t2\/stream/.test(a.getAttribute('src') || '') && a.readyState >= 1 && Number.isFinite(a.duration) && a.duration >= 4.5; }, null, { timeout: 15000 });
       await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.pause(); });
       await pg.evaluate(() => { const r = document.querySelector('[data-r="seek"]'); r.value = '500'; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); });
       const t2 = await pg.evaluate(() => { const a = document.getElementById('mu-audio'); return a.currentTime / a.duration; });
@@ -159,7 +162,7 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('#mu-mini [data-act="mini-pp"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(!(await pg.evaluate(() => ChatterMusic.isOpen())), '迷你条上点播放：直接放，不打开页面');
       await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});
-      await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.currentTime = 2.2; ChatterMusic._m.savedAt = 0; });
+      await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.currentTime = 2.2; ChatterMusic._m.savedAt = 0; a.dispatchEvent(new Event('timeupdate')); });
       await pg.waitForFunction(() => { const v = JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'); return v && v.at >= 2; }, null, { timeout: 4000 }).catch(() => {});
       const sv = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'));
       ok(sv && sv.at >= 2 && sv.q.length === 12, '放的时候每 5 秒把位置记在手机里（重开能接着听）→ ' + (sv && sv.at) + ' 秒');
