@@ -38,6 +38,24 @@ async function main(){
   await must(await admin.from('app_config').update({value:{enabled:true}}).eq('key','private_chat_attachments'),'enable local test only');
   await deny(await carol.storage.from(bucket).upload(path,png,{contentType:'image/png'}),'upload to other sender prefix');
   await must(await alice.storage.from(bucket).upload(path,png,{contentType:'image/png'}),'upload owned image');
+
+  // Exercise the exact REST signing API used by the backup Edge Function,
+  // against real local Storage, not a mocked endpoint.
+  const signResponse = await fetch(url+'/storage/v1/object/sign/'+bucket, {
+    method:'POST',
+    headers:{apikey:serviceKey,Authorization:'Bearer '+serviceKey,'Content-Type':'application/json'},
+    body:JSON.stringify({paths:[path],expiresIn:900})
+  });
+  assert.equal(signResponse.status,200,'real local Storage bulk signing API must accept paths/expiresIn');
+  const signs=await signResponse.json();
+  assert.ok(Array.isArray(signs) && signs.length===1 && signs[0].path===path && signs[0].signedURL,
+    'real Storage signing response shape differs from Edge Function expectation');
+  const signedLink=signs[0].signedURL.startsWith('/object/')
+    ? url+'/storage/v1'+signs[0].signedURL : url+signs[0].signedURL;
+  const signedDownload=await fetch(signedLink);
+  assert.equal(signedDownload.status,200,'signed private object must be retrievable');
+  assert.deepEqual(Buffer.from(await signedDownload.arrayBuffer()),png,'signed private object bytes must match');
+
   await deny(await bob.storage.from(bucket).download(path),'receive without message');
   const publicUrl=alice.storage.from(bucket).getPublicUrl(path).data.publicUrl;
   const anonymousResponse=await fetch(publicUrl);
