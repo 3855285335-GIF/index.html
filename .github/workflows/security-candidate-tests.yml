@@ -1,0 +1,47 @@
+name: Chatter 安全候选自动检查
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app.js'
+      - 'index.html'
+      - 'navigation.html'
+      - 'tests/**'
+      - 'supabase/migrations/**'
+      - 'supabase/rollback/**'
+      - 'review/security/**'
+      - '.github/workflows/security-candidate-tests.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 代码语法检查
+        run: |
+          node --check app.js
+          node --check search.js
+          node --check navigation.js
+          node --check tests/run.js
+          node --check tests/harness.js
+          node --check tests/private-photo-browser.js
+          node --check tests/security-anon-check.cjs
+      - name: 安装隔离测试依赖（不连接生产环境）
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund @electric-sql/pglite@0.2.17
+      - name: 前端全量回归
+        working-directory: tests
+        run: npm test
+      - name: 私密附件与联系人设置数据库回归
+        working-directory: tests
+        run: |
+          node sql-private-attachments-test.mjs
+          node sql-contacts-only-test.mjs
+          node security-anon-check.cjs

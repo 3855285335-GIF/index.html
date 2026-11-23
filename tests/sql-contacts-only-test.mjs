@@ -1,0 +1,42 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import { PGlite } from '@electric-sql/pglite';
+
+const read = folder => fs.readFileSync(new URL('../supabase/' + folder + '/20261119134407_chatter_contacts_only.sql', import.meta.url), 'utf8');
+const db = new PGlite();
+const settings = 'public.contacts_only_chats';
+const list = async () => (await db.query("select public.bootstrap_contacts()->'contacts_only' as peers")).rows[0].peers;
+const login = async name => db.exec("reset role; set role authenticated; set test.account = '" + name + "'");
+try {
+  await db.exec(`create role authenticated; create role anon;
+    create table public.friendships(owner_acc text,friend_acc text, primary key(owner_acc,friend_acc));
+    insert into public.friendships values ('alice','bob'),('bob','alice');
+    create function public.my_acc() returns text language sql as $$select nullif(current_setting('test.account',true),'')$$;
+    create function public.bootstrap() returns jsonb language sql as $$ select jsonb_build_object('me',public.my_acc()) $$;`);
+  await db.exec(read('migrations')); await db.exec(read('migrations'));
+  await login('alice');
+  assert.deepEqual(await list(), []);
+  await db.exec("insert into " + settings + " values ('alice','bob') on conflict do nothing");
+  assert.deepEqual(await list(), ['bob']);
+  await assert.rejects(db.exec("insert into " + settings + " values ('alice','eve')"), /foreign key/i);
+  await login('bob');
+  assert.deepEqual(await list(), []);
+  assert.deepEqual((await db.query('select * from ' + settings)).rows, []);
+  await assert.rejects(db.exec("insert into " + settings + " values ('alice','bob')"), /row-level security/i);
+  await db.exec("delete from " + settings + " where owner_acc='alice'");
+  await db.exec('reset role; set role anon');
+  await assert.rejects(db.query('select * from ' + settings), /permission denied/i);
+  await assert.rejects(list(), /permission denied/i);
+  await db.exec('reset role'); await db.exec(read('rollback'));
+  assert.equal((await db.query('select count(*)::int as n from ' + settings)).rows[0].n, 1);
+  await db.exec('set role authenticated');
+  await assert.rejects(db.query('select * from ' + settings), /permission denied/i);
+  await db.exec('reset role'); await db.exec(read('migrations'));
+  await login('alice'); assert.deepEqual(await list(), ['bob']);
+  await db.exec('reset role'); await db.exec("delete from public.friendships where owner_acc='alice'");
+  await login('alice'); assert.deepEqual(await list(), []);
+  await db.exec('reset role'); await db.exec(read('rollback')); await db.exec(read('rollback'));
+  assert.equal((await db.query("select to_regclass('public.contacts_only_chats') as t")).rows[0].t, null);
+  assert.equal((await db.query("select count(*)::int as n from public.friendships")).rows[0].n, 1);
+  console.log('好友专属显示设置：重复迁移、双方账号隔离、陌生人、匿名、解除好友及两种回滚均通过。');
+} finally { await db.close(); }

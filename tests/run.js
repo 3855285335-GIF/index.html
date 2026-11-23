@@ -946,6 +946,27 @@ test('聊天里的网址：在 App 里打开（不跳到系统浏览器）；聊
   } finally { env.close(); }
 });
 
+test('私密照片暂停时保留待发照片，禁止改用公开桶', async () => {
+  const db = baseDb(Date.now(), { app_config:[{ key:'private_chat_attachments', value:{ enabled:false, paused:true } }] });
+  const env = makeEnv({ db });
+  try {
+    await env.login(); await env.T.openConv('bob::me', 'bob');
+    const storage = env.T.sb.storage.from;
+    let uploads = 0;
+    env.T.sb.storage.from = function (bucket) {
+      const api = storage(bucket);
+      const upload = api.upload;
+      api.upload = (...args) => { uploads++; return upload(...args); };
+      return api;
+    };
+    const photo = new env.w.File(['protected'], 'photo.png', { type:'image/png' });
+    await env.T.sendImage(photo, true);
+    await sleep(40);
+    ok(uploads === 0 && db.messages.length === 0, '暂停后仍然上传或发送');
+    ok([...env.T.S.out.values()].some(m => m.type === 'image' && m._st === 'failed' && m._blob), '照片未保留为待重试消息');
+  } finally { env.close(); }
+});
+
 test('图片画质：默认发原图，聊天预览跟随画质设置，关闭发送前编辑后直接发送', async () => {
   const db = baseDb(Date.now());
   const env = makeEnv({ db });
@@ -1132,6 +1153,84 @@ test('退出登录会清除本账号的离线文章和浏览记录，保留另�
       for (const prefix of ['ch2wsSeen','ch2wsFrm','ch2wsTabs','ch2muNow','ch2muRecent'])
         ok(env.w.localStorage.getItem(prefix+':'+me) === null && env.w.localStorage.getItem(prefix+':'+other) === '[]', prefix+' 清理的账号范围错误');
       for (const prefix of ['ch2muLike','ch2mute']) ok(env.w.localStorage.getItem(prefix+':'+me) === '[]', '应保留本账号的收藏和设置');
+    } finally { db.close(); }
+  } finally { env.close(); }
+});
+
+test('仅在通讯录显示：新消息、置顶、读写失败、刷新、换号和恢复', async () => {
+  const db = baseDb(Date.now());
+  let failWrite = false, user = ME, releaseRead, staleRead = false;
+  const env = makeEnv({ db, onQuery(q) {
+    if (q.table === 'contacts_only_chats' && failWrite) return { error: { message: '断网' } };
+  }, onRpc(name) {
+    if (name === 'bootstrap_contacts' && staleRead) return new Promise(resolve => { releaseRead = resolve; });
+    if (name === 'bootstrap' && user !== ME) return { data: { me: prof(user, user), friends: [], convs: [], requests: [] } };
+  } });
+  const row = () => env.$('conv-list').querySelector('[data-peer="bob"]');
+  const friend = () => env.$('friend-list').querySelector('[data-acc="bob"].friend-item');
+  const setting = env.$('pf-contacts-only');
+  try {
+    await env.login(); await sleep(100);
+    ok(row() && friend(), '好友及聊天应默认可见');
+    env.w.localStorage.setItem('ch2pin:' + env.T.S.uid, JSON.stringify({'bob::me':1}));
+    env.T.openProfile('bob');
+    failWrite = true; setting.click(); await sleep(60);
+    ok(row() && setting.getAttribute('aria-pressed') === 'false', '保存失败不应隐藏');
+    await sleep(550);
+    staleRead = true;
+    const pull = env.T.pullRefresh();
+    await sleep(50);
+    ok(releaseRead, '没有发出旧刷新请求');
+    failWrite = false; setting.click(); setting.click(); await sleep(60);
+    ok(!row() && friend() && setting.getAttribute('aria-pressed') === 'true', '隐藏失败或通讯录好友丢失');
+    releaseRead({ data: { me: prof(ME, '我'), friends: [prof('bob','Bob')], convs: db.conversations, contacts_only: [], requests: [] } });
+    staleRead = false; await pull; await sleep(80);
+    ok(!row(), '慢刷新覆盖了新设置');
+    env.$('pf-close').click();
+    const m = serverInsert(db, msg(901, 'bob', 'bob::me', '只从通讯录进入', Date.now()));
+    env.rtFire('INSERT','messages',m); await sleep(150);
+    ok(!row() && !banner(env) && !!friend().querySelector('.badge'), '新消息使会话重现、泄露横幅或没有通讯录未读提示');
+    ok(!!env.$('conv-list').querySelector('[data-key="' + GK + '"]'), '错误隐藏群聊');
+    friend().querySelector('.act-chat').click(); await sleep(180);
+    ok(!!msgEl(env, uid(901)) && !friend().querySelector('.badge'), '从通讯录无法读到消息或清除未读');
+    env.T.closeChat();
+    await env.T.onAuth('SIGNED_OUT', null);
+    user = 'other'; await env.T.onAuth('SIGNED_IN', { user: { id: 'another-uid' }, access_token: 'test-other' });
+    ok(!env.w.localStorage.getItem('ch2contactsOnly:another-uid')?.includes('bob'), '好友设置泄露到另一账号');
+    await env.T.onAuth('SIGNED_OUT', null);
+    user = ME; await env.login(); await sleep(100);
+    ok(!row() && friend(), '重新登录丢失隐藏设置');
+    env.T.openProfile('bob'); setting.click(); await sleep(100);
+    ok(row()?.textContent.includes('只从通讯录进入') && setting.getAttribute('aria-pressed') === 'false', '恢复后未显示原聊天');
+    env.T.openProfile('stranger'); ok(setting.style.display === 'none', '陌生人资料不应有好友设置');
+  } finally { env.close(); }
+});
+
+test('退出登录会清除本账号的离线文章和浏览记录，保留另一账号', async () => {
+  const env = makeEnv({ db: baseDb(Date.now()) });
+  try {
+    await env.login();
+    const me = env.T.S.uid, other = 'other-account';
+    const db = await new Promise((resolve, reject) => {
+      const q = env.w.indexedDB.open('chatter-ws', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('art', {keyPath:'k'}).createIndex('tm','tm');
+      q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error);
+    });
+    try {
+      const key = u => u + '||https://sample.test/article';
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('art','readwrite');
+        for (const uid of [me,other]) {
+          tx.objectStore('art').put({k:key(uid),uid,tm:1});
+          env.w.localStorage.setItem('ch2wsSeen:'+uid,'[]');
+        }
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      await env.T.onAuth('SIGNED_OUT', null);
+      const readKeys = () => new Promise(resolve => { const q=db.transaction('art').objectStore('art').getAllKeys(); q.onsuccess=() => resolve(q.result); });
+      for (let attempt=0; attempt<25 && (await readKeys()).includes(key(me)); attempt++) await sleep(20);
+      ok((await readKeys()).join() === key(other), '离线文章清理的账号范围错误');
+      ok(env.w.localStorage.getItem('ch2wsSeen:'+me) === null && env.w.localStorage.getItem('ch2wsSeen:'+other) === '[]', '浏览记录清理的账号范围错误');
     } finally { db.close(); }
   } finally { env.close(); }
 });

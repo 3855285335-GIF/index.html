@@ -128,6 +128,11 @@ function makeEnv(opts) {
   function defRpc(name, args) {
     if (name === 'my_kick_at') return { data: null, error: { code: 'PGRST202' } };
     if (name === 'mark_read') { db.conversations.filter(c => c.owner_acc === ME && c.conv_key === (args && args.p_conv)).forEach(c => { c.unread = 0; c.last_read_ts = iso(Date.now()); }); return { data: null, error: null }; }   // 像线上一样：标记已读就把未读清零
+    if (name === 'bootstrap_contacts') {
+      const boot = (opts.onRpc && opts.onRpc('bootstrap', args, db)) || defRpc('bootstrap', args);
+      return Promise.resolve(boot).then(r => r.data ? { data: { ...r.data, contacts_only: (db.contacts_only_chats || [])
+        .filter(row => row.owner_acc === r.data.me?.account_id).map(row => row.friend_acc) }, error: null } : r);
+    }
     if (name === 'bootstrap') return { data: { me: db.profiles.find(p => p.account_id === ME), friends: db.profiles.filter(p => p.account_id !== ME && db.friendships.some(f => f.friend_acc === p.account_id)), convs: db.conversations.filter(c => c.owner_acc === ME), peers: [], requests: [] }, error: null };
     if (name === 'chatter_schema') return { data: 8, error: null };
     if (name === 'my_group_invites') return { data: [], error: null };
