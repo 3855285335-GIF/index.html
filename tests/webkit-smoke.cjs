@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { webkit, devices } = require('playwright');
 const ROOT = path.resolve(__dirname, '..');
-const contentType = f => f.endsWith('.html') ? 'text/html; charset=utf-8' : f.endsWith('.js') ? 'text/javascript; charset=utf-8' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream';
+const contentType = f => (!f || f === '/' || f.endsWith('.html')) ? 'text/html; charset=utf-8' : f.endsWith('.js') ? 'text/javascript; charset=utf-8' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream';
 const load = pathname => {
   let name;
   try { name = decodeURIComponent(pathname); while (name.startsWith('/')) name = name.slice(1); } catch { return null; }
