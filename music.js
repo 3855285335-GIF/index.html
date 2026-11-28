@@ -109,7 +109,9 @@ function saveSync() {   // 播放列表和位置存在手机里：重开 App 还
   clearTimeout(saveT); M.savedAt = Date.now();
   const t = cur(); if (!t || !B.uid()) return;
   const keep = Math.max(0, M.i - 50), q = M.q.slice(keep, keep + 100);   // 最多存 100 首（正在放的这首前后）
-  LSs(uidKey('ch2muNow'), { q: q, i: M.i - keep, mode: M.mode, at: audio && audio.src ? Math.floor(audio.currentTime || 0) : (M.resumeAt || 0) });
+  // 重开后音轨还在等待元数据，currentTime 暂时是零。保留待恢复的位置。
+  const at = M.resumeAt || (audio && audio.src ? Math.floor(audio.currentTime || 0) : 0);
+  LSs(uidKey('ch2muNow'), { q: q, i: M.i - keep, mode: M.mode, at: at });
 }
 function saveNow() { clearTimeout(saveT); saveT = setTimeout(saveSync, 400); }
 
@@ -499,7 +501,7 @@ function onAudioError() {   // 这首放不出来：说一声，自动换下一�
 function seekTo(frac) {   // frac：0~1；传 0 就是回到开头
   if (!audio) return;
   const d = isFinite(audio.duration) && audio.duration ? audio.duration : ((cur() && cur().d) || 0);
-  try { audio.currentTime = Math.max(0, Math.min(d - 0.5, d * frac)); } catch (e) { /* 还没加载好 */ }
+  try { audio.currentTime = d * Math.max(0, Math.min(1, frac)); } catch (e) { /* 还没加载好 */ }
   paintProg();
 }
 

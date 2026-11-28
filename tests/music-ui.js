@@ -7,7 +7,7 @@ const OUT = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'mu-shots-'
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const CSS = /<style>([\s\S]*?)<\/style>/.exec(HTML)[1];
 
-// 一段 2 秒的正弦波（WAV），当作假的歌
+// 时长固定的本地音轨，分别覆盖长曲续听和不足一秒的短音频
 function wav(sec) {
   const rate = 8000, n = Math.round(rate * sec), b = Buffer.alloc(44 + n * 2);
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write('fmt ', 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
@@ -15,7 +15,7 @@ function wav(sec) {
   for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i / rate * 2 * Math.PI * 440) * 3000), 44 + i * 2);
   return b;
 }
-const SONG = wav(5), SHORT = wav(0.6);
+const SONG = wav(20), SHORT = wav(0.6);
 const COLORS = ['8b7cf6', '22c08a', 'e8508c', 'e39a2d', '3a8ee6', '6c5ce7'];
 const ART = (id, size) => `https://art.test/${id}/${size}.svg`;
 const TR = (n, extra) => Object.assign({ id: 't' + n, title: ['夜里的海', 'Morning Coffee', '城市边缘', 'Lo-Fi 学习用', '雨天', 'Slow Drive', '风', 'Neon'][n % 8] + (n >= 8 ? ' ' + n : ''), duration: 180 + n * 7,
@@ -52,6 +52,14 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
     const L = theme === 'light'; let likedT = '';
     const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: theme, hasTouch: true });
     const reqs = [];
+    const coverRequests = [];
+    await ctx.route('https://i0.hdslb.com/**', route => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      coverRequests.push({ pathname, referer: request.headers().referer });
+      if (pathname.includes('/c12.jpg') || pathname.includes('/c11.jpg@')) return route.fulfill({ status: 404, body: '' });
+      return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect width="160" height="100" fill="teal"/></svg>' });
+    });
     await ctx.route(/art\.test|mirror\.test/, rt => { const u = rt.request().url(), id = (/\/(t\d+)\//.exec(u) || [])[1] || 't0', c = COLORS[(+id.slice(1)) % COLORS.length];
       if (/art\.test\/t3\//.test(u)) return rt.fulfill({ status: 404, body: '' });   // 第 3 首的封面服务器坏了：要换备用服务器
       rt.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#${c}"/><stop offset="1" stop-color="#1d1b2e"/></linearGradient></defs><rect width="300" height="300" fill="url(#g)"/><circle cx="210" cy="90" r="40" fill="#fff" fill-opacity=".25"/></svg>` }); });
@@ -108,8 +116,21 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => document.getElementById('mu-audio').paused && !document.querySelector('[data-r="state"]').textContent, null, { timeout: 3000 }).catch(() => {});
       ok(bufOn === '正在缓冲…' && await pg.$eval('[data-r="state"]', e => e.textContent) === '', '缓冲时点暂停：不再一直显示“正在缓冲…” → ' + bufOn + ' / ' + await pg.$eval('[data-r="state"]', e => e.textContent));
       await pg.click('[data-act="toggle"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
+      await pg.evaluate(() => document.getElementById('mu-audio').addEventListener('loadedmetadata', e => e.target.pause(), { once: true }));
       await pg.click('[data-act="next"]'); await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.getAttribute('src').includes('/t1/stream'); }, null, { timeout: 4000 }).catch(() => {});
       ok((await st()).src.includes('/t1/stream') && await pg.$eval('.mu-nt .mu-rt', e => e.textContent) === 'Morning Coffee', '下一首');
+      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && a.paused && Math.abs(a.duration - 0.6) < 0.01; });
+      const shortFraction = await pg.evaluate(() => {
+        const slider = document.querySelector('.mu-v.on [data-r="seek"]');
+        slider.value = '500';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        slider.dispatchEvent(new Event('change', { bubbles: true }));
+        const audio = document.getElementById('mu-audio');
+        return audio.currentTime / audio.duration;
+      });
+      ok(Math.abs(shortFraction - 0.5) < 0.02, '不足一秒的音轨也能定位到中点 → ' + shortFraction.toFixed(2));
+      await pg.click('[data-act="toggle"]');
+
       await pg.waitForFunction(() => document.getElementById('mu-audio').getAttribute('src').includes('/t2/stream'), null, { timeout: 6000 }).catch(() => {});
       ok((await st()).src.includes('/t2/stream'), '放完自动下一首');
       await pg.evaluate(() => { document.getElementById('mu-audio').currentTime = 0; });
@@ -131,8 +152,13 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const seen = new Set(); for (let k = 0; k < 11; k++) { await pg.click('[data-act="next"]'); await pg.waitForTimeout(40); seen.add(await pg.evaluate(() => ChatterMusic._m.i)); }
       ok(seen.size === 11, '随机播放：每首都轮到一次才重复 → 轮到了 ' + seen.size + ' 首');
       await pg.click('[data-act="mode"]'); ok((await toasts()).slice(-1)[0] === '列表循环', '→ 回到列表循环');
-      // 拖进度条
-      await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});   // 刚在随机里连点了下一首：等这首加载好再拖
+      // 随机顺序可能停在 0.6 秒的音轨。长曲定位与五秒存盘用已知的 20 秒文件。
+      await pg.click('.mu-v.on [data-act="back"]');
+      await pg.click('.mu-v.on[data-v="home"] .mu-row[data-i="0"]');
+      await pg.waitForFunction(() => {
+        const a = document.getElementById('mu-audio');
+        return a.readyState >= 1 && a.duration === 20 && a.getAttribute('src').includes('/t0/stream');
+      });
       await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.pause(); });
       await pg.evaluate(() => { const r = document.querySelector('[data-r="seek"]'); r.value = '500'; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); });
       const t2 = await pg.evaluate(() => { const a = document.getElementById('mu-audio'); return a.currentTime / a.duration; });
@@ -159,10 +185,13 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       await pg.click('#mu-mini [data-act="mini-pp"]'); await pg.waitForFunction(() => !document.getElementById('mu-audio').paused);
       ok(!(await pg.evaluate(() => ChatterMusic.isOpen())), '迷你条上点播放：直接放，不打开页面');
       await pg.waitForFunction(() => { const a = document.getElementById('mu-audio'); return a.readyState >= 1 && isFinite(a.duration) && a.duration > 0; }, null, { timeout: 15000 }).catch(() => {});
-      await pg.evaluate(() => { const a = document.getElementById('mu-audio'); a.currentTime = 2.2; ChatterMusic._m.savedAt = 0; });
-      await pg.waitForFunction(() => { const v = JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'); return v && v.at >= 2; }, null, { timeout: 4000 }).catch(() => {});
-      const sv = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null'));
-      ok(sv && sv.at >= 2 && sv.q.length === 12, '放的时候每 5 秒把位置记在手机里（重开能接着听）→ ' + (sv && sv.at) + ' 秒');
+      const startedAt = await pg.evaluate(() => document.getElementById('mu-audio').currentTime);
+      await pg.waitForFunction(at => {
+        const stored = JSON.parse(localStorage.getItem('ch2muNow:u1') || 'null');
+        return stored && stored.q[stored.i].id === 't0' && stored.at >= Math.floor(at) + 4;
+      }, startedAt, { timeout: 9000 });
+      const sv = await pg.evaluate(() => JSON.parse(localStorage.getItem('ch2muNow:u1')));
+      ok(sv.q.length === 12 && sv.at < 20, '持续播放：实际经过五秒后记住当前曲目的进度 → ' + sv.at + ' 秒');
       await pg.evaluate(() => { const v = document.createElement('video'); v.muted = true; v.id = 'mutedv'; v.src = '/voice.wav'; document.body.appendChild(v); return v.play().catch(() => {}); });
       await pg.waitForTimeout(200);
       ok(!(await st()).paused, '静音的视频开始放（比如视频通话里自己的画面）：音乐不停');
@@ -264,6 +293,15 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       const bl = await pg.evaluate(() => ({ tab: (document.querySelector('.mu-src .on') || {}).textContent, n: document.querySelectorAll('.mu-v.on [data-act="brow"]').length, img: (document.querySelector('.mu-v.on [data-act="brow"] img') || {}).getAttribute && document.querySelector('.mu-v.on [data-act="brow"] img').getAttribute('src'), rp: document.querySelector('.mu-v.on [data-act="brow"] img') && document.querySelector('.mu-v.on [data-act="brow"] img').getAttribute('referrerpolicy'), rs: (document.querySelector('.mu-v.on [data-act="brow"] .mu-rs') || {}).textContent, call: window.__bili.slice(-1)[0] }));
       ok(/B 站/.test(bl.tab) && bl.n === 3 && bl.call.op === 'bili' && bl.call.q === '晴天' && bl.call.page === 1, '搜中文“晴天”：默认先看 B 站（服务器替手机搜），列出结果 → ' + JSON.stringify(bl).slice(0, 160));
       ok(/@160w_100h_1c\.jpg$/.test(bl.img) && bl.rp === 'no-referrer' && /UP主0 · 4:30 · 355 万次播放/.test(bl.rs), 'B 站结果：用小封面（省流量、不带来源网址才显示得出来）、UP 主 · 时长 · 播放量');
+      await pg.waitForFunction(() => {
+        const rows = document.querySelectorAll('.mu-v.on [data-act="brow"]');
+        const first = rows[0].querySelector('img'), second = rows[1].querySelector('img');
+        return first && first.naturalWidth > 0 && second && second.naturalWidth > 0 && !rows[2].querySelector('img');
+      });
+      ok(coverRequests.some(r => r.pathname.endsWith('c10.jpg@160w_100h_1c.jpg')) &&
+         coverRequests.some(r => r.pathname.endsWith('/c11.jpg')) &&
+         coverRequests.some(r => r.pathname.endsWith('/c12.jpg')) && coverRequests.every(r => !r.referer),
+         'B 站小图可见、不发来源网址；小图失败改用原图、两次失败保留占位');
       await pg.click('.mu-v.on [data-act="bmore"]'); await pg.waitForFunction(() => document.querySelectorAll('.mu-v.on [data-act="brow"]').length === 5, null, { timeout: 4000 }).catch(() => {});
       ok(await pg.$$eval('.mu-v.on [data-act="brow"]', a => a.length) === 5 && /没有更多了/.test(await pg.$eval('.mu-v.on[data-v="list"]', e => e.textContent)), 'B 站“加载更多”：取第 2 页，到最后一页说“没有更多了”');
       await pg.click('[data-act="src"][data-s="au"]'); await pg.waitForSelector('.mu-v.on [data-act="row"]', { timeout: 5000 }).catch(() => {});
@@ -309,7 +347,16 @@ let bad = 0; const ok = (c, m) => { if (!c) bad++; console.log((c ? '✅ ' : '�
       ok(mm.on && /雨天/.test(mm.txt) && mm.paused && !mm.src && reqs.slice(r0).every(r => !/stream/.test(r)), '重开 App：底部恢复上次的歌（不自动播放、先不连 Audius 不花流量）→ ' + JSON.stringify(mm));
       const look = await pg2.evaluate(() => { const m = document.getElementById('mu-mini'), r = m.getBoundingClientRect(), im = m.querySelector('.mu-art'); return { h: Math.round(r.height), disp: getComputedStyle(m).display, art: im ? Math.round(im.getBoundingClientRect().width) : 0, btn: Math.round(m.querySelector('[data-act="mini-pp"]').getBoundingClientRect().width) }; });
       ok(look.disp === 'flex' && look.h > 40 && look.h < 70 && look.art === 40 && look.btn === 40, '重开 App 只恢复迷你条（没打开音乐页）：迷你条也有样式，是一条细条，不会封面撑满半屏 → ' + JSON.stringify(look));
+      let releaseMedia;
+      const mediaGate = new Promise(resolve => { releaseMedia = resolve; });
+      await pg2.route('**/v1/tracks/t4/stream*', async route => { await mediaGate; await route.fallback(); });
       await pg2.click('#mu-mini [data-act="mini-pp"]');
+      await pg2.waitForTimeout(650);
+      ok(await pg2.evaluate(() => {
+        const a = document.getElementById('mu-audio');
+        return a.readyState === 0 && JSON.parse(localStorage.getItem('ch2muNow:u1')).at === 1;
+      }), '重开后等音乐元数据时，已保存的续听位置仍然保留');
+      releaseMedia();
       await pg2.waitForFunction(() => { const a = document.getElementById('mu-audio'); return !a.paused && a.currentTime >= 0.9; }, null, { timeout: 6000 }).catch(() => {});
       const at = await pg2.evaluate(() => document.getElementById('mu-audio').currentTime);
       ok(at >= 0.9, '点播放：从上次听到的地方接着放 → ' + at.toFixed(2) + ' 秒');
