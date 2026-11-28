@@ -3,7 +3,7 @@
    2) 加速打开：带版本号的程序文件（app.js?v=…）和依赖库存在手机里，第二次打开不用再下载；
       页面本身先联网取，2.5 秒取不到才用手机里存的（所以新版本照样第一次打开就生效，网不好时也能秒开）；
    3) 聊天和朋友圈的图片存在手机里（最多 300 张），看过的图再打开不用重新下载。 */
-const SW_BUILD = '4.3';
+const SW_BUILD = '4.4';
 const SHELL = 'chatter-shell-v1', IMG = 'chatter-img-v1', IMG_MAX = 300;
 const IMG_PREFIX = 'https://uaoiqbxptnbrvkzjwguc.supabase.co/storage/v1/object/public/chat-media/';
 
@@ -26,6 +26,10 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = req.url;
+  if (url === new URL('manifest.webmanifest', self.registration.scope).href) {
+    e.respondWith(launchManifest(req));
+    return;
+  }
   if (url.indexOf(IMG_PREFIX) === 0) {   // 图片（不碰视频/语音：它们要分段加载）
     if (req.destination === 'image' && !req.headers.get('range')) e.respondWith(imgFirst(req));
     return;
@@ -49,6 +53,32 @@ self.addEventListener('fetch', e => {
   if (u.searchParams.has('retry')) return;
   if (u.searchParams.has('v') || u.pathname.indexOf('/vendor/') >= 0) e.respondWith(keepFirst(req));
 });
+
+// 安装标识、作用域和图标仍来自同一份 manifest，只按本机主题调整系统启动底色。
+async function launchManifest(req) {
+  let response, cache;
+  try { cache = await caches.open(SHELL); } catch (e) {}
+  try {
+    response = await fetch(req);
+    if (cache && response.ok) await cache.put(req, response.clone()).catch(() => {});
+  } catch (err) {
+    response = cache && await cache.match(req);
+    if (!response) throw err;
+  }
+  if (!response.ok || !cache) return response;
+  try {
+    const pref = await cache.match(new URL('.chatter-launch-theme', self.registration.scope).href);
+    if (!pref) return response;
+    const theme = await pref.text();
+    if (theme !== 'light' && theme !== 'dark') return response;
+    const manifest = await response.clone().json();
+    manifest.background_color = theme === 'dark' ? '#12101c' : '#f6f3ee';
+    manifest.theme_color = manifest.background_color;
+    return new Response(JSON.stringify(manifest), {
+      headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' }
+    });
+  } catch (e) { return response; }
+}
 
 async function pageFirst(net, cache, key, u) {
   let saved;
@@ -110,15 +140,15 @@ async function show(d) {
   };
   if (kind === 'call') { opt.requireInteraction = true; opt.vibrate = [600, 300, 600, 300, 600, 300, 600]; }   // 来电：一直留着、震久一点
   else opt.vibrate = [180];
-  if (d.badge != null && self.navigator && self.navigator.setAppBadge) {   // 主屏幕图标上的未读数（iPhone 16.4+ / 部分安卓）
-    try { if (+d.badge > 0) await self.navigator.setAppBadge(+d.badge); else if (self.navigator.clearAppBadge) await self.navigator.clearAppBadge(); } catch (x) {}
-  }
   // 每次推送都一定要弹通知（苹果的规定：收到推送却不弹，会被系统收回推送权限）
   await self.registration.showNotification(title, opt);
   try {   // 告诉开着的页面：正看着这个聊天的话，页面会把通知收起来
     const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     list.forEach(c => { try { c.postMessage({ t: 'pushed', tag: opt.tag, kind, from: opt.data.from }); } catch (x) {} });
   } catch (x) {}
+  if (d.badge != null && self.navigator && self.navigator.setAppBadge) {   // 主屏幕图标上的未读数（iPhone 16.4+ / 部分安卓）
+    try { if (+d.badge > 0) await self.navigator.setAppBadge(+d.badge); else if (self.navigator.clearAppBadge) await self.navigator.clearAppBadge(); } catch (x) {}
+  }
 }
 
 async function openUrl(u) {
@@ -129,16 +159,14 @@ async function openUrl(u) {
     if (dest.origin === scope.origin && (dest.pathname === scope.pathname || dest.pathname === scope.pathname + 'index.html') && !dest.search) url = dest.href;
   } catch (x) {}
   const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const c = list.find(client => {
+  for (const client of list) {
     try {
       const page = new URL(client.url);
-      return page.origin === scope.origin && (page.pathname === scope.pathname || page.pathname === scope.pathname + 'index.html');
-    } catch { return false; }
-  });
-  if (c) {   // App 已经开着（可能在后台）：切到前台，让它自己打开那个聊天
-    try { c.postMessage({ t: 'open', url }); } catch (x) {}
-    try { await c.focus(); } catch (x) {}
-    return 'focus';
+      if (page.origin !== scope.origin || (page.pathname !== scope.pathname && page.pathname !== scope.pathname + 'index.html')) continue;
+      await client.focus();
+      client.postMessage({ t: 'open', url });
+      return 'focus';
+    } catch (x) { /* 窗口可能刚被系统回收，继续找能接收此次点击的窗口。 */ }
   }
   if (self.clients.openWindow) { await self.clients.openWindow(url); return 'open'; }
   return 'none';

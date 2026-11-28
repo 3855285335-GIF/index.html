@@ -86,9 +86,10 @@ const LS = {
 function fmtTime(t) {
   if (!t) return '';
   const d = new Date(t), n = new Date();
+  if (!Number.isFinite(d.getTime())) return '';
   const hh = pad2(d.getHours()), mm = pad2(d.getMinutes());
   if (d.toDateString() === n.toDateString()) return hh + ':' + mm;
-  if (d.getFullYear() !== n.getFullYear()) return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  if (d.getFullYear() !== n.getFullYear()) return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm;
   return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm;
 }
 const convKeyOf = (a, b) => [a, b].sort().join('::');
@@ -290,7 +291,6 @@ const peerName = a => {
 };
 const avatarOf = a => (S.profiles[a] && S.profiles[a].avatar_url) || '';
 const isOnline = a => S.online.has(a) || (S.fbOnline && S.fbOnline.has(a));
-const peerActiveAt = {};   // 好友最近一次“确实在看和我的聊天”的时间（服务器确认的已读）
 const convOf = k => S.convs.find(c => c.convKey === k);
 
 /* ================= 本地缓存（秒开的关键）================= */
@@ -325,13 +325,16 @@ async function idbDel(k) {
     await new Promise(function (res, rej) { const tx = db.transaction('msgs', 'readwrite'); tx.objectStore('msgs').delete(k); tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); }; });
   } catch (e) { IDB.bad = true; }
 }
-async function idbClear(uid) {
+async function idbClear(uid, includeOutbox) {
   if (!window.indexedDB) return true;
   try {
     const db = await idbOpen();
     await new Promise(function (resolve, reject) {
       const tx = db.transaction('msgs', 'readwrite'), store = tx.objectStore('msgs');
-      if (uid) store.delete(IDBKeyRange.bound(uid + ':', uid + ';', false, true));
+      if (uid) {
+        store.delete(IDBKeyRange.bound(uid + ':', uid + ';', false, true));
+        if (includeOutbox) store.delete(IDBKeyRange.bound('out:' + uid + ':', 'out:' + uid + ';', false, true));
+      }
       else store.clear();
       tx.oncomplete = () => resolve();
       tx.onabort = tx.onerror = () => reject(tx.error);
@@ -449,7 +452,7 @@ function flashTitle() {
 }
 function stopFlash() { if (flashI) { clearInterval(flashI); flashI = 0; } document.title = baseTitle; }
 function updateTitle() {
-  let n = 0; S.convs.forEach(c => { if (c.convKey !== S.conv && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
+  let n = 0; S.convs.forEach(c => { if (!readingChat(c.convKey) && !convGone(c) && !isMuted(c.convKey)) n += c.unread || 0; });
   baseTitle = (n ? '(' + (n > 99 ? '99+' : n) + ') ' : '') + 'Chatter';
   if (!flashI) document.title = baseTitle;
   if (!convsReady) return;   // 会话还没从服务器读回来：此时 n 一定是 0，动系统角标会把推送设好的数字清掉（冷启动角标消失的原因）
@@ -661,10 +664,10 @@ function touchConv(key, preview, t, inc) {
   let c = convOf(key);
   if (c) {
     if (!c.last_ts || Date.parse(t) >= Date.parse(c.last_ts)) { c.last_body = preview; c.last_ts = t; }
-    if (inc && key !== S.conv) c.unread = (c.unread || 0) + 1; }
+    if (inc) c.unread = (c.unread || 0) + 1; }
   else {
     const peer = peerOf(key, ME());
-    S.convs.push({ convKey: key, peer_acc: peer, last_body: preview, last_ts: t, last_read_ts: null, unread: inc && key !== S.conv ? 1 : 0 });
+    S.convs.push({ convKey: key, peer_acc: peer, last_body: preview, last_ts: t, last_read_ts: null, unread: inc ? 1 : 0 });
     if (isGroupKey(peer)) { if (!grpOf(peer)) setTimeout(() => grpLoad(true), 0); }
     else if (!S.profiles[peer]) fetchProfile(peer);
   }
@@ -692,29 +695,48 @@ async function fetchPeerRead(conv) {
     if (generation !== accountGeneration) return;
     if (error) { if (isMissingFn(error)) S.noPR = true; return; }
     const t = data ? Date.parse(data) : 0;
-    if (t > 0 && t > peerReadOf(conv)) { S.peerRead[conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); if (S.conv === conv) refreshReads(); if (Date.now() - t < 60000) peerActiveAt[peerOf(conv, ME())] = now(); }   // 服务器确认对方刚读过：说明人就在这个聊天里
+    if (t > 0 && t > peerReadOf(conv)) { S.peerRead[conv] = t; LS.set('ch2rd:' + (S.uid || ''), S.peerRead); if (S.conv === conv) refreshReads(); }
   } catch (e) { logErr('peerRead', e); }
 }
-function markReadSoon(key) {
+function readingChat(key) {
+  return !!key && S.conv === key && !document.hidden;
+}
+function markReadSoon(key, explicitlyCleared) {
   const generation = accountGeneration;
-  if (key === S.conv) setTimeout(() => { if (generation === accountGeneration) sendReadAck(key); }, 120);
-  const c = convOf(key); if (c) { c.unread = 0; c.last_read_ts = new Date().toISOString(); sched('list'); }
-  clearTimeout(readT[key]);
-  readT[key] = setTimeout(() => {
-    if (generation !== accountGeneration || !sb || !S.me) return;
-    const direct = () => sb.from('conversations').update({ unread: 0, last_read_ts: new Date().toISOString() }).eq('owner_acc', ME()).eq('conv_key', key).then(r => { if (r && r.error) logErr('markRead', r.error); });
-    if (S.noMR) { direct(); return; }
-    sb.rpc('mark_read', { p_conv: key }).then(r => {
-      if (r && r.error) { if (isMissingFn(r.error)) S.noMR = true; logErr('mark_read', r.error); direct(); }
-    }, () => direct());
-  }, 250);
+  const canMark = () => generation === accountGeneration && !document.hidden &&
+    (explicitlyCleared || readingChat(key)) && sb && S.me;
+  if (!canMark()) return;
+  if (readingChat(key)) setTimeout(() => { if (canMark() && readingChat(key)) sendReadAck(key); }, 120);
+  const c = convOf(key);
+  if (c) { c.unread = 0; c.last_read_ts = new Date().toISOString(); sched('list'); }
+  clearTimeout(readT[key]?.timer);
+  const commitRead = async () => {
+    delete readT[key];
+    if (!canMark()) return;
+    if (!S.noMR) {
+      try {
+        const { error } = await sb.rpc('mark_read', { p_conv: key });
+        if (!error || !canMark()) return;
+        if (isMissingFn(error)) S.noMR = true;
+        logErr('mark_read', error);
+      } catch (e) { logErr('mark_read', e); }
+    }
+    // 请求未完成时可能已经锁屏、换号或离开这段聊天。
+    if (canMark()) {
+      try {
+        const { error } = await sb.from('conversations').update({ unread: 0, last_read_ts: new Date().toISOString() }).eq('owner_acc', ME()).eq('conv_key', key);
+        if (error) logErr('markRead', error);
+      } catch (e) { logErr('markRead', e); }
+    }
+  };
+  readT[key] = { timer: setTimeout(commitRead, 250), commit: commitRead };
   saveCache();
 }
 function upsertConvRow(r) {
   const key = r.conv_key; if (!key) return;
   const c = convOf(key);
   const n = { convKey: key, peer_acc: r.peer_acc || peerOf(key, ME()), last_body: r.last_body || (c && c.last_body) || r.last_body, last_ts: r.last_ts, last_read_ts: r.last_read_ts, unread: r.unread || 0 };
-  if (key === S.conv) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
+  if (readingChat(key)) { if (n.unread > 0) markReadSoon(key); n.unread = 0; }
   if (isGroupKey(key) && (n.unread || 0) > 0 && now() - (AT_CHK[key] || 0) > 4000) { AT_CHK[key] = now(); checkConvMention(key); }
   if (c) Object.assign(c, n); else S.convs.push(n);
   S.convs.sort((a, b) => Date.parse(b.last_ts || 0) - Date.parse(a.last_ts || 0));
@@ -760,12 +782,13 @@ function applyBoot(b) {
   const first = !S.bootInited; S.bootInited = true;
   try { (LS.get('ch2eds:' + (S.uid || ''), []) || []).forEach(function (x) { editSeen.add(x); }); } catch (e) {}
   if (first) setTimeout(function () { try { recordDevice(); } catch (e) {} }, 1500);   // 设备登记只做一次：以前每次 resync 都会写一次库
+  loadHidden();
   loadOutQueue();
   try { bubbleColorCache = LS.get('ch2profc:' + (S.uid || ''), {}) || {}; } catch (e) {}
   S.friends = (b.friends || []).map(p => { S.profiles[p.account_id] = p; return p.account_id; });
   (b.peers || []).forEach(p => { S.profiles[p.account_id] = p; });
   const oldConvs = S.convs || [];
-  S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: c.conv_key === S.conv ? 0 : (c.unread || 0) }));
+  S.convs = (b.convs || []).map(c => ({ convKey: c.conv_key, peer_acc: c.peer_acc, last_body: c.last_body || ((oldConvs.find(o => o.convKey === c.conv_key) || {}).last_body) || c.last_body, last_ts: c.last_ts, last_read_ts: c.last_read_ts, unread: readingChat(c.conv_key) ? 0 : (c.unread || 0) }));
   convsReady = true;   // 从这里开始，未读数才是真的，可以据此设置/清除系统角标
   S.requests = b.requests || [];
   const prevReq = S.reqKnown; S.reqKnown = new Set(S.requests.map(r => String(r.id)));
@@ -1013,7 +1036,7 @@ function msgHTML(m) {
       body = '<div class="bubble video" data-v="' + esc(u) + '">' + cover + (m._st === 'sending' ? '<span class="vup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span><span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '<span class="vplay"></span>') + (m.dur > 0 ? '<span class="vlen">' + fmtDur(m.dur) + '</span>' : '') + '</div>'; break;
     }
     case 'file': { const f = parseFile(m.body) || { u: '', n: '文件', s: 0 }, x = (extOfName(f.n) || '文件').slice(0, 4).toUpperCase(); body = '<div class="bubble file" data-u="' + esc(f.u) + '"><span class="fic">' + esc(x) + '</span><span class="fm"><b>' + esc(f.n) + '</b><small>' + (f.s ? fmtSize(f.s) : '') + (m._st === 'sending' ? '　<span class="fup">' + (m._pct > 0 ? '上传中 ' + m._pct + '%' : '上传中…') + '</span>' : m._st ? '' : '　点开查看') + '</small></span>' + (m._st === 'sending' ? '<span class="upbar"><i style="width:' + (m._pct || 0) + '%"></i></span>' : '') + '</div>'; break; }
-    case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
+    case 'voice': { const d = Math.max(1, m.dur || 1); body = '<div class="bubble voice' + (playingId === m.id && audioEl && !audioEl.paused ? ' playing' : '') + '" data-url="' + esc(m.body) + '" style="min-width:' + Math.min(200, 96 + d * 6) + 'px"><span class="vp"></span><span class="vw"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vd">' + d + '″</span><span class="vprog"><i></i></span></div>'; break; }
     case 'call': body = '<div class="bubble call">' + (m.body === 'video' ? '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><rect x="3" y="6.5" width="12.5" height="11" rx="3"/><path d="m15.5 11 5-3v8l-5-3z"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5.2 4h3.3l1.6 4.2-2 1.4a11 11 0 0 0 5.3 5.3l1.4-2 4.2 1.6v3.3a1.8 1.8 0 0 1-1.9 1.8C10.8 19.2 4.8 13.2 3.4 5.9A1.8 1.8 0 0 1 5.2 4z"/></svg>') + (m.dur > 0 ? '通话时长 ' + fmtDur(m.dur) : '未接通') + '</div>'; break;
     default: { const pq = parseQ(m.body); let qh = ''; if (pq.q) { const t = S.msgs.find(x => x.id === pq.q.id); qh = '<div class="quote" data-qid="' + esc(pq.q.id) + '"><b>' + esc(t ? (t.from_acc === ME() ? '我' : peerName(t.from_acc)) : '消息') + '</b>' + esc(t ? previewOf(t).slice(0, 40) : pq.q.snip) + '</div>'; } body = '<div class="bubble' + (pq.q ? ' hasq' : '') + (isAtMe(m) ? ' at-me' : '') + '" data-links="' + esc(glGids(pq.text).length ? pq.text : '') + '">' + qh + (m.body === NAV_INVITE_TEXT && NAV_UUID.test(m.id) ? navInviteButton(m.id) : mentionify((function () { const gs = glGids(pq.text); return gs.length ? pq.text.replace(/(?:https?:\/\/)?\S*#g=[0-9a-f-]{36}\S*/ig, '').trim() : pq.text; })(), mentionsOf(m))) + (m.edited_at ? ' <span class="edited-tag">已编辑</span>' : '') + (function () { const gs = glGids(pq.text); return gs.length ? '<div class="gl-cards">' + gs.map(glCardHTML).join('') + '</div>' : ''; })() + '</div>'; }
   }
@@ -1023,7 +1046,7 @@ function msgHTML(m) {
     const _bc = bubCss(_pc);
     if (_bc) body = body.replace(/class="bubble([^"]*)"/, 'class="bubble$1" style="background:' + _bc + ';color:#fff"');
   }
-  const st = m._st === 'sending' && m.type !== 'text' ? '<span class="st sending"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
+  const st = m._st === 'sending' ? '<span class="st sending" aria-label="正在发送"></span>' : m._st === 'failed' ? '<span class="st failed" data-retry="1">!</span>' : '';
   const gp = isGroupKey(m.conv);
   let senderTag = '';
   if (gp) {
@@ -1137,11 +1160,6 @@ function patchMsg(id, p) {
   const i = S.msgs.findIndex(x => x.id === id); if (i < 0) return null;
   const m = S.msgs[i];
   Object.assign(m, p);
-  // 图片从本地 blob 换成服务器地址：只换 src，不重建节点，避免“先变小再变大”的闪烁
-  if (p.body && m.type === 'image') {
-    const el = msgElOf(id), img = el && el.querySelector('.bubble.img img');
-    if (img && !/^blob:/.test(p.body)) { try { img.src = p.body; } catch (e) {} return m; }
-  }
   chatReplace(m); return m;
 }
 /* S.msgs[i] 的时间变了或是新来的：如果位置不对，只把这一条挪到正确位置（以前会整页重画，聊天里图片视频多时很卡） */
@@ -1176,7 +1194,7 @@ function upsertMsg(m) {
     if (o._rx && m.created_at && !m._rx) { addSkew(Date.parse(m.created_at) - o._rx); delete o._rx; }
     if (isStaleMessage(o, m)) return;
     if (o.type === m.type && o.body === m.body && o.dur === m.dur && o.edited_at === m.edited_at && o.cover === m.cover && !o._st) { if (o.created_at !== m.created_at) { o.created_at = m.created_at; placeMsg(i); } return; }
-    S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; S.out.delete(m.id); chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
+    S.msgs[i] = Object.assign({}, m); delete S.msgs[i]._rx; if (S.out.has(m.id)) { removePending(m.id); saveOutQueue(); } chatReplace(S.msgs[i]); placeMsg(i); saveMsgsSoon(); return;
   }
   S.msgs.push(m); chatAppend(m); placeMsg(S.msgs.length - 1);
   saveMsgsSoon();
@@ -1203,15 +1221,15 @@ function onIncoming(m, noInc) {
   if (S.seen.size > 800) S.seen = new Set(Array.from(S.seen).slice(-400));
   const open = S.conv === m.conv;
   const at = first && isGroupKey(m.conv) && mentionsOf(m).some(function (x) { return x.acc === ME() || x.acc === '@all'; });
-  if (at && !open) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
+  if (at && !readingChat(m.conv)) setAtMe(m.conv, true);   // 被 @ 了：会话列表标“有人@你”（免打扰也标，但不出声）
   if (open && m.from_acc === S.peer) { S.typingUntil = 0; sched('title'); }
-  if (first && m.type !== 'call' && !isMuted(m.conv) && !nightOnAt(new Date())) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); if (!open && !document.hidden && m.type !== 'recalled') inAppBanner(m); }
+  if (first && m.type !== 'call' && !isMuted(m.conv) && !nightOnAt(new Date())) { try { const _t = now(), _burst = _t - (S.lastIncAt || 0) < 1500; S.lastIncAt = _t; if (!_burst) SFX.recv(open); } catch (e) {} if (document.hidden) flashTitle(); if ((!open || document.hidden) && m.type !== 'recalled') noteIncoming(m); }
   if (open) {
     upsertMsg(m);
     if (first) markReadSoon(m.conv);
     m = S.msgs.find(x => x.id === m.id) || m;
   }
-  touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !open && m.type !== 'call');
+  touchConv(m.conv, previewOf(m), m.created_at, !noInc && first && !readingChat(m.conv) && m.type !== 'call');
   if (!S.profiles[m.from_acc]) fetchProfile(m.from_acc);
 }
 let msgBannerT = 0;
@@ -1309,28 +1327,74 @@ function uploadContentType(type) {
   if (ct === 'text/plain' || ct === 'application/pdf') return ct;
   return 'application/octet-stream';
 }
+const uncertainUploads = new WeakMap();
 async function upload(blob, ext, ct, pre, fixed, onPct) {
   ct = uploadContentType(ct);
   const path = fixed || ME() + '/' + (pre || '') + now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + ext;
   const generation = accountGeneration;
-  let done = false;
-  if (onPct && typeof XMLHttpRequest !== 'undefined' && typeof FormData !== 'undefined') {
+  const store = sb.storage.from('chat-media');
+  const url = canon(store.getPublicUrl(path).data.publicUrl);
+  if (fixed && uncertainUploads.get(blob) === path) {
     try {
-      const { data } = await sb.auth.getSession(); const tok = data && data.session && data.session.access_token;
-      if (tok && generation === accountGeneration) { await xhrUpload(path, blob, ct, tok, onPct); done = true; }
-    } catch (e) { if (tooBigErr(e)) throw e; logErr('xhr-upload', e); }   // 别的问题：退回官方库再传一次
+      const found = await fetch(disp(url), { method: 'HEAD', cache: 'no-store' });
+      if (generation !== accountGeneration) throw new Error('账号已切换');
+      if (found.ok && Number(found.headers.get('content-length')) === blob.size) {
+        uncertainUploads.delete(blob); return url;
+      }
+    } catch (e) { if (generation !== accountGeneration) throw e; }
+  }
+  let token;
+  if (onPct && typeof XMLHttpRequest !== 'undefined' && typeof FormData !== 'undefined') {
+    const session = await sb.auth.getSession();
+    token = session.data && session.data.session && session.data.session.access_token;
   }
   if (generation !== accountGeneration) throw new Error('账号已切换');
-  if (!done) {
-    const { error } = await sb.storage.from('chat-media').upload(path, blob, { contentType: ct, cacheControl: '31536000' });
-    if (error && !(fixed && /already exists|Duplicate/i.test(String(error.message || '')))) throw error;   // 刚才其实已经传上去了（只是回应丢了）
+  try {
+    if (token) { onPct(0); await xhrUpload(path, blob, ct, token, onPct); }
+    else {
+      const result = await store.upload(path, blob, { contentType: ct, cacheControl: '31536000' });
+      if (result.error) throw result.error;
+    }
+  } catch (e) {
+    if (!(fixed && /already exists|duplicate/i.test(String(e.message || '')))) {
+      if (fixed) uncertainUploads.set(blob, path);
+      throw e;
+    }
   }
-  return canon(sb.storage.from('chat-media').getPublicUrl(path).data.publicUrl);
+  uncertainUploads.delete(blob);
+  return url;
+}
+const writeTurns = new Map();
+async function writeMessage(row) {
+  const controller = new AbortController();
+  let query = sb.from('messages').insert(row).select('*').single();
+  if (query.abortSignal) query = query.abortSignal(controller.signal);
+  let timer;
+  try {
+    return await Promise.race([query, new Promise((resolve,reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('发送超时')); }, 15000);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 async function deliver(m, silent) {
   const id = m.id, generation = accountGeneration;
   if (m.from_acc !== ME()) return;
+  const tracked = S.out.get(id) === m;
+  // 上传可并行，每个会话按用户确认发送的顺序提交；其他会话独立写入。
+  const lane = S.uid + ':' + m.conv, previous = writeTurns.get(lane) || Promise.resolve();
+  let release;
+  const turn = new Promise(resolve => { release = resolve; });
+  const tail = previous.then(() => turn);
+  writeTurns.set(lane, tail);
+  const active = () => generation === accountGeneration && (!tracked || S.out.get(id) === m);
   try {
+    if (tracked) {
+      if (m._blob) savePendingFile(m);
+      saveOutQueue();
+      if (m._savingFile) await m._savingFile;
+      if (m._filePending && !m._blob) await restorePendingFile(m, S.uid);
+      if (!active()) return;
+    }
     if (m._blob) {
       const old = m.body, base = m.from_acc + '/' + id + '.' + m._ext;
       // 图片：同时传一张长边 720 的小图（文件名 = 原图 + “.t”），聊天里先显示小图，快很多；小图没传上也不影响发送
@@ -1347,20 +1411,21 @@ async function deliver(m, silent) {
         if (vp) { try { await upload(m._poster, 'jpg', 'image/jpeg', '', decodeURIComponent(vp[1]) + '.jpg'); } catch (x) { logErr('poster', x); } }
         m._poster = null;
       }
-      m.body = nb; m._blob = null;
+      m.body = nb; m._blob = null; m._filePending = false;
+      saveOutQueue();
       try { if (m._pu) URL.revokeObjectURL(m._pu); } catch (e) {}
       delete m._pu;
       patchMsg(id, { body: nb, _blob: undefined, _pu: undefined });
       try { URL.revokeObjectURL(m._fm ? (parseFile(old) || {}).u : old); } catch (e) {}
     }
-    // 新类型（表情/视频/文件）在确认后端支持之前，先写数据库再通知对方，免得对方看到一条其实没发成的消息
-    if (generation !== accountGeneration) return;
+    await previous;
+    if (!active()) return;
     const gp = isGroupKey(m.conv);
     const fast = () => bcast('u:' + m.to_acc, 'm', { id: m.id, conv: m.conv, from: m.from_acc, to: m.to_acc });
     // 先写库、再广播：接收方收到广播会按 id 查库，广播太早会查不到
     const row = { id: m.id, conv_key: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, cover: m.cover || null };
     const t0 = now();
-    let { data, error } = await sb.from('messages').insert(row).select('*').single();
+    let { data, error } = await writeMessage(row);
     if (generation !== accountGeneration) return;
     if (error && error.code === '23505') {
       const persisted = await sb.from('messages').select('*').eq('id', id)
@@ -1372,7 +1437,7 @@ async function deliver(m, silent) {
     if (!data) throw new Error('服务器未返回发送结果');
     if (data && data.created_at && now() - t0 < 3000) addSkew(Date.parse(data.created_at) - (t0 + now()) / 2);
     if (!gp && S.token && m.type !== 'call' && !(S.rt && S.rt.db)) fast();   // 实时库连着就不走快通道，省一次广播+一次查询
-    S.out.delete(id); saveOutQueue(); delete m._blob;
+    removePending(id); saveOutQueue(); delete m._blob;
     const committed = rowToMsg(data), t = committed.created_at;
     if (S.conv === m.conv) upsertMsg(committed);
     touchConv(m.conv, previewOf(committed), t, false);
@@ -1391,6 +1456,7 @@ async function deliver(m, silent) {
     if (committed.type !== 'recalled') pushAfterSend(committed);
   } catch (e) {
     if (generation !== accountGeneration) return;
+    if (tracked && S.out.get(id) !== m) return;   // 回包丢失期间已由同步行确认，或用户已取消。
     logErr('send', e);
     SFX.error();
     const em = String((e && (e.message || '')) || '') + ' ' + String((e && (e.statusCode || e.status)) || '');
@@ -1398,7 +1464,11 @@ async function deliver(m, silent) {
     if (noType && m.type !== 'recalled') S.v6 = false;
     if (m.type === 'recalled') { m._fatal = true; }
     m._st = 'failed'; if ((e && e.code === '42501') || noType || tooBig) m._fatal = true; patchMsg(id, { _st: 'failed' }); saveOutQueue();
-    if (!silent || m._fatal) toast(e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过了存储允许的大小（没运行 setup-v6.sql 时上限是 20MB，运行后是 50MB）' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
+    m._nextRetry = now() + Math.min(60000, 3000 * Math.pow(2, Math.min(m._tries || 0, 5)));
+    if (!silent || m._fatal) toast(m._filePending && m._fatal && !m._blob ? '本机未能保留待发附件，请重新选择文件' : e && e.code === '42501' ? (isGroupKey(m.conv) ? '发送失败：你不在这个群里了' : '发送失败：对方不是你的好友') : noType ? '发送失败：' + NEED_V6 : tooBig ? '发送失败：文件超过当前大小限制，请选择较小的文件' : '发送失败，网络恢复后会自动重发，也可点消息左边的 ! 重试');
+  } finally {
+    release();
+    tail.then(() => { if (writeTurns.get(lane) === tail) writeTurns.delete(lane); });
   }
 }
 /* ---- @某人 ---- */
@@ -1569,14 +1639,18 @@ function ieScale() { const cv = ieCanvas(), r = ieWrap().getBoundingClientRect()
 function iePushHist() {
   try {
     const cv = ieCanvas();
-    IE.hist.push(cv.toDataURL('image/jpeg', 0.85));
+    IE.changeCount++;
+    IE.hist.push(cv.toDataURL('image/png'));
     if (IE.hist.length > 4) IE.hist.shift();
   } catch (e) {}
 }
 function ieUndo() {
   const u = IE.hist.pop(); if (!u) { toast('没有可撤销的步骤'); return; }
+  const session = IE.resolve;
   const im = new Image();
   im.onload = function () {
+    if (!session || IE.resolve !== session) return;
+    IE.changeCount--;
     const cv = ieCanvas(); cv.width = im.width; cv.height = im.height;
     cv.getContext('2d').drawImage(im, 0, 0);
     IE.sel = null; ieLayout();
@@ -1672,7 +1746,7 @@ function paintIeColors() {
 }
 function openImgEditor(file) {
   return new Promise(function (resolve) {
-    IE.file = file; IE.resolve = resolve; IE.hist = []; IE.sel = null; IE.drag = null; IE.origin = null;
+    IE.file = file; IE.resolve = resolve; IE.hist = []; IE.changeCount = 0; IE.sel = null; IE.drag = null; IE.origin = null;
     IE.mosaicSize = IE.mosaicSize || 14; IE.stk = IE.stk || '😀'; IE.stkSize = IE.stkSize || 64;
     const finish = function () {
       if (IE.resolve !== resolve) return;
@@ -1684,7 +1758,8 @@ function openImgEditor(file) {
       const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
       if (!w || !h) { if (src.close) src.close(); finish(); return; }
       const cv = ieCanvas();
-      const max = 1600, sc = Math.min(1, max / Math.max(w, h));
+      const sc = Math.min(1, 8192 / Math.max(w, h), Math.sqrt(16000000 / (w * h)));
+      if (sc < 1) toast('照片较大，编辑后会缩小；直接点完成可保留原文件');
       cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(h * sc));
       cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
       IE.img = true;
@@ -1845,15 +1920,20 @@ function ieAddText(p) {
 function ieFinish() {
   const cv = ieCanvas(); if (!cv) return;
   const src = IE.file, finish = IE.resolve;
-  cv.toBlob(function (blob) {
-    if (!finish || IE.resolve !== finish) return;
-    const f = blob ? new File([blob], 'edit.jpg', { type: 'image/jpeg' }) : src;
+  if (!finish) return;
+  function done(file) {
+    if (IE.resolve !== finish) return;
     $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
-    try { if (IE.bmp && IE.bmp.close) IE.bmp.close(); } catch (e) {}
-    IE.bmp = null;
-    const r = IE.resolve; IE.resolve = null;
-    if (r) r(f || null);
-  }, 'image/jpeg', 0.92);
+    IE.resolve = null; IE.file = null; IE.img = null; IE.hist = [];
+    finish(file);
+  }
+  if (!IE.changeCount) { done(src); return; }
+  const jpeg = src.type === 'image/jpeg';
+  cv.toBlob(function (blob) {
+    if (IE.resolve !== finish) return;
+    if (!blob) { toast('图片尚未保存，可再试一次或取消编辑'); return; }
+    done(new File([blob], jpeg ? 'edit.jpg' : 'edit.png', { type: blob.type }));
+  }, jpeg ? 'image/jpeg' : 'image/png', 0.92);
 }
 function ieClose() {
   $('imgedit-backdrop').classList.remove('active'); $('imgedit-sheet').classList.remove('active');
@@ -1914,13 +1994,59 @@ function sendVoice(blob, dur, ext, ct) {
   addLocal(newMsg('voice', URL.createObjectURL(blob), dur, { _blob: blob, _ext: ext || 'wav', _ct: ct || 'audio/wav' }));
 }
 function outKey() { return 'ch2outq:' + (S.uid || ''); }
+// 正文和附件索引同步保存；二进制只写 IndexedDB，不把临时 blob: URL 当成可恢复的数据。
+function pendingFileKey(uid, id) { return 'out:' + uid + ':' + id; }
+function bytesOf(blob) {
+  if (blob.arrayBuffer) return blob.arrayBuffer();
+  return new Promise((resolve,reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+function savePendingFile(m) {
+  if (!m._blob || m._savingFile) return;
+  const uid = S.uid, key = pendingFileKey(uid, m.id), generation = accountGeneration;
+  m._filePending = true;
+  m._savingFile = (async () => {
+    const bytes = await bytesOf(m._blob);
+    const poster = m._poster ? await bytesOf(m._poster) : null;
+    if (generation !== accountGeneration || S.out.get(m.id) !== m) return;
+    await idbSet(key, { bytes, poster });
+    m._fileSaved = true;
+  })().catch(() => {
+    if (uid === S.uid && S.out.get(m.id) === m) toast('这台设备无法保存待发附件。请保持页面打开，直到发送成功。');
+  });
+}
+async function restorePendingFile(m, uid) {
+  const saved = await idbGet(pendingFileKey(uid, m.id));
+  if (uid !== S.uid || S.out.get(m.id) !== m) return;
+  if (!saved || !saved.bytes) {
+    m._fatal = true;
+    throw new Error('本机未能保留待发附件，请重新选择文件');
+  }
+  m._blob = new Blob([saved.bytes], { type: m._ct });
+  const url = URL.createObjectURL(m._blob);
+  m.body = m._fm ? JSON.stringify({ u:url, n:m._fm.n, s:m._fm.s }) : url;
+  if (saved.poster) { m._poster = new Blob([saved.poster], { type:'image/jpeg' }); m._pu = URL.createObjectURL(m._poster); }
+  m._fileSaved = true;
+  if (S.conv === m.conv) patchMsg(m.id, { body:m.body, _blob:m._blob, _pu:m._pu });
+}
+function removePending(id) {
+  const m = S.out.get(id);
+  if (!m) return;
+  S.out.delete(id);
+  if (m._filePending || m._fileSaved) idbDel(pendingFileKey(S.uid, id));
+}
 function saveOutQueue() {
   try {
     const arr = [];
     S.out.forEach(function (m) {
-      if (m && m._st === 'failed' && !m._fatal && !m._blob && m.type !== 'call') {
-        arr.push({ id: m.id, conv: m.conv, from_acc: m.from_acc, to_acc: m.to_acc, type: m.type, body: m.body, dur: m.dur, mentions: m.mentions || null, created_at: m.created_at });
-      }
+      if (!m || !m._st || m.type === 'call') return;
+      const row = { id:m.id, conv:m.conv, from_acc:m.from_acc, to_acc:m.to_acc, type:m.type, body:m._filePending ? '' : m.body, dur:m.dur, mentions:m.mentions || null, created_at:m.created_at, cover:m.cover || null };
+      if (m._filePending) Object.assign(row, { _filePending:true, _ext:m._ext, _ct:m._ct, _fm:m._fm, _w:m._w, _h:m._h });
+      if (m._fatal) row._fatal = true;
+      arr.push(row);
     });
     LS.set(outKey(), arr);
   } catch (e) {}
@@ -1928,19 +2054,23 @@ function saveOutQueue() {
 function loadOutQueue() {
   try {
     const arr = LS.get(outKey(), []) || [];
+    let removed = false;
     arr.forEach(function (o) {
-      if (o && o.id && !S.out.has(o.id)) S.out.set(o.id, Object.assign({}, o, { _st: 'failed' }));
+      if (!o || !o.id || !o.conv || o.from_acc !== ME()) return;
+      if (isHidden(o)) { if (o._filePending) idbDel(pendingFileKey(S.uid, o.id)); removed = true; return; }
+      if (!S.out.has(o.id)) S.out.set(o.id, Object.assign({}, o, { _st: 'failed' }));
     });
+    if (removed) saveOutQueue();
   } catch (e) {}
 }
 function retryMsg(id) {
   const m = S.out.get(id); if (!m || m._st !== 'failed') return;
   m._tries = 0; m._fatal = false; m._st = 'sending'; patchMsg(id, { _st: 'sending' }); deliver(m);
 }
-function retryFailed() {
+function retryFailed(immediate) {
   if (!sb || !S.me || navigator.onLine === false) return;
   S.out.forEach(m => {
-    if (m._st !== 'failed' || m._fatal || (m._tries || 0) >= 8) return;
+    if (m._st !== 'failed' || m._fatal || (!immediate && (m._nextRetry || 0) > now())) return;
     m._tries = (m._tries || 0) + 1; m._st = 'sending'; patchMsg(m.id, { _st: 'sending' }); deliver(m, true);
   });
   saveOutQueue();
@@ -1953,14 +2083,14 @@ function showMsgMenu(id) {
   const m = S.msgs.find(x => x.id === id);
   if (!m || m._st === 'sending') return;
   const mine = m.from_acc === ME(), plain = m.type !== 'recalled' && m.type !== 'call' && !m._st;
-  const canRecall = mine && plain && now() - ts(m) <= RECALL_MS;
+  const canRecall = mine && plain && now() + skewMs - ts(m) <= RECALL_MS;
   $('msg-menu-reply').style.display = plain ? '' : 'none';
   $('msg-menu-copy').style.display = plain && m.type === 'text' ? '' : 'none';
   $('msg-menu-fwd').style.display = plain ? '' : 'none';
   $('msg-menu-stk').style.display = plain && (m.type === 'image' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-save').style.display = plain && (m.type === 'image' || m.type === 'video' || m.type === 'file' || (m.type === 'sticker' && isStoreUrl(m.body))) ? '' : 'none';
   $('msg-menu-recall').style.display = canRecall ? '' : 'none';
-  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st && !m.edited_at && now() - ts(m) <= 60000) ? '' : 'none';   // 只能改一次：改过就不显示编辑
+  $('msg-menu-edit').style.display = (mine && m.type === 'text' && !m._st && !m.edited_at && now() + skewMs - ts(m) <= 60000) ? '' : 'none';   // 只能改一次：改过就不显示编辑
   $('msg-menu-del').style.display = '';
   $('msg-menu-title').textContent = canRecall ? '2 分钟内可撤回' : '消息';
   menuId = id; menuOpenAt = now(); $('msg-menu-backdrop').classList.add('active'); $('msg-menu').classList.add('active');
@@ -1968,26 +2098,27 @@ function showMsgMenu(id) {
 function closeMenu() { $('msg-menu-backdrop').classList.remove('active'); $('msg-menu').classList.remove('active'); menuId = null; }
 function editMsg(m) {
   if (!m || m.type !== 'text' || m.from_acc !== ME()) return;
-  if (now() - ts(m) > 60000) { toast('超过 1 分钟，不能编辑了'); return; }
+  if (now() + skewMs - ts(m) > 60000) { toast('超过 1 分钟，不能编辑了'); return; }
   const pq = parseQ(m.body), generation = accountGeneration;
-  openForm('编辑消息', [{ ph: '消息内容', val: pq.text, max: TEXT_MAX }], function (vals) {
-    const body = String(vals[0] || '').trim();
-    if (!body) return '不能为空';
+  openForm('编辑消息', [{ ph: '消息内容', val: pq.text, max: TEXT_MAX, multiline: true }], async function (vals) {
+    const body = String(vals[0] || '');
     if (body === pq.text) return '';
+    if (!body.trim()) return '不能为空';
     const nb = pq.q ? encQ(pq.q, body) : body;
     const t = new Date().toISOString();
     if (generation !== accountGeneration) return '';
-    sb.from('messages').update({ body: nb, edited_at: t }).eq('id', m.id)
-      .eq('from_acc', ME()).eq('type', 'text').select('*').maybeSingle().then(function (r) {
-        if (generation !== accountGeneration) return;
-        if (r.error || !r.data) { toast('保存失败：' + (r.error ? r.error.message : '消息状态已变化')); return; }
-        const committed = rowToMsg(r.data);
-        if (S.conv === m.conv) upsertMsg(committed);
-        touchConv(m.conv, previewOf(committed), committed.created_at, false);
-        toast('已保存');
-        if (!isGroupKey(m.conv)) firePush('edit', m.to_acc, m.id);
-      }, function () { if (generation === accountGeneration) toast('保存失败，检查网络'); });
-    return '';
+    try {
+      const r = await sb.from('messages').update({ body: nb, edited_at: t }).eq('id', m.id)
+        .eq('from_acc', ME()).eq('type', 'text').select('*').maybeSingle();
+      if (generation !== accountGeneration) return '';
+      if (r.error || !r.data) return /edit window passed/i.test(r.error && r.error.message) ? '超过 1 分钟，不能再修改。可以复制这里的文字。' : '保存失败，请检查网络或消息状态后重试';
+      const committed = rowToMsg(r.data);
+      if (S.conv === m.conv) upsertMsg(committed);
+      touchConv(m.conv, previewOf(committed), committed.created_at, false);
+      toast('已保存');
+      if (!isGroupKey(m.conv)) firePush('edit', m.to_acc, m.id);
+      return '';
+    } catch (e) { return '保存失败，请检查网络后重试'; }
   }, '保存');
 }
 async function copyImageMsg(m) {
@@ -2037,25 +2168,33 @@ function menuAction(kind) {
   else if (kind === 'save') saveMsg(m);
   else if (kind === 'edit') setTimeout(function () { editMsg(m); }, 50);
   else if (kind === 'del') {
-    hidden.add(id); saveHidden(); S.out.delete(id);
+    const pending = S.out.get(id), owner = accountGeneration;
+    hidden.add(id); saveHidden(); removePending(id); saveOutQueue();
     const el = msgElOf(id); if (el) el.remove();
     if (!$('chat-messages').querySelector('.msg')) chatRender(true);
     notePreview(S.conv); sched('list');   // 消息页的预览跟着变（删的是最后一句时不再显示它）
     toastUndo('已删除（仅在你这边）', '撤销', function () {
-      hidden.delete(id); saveHidden(); chatRender(true); notePreview(S.conv); sched('list'); toast('已恢复');
+      if (owner !== accountGeneration) return;
+      hidden.delete(id); saveHidden();
+      if (pending && pending._st === 'failed') {
+        S.out.set(id, pending);
+        if (pending._blob) { pending._savingFile = null; savePendingFile(pending); }
+        saveOutQueue();
+      }
+      chatRender(true); notePreview(m.conv); sched('list'); toast('已恢复');
     });
   }
 }
 async function doRecall() {
   const id = menuId; closeMenu(); if (!id) return;
   const m = S.msgs.find(x => x.id === id);
-  if (!m || m._st || m.from_acc !== ME() || m.type === 'recalled' || now() - ts(m) > RECALL_MS) { toast('超过 2 分钟，无法撤回'); return; }
+  if (!m || m._st || m.from_acc !== ME() || m.type === 'recalled' || now() + skewMs - ts(m) > RECALL_MS) { toast('超过 2 分钟，无法撤回'); return; }
   const generation = accountGeneration;
   try {
     const { data, error } = await sb.from('messages').update({ type: 'recalled', body: '' })
       .eq('id', id).eq('from_acc', ME()).neq('type', 'recalled').select('*').maybeSingle();
     if (generation !== accountGeneration) return;
-    if (error || !data) { toast('撤回失败：' + (error ? error.message : '消息状态已变化或已超时')); return; }
+    if (error || !data) { toast(/recall window passed/i.test(error && error.message) ? '超过 2 分钟，无法撤回' : '撤回失败，请检查网络或消息状态后重试'); return; }
     const committed = rowToMsg(data);
     if (S.conv === m.conv) upsertMsg(committed);
     touchConv(m.conv, previewOf(committed), committed.created_at, false);
@@ -2070,7 +2209,7 @@ function beforeMessage(query, cursor) {
   return cursor ? query.or('created_at.lt.' + cursor.created_at +
     ',and(created_at.eq.' + cursor.created_at + ',id.lt.' + cursor.id + ')') : query;
 }
-let olderCursor = null;
+let olderCursor = null, syncGeneration = -1;
 async function fetchMsgs(conv, before) {
   const q = sb.from('messages').select('*').eq('conv_key', conv)
     .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(PAGE);
@@ -2098,7 +2237,7 @@ async function openConv(key, peer) {
   try { if (window.ChatterSearch && window.ChatterSearch.isOpen()) window.ChatterSearch.closeNow(); } catch (e) {}   // 在搜索里点了消息横幅：先收起搜索，不然聊天被盖在下面
   try { if (window.ChatterMusic && window.ChatterMusic.isOpen()) window.ChatterMusic.closeNow(); } catch (e) {}
   recAbort();
-  setAtMe(key, false);
+  if (!document.hidden) setAtMe(key, false);
   S.conv = key; S.peer = peer || peerOf(key, ME()); S.hasMore = true; S.stick = true; S.typingUntil = 0; S.renderLimit = 200; S.rendered = 0; S.editSince = new Date().toISOString(); clearReply(); pendingMentions = []; closeMention(); loadHidden(); loadPeerRead(); closeSearch(); $('chat-input').value = draftOf(key);
   requestAnimationFrame(chatGrow);
   if (!draftOf(key) && sb && S.token) {
@@ -2128,7 +2267,7 @@ async function openConv(key, peer) {
   else $('chat-messages').innerHTML = '<div class="empty">正在打开…</div>';
   markReadSoon(key); sendReadAck(key, true);
   if (S.token && !isGroupKey(key)) bcast('u:' + S.peer, 'rq', { from: ME(), conv: key });
-  { const pa = S.peer; closeNotes(t => t === 'm:' + pa || t === 'c:' + pa || t === pa); if (nbCur && nbCur.acc === pa) hideNBar(); }
+  clearChatNotes(key);
   if (isGroupKey(key)) { grpOpenMeta(key); refreshMyMuteState(gidOf(key)); }
   const pCache = msgCacheGet(key), pRows = fetchMsgs(key).catch(function (e) { return { __err: e }; });   // 缓存和网络并行，不等缓存读完再发请求
   const cachedMsgs = await pCache;
@@ -2163,7 +2302,7 @@ async function openConv(key, peer) {
       const found = map.get(m.id);
       if ((!found || isStaleMessage(m, found)) && !isHidden(m)) map.set(m.id, m);
     });
-    rows.forEach(m => S.out.delete(m.id));
+    rows.forEach(m => removePending(m.id));
     saveOutQueue();
     S.msgs = Array.from(map.values()).sort(compareMessages);
     olderCursor = rows[0] || null;
@@ -2183,7 +2322,27 @@ async function openConv(key, peer) {
   }
 }
 let lastChat = null;   // 刚关掉的聊天（“前进”手势用）
+let chatBackTimer = 0;
+function backFromChat() {
+  if (!S.conv || chatBackTimer) return;
+  // 仅退自己为聊天添加的记录，避免状态失配或连点把浏览器带到上一站。
+  if (S.hist && history.state && history.state.chat) {
+    const generation = chatGeneration;
+    chatBackTimer = setTimeout(() => {
+      chatBackTimer = 0;
+      if (generation === chatGeneration && S.conv) closeChat();
+    }, 800);
+    try { history.back(); return; } catch (e) {}
+  }
+  closeChat();
+}
 function closeChat() {
+  const pendingRead = readT[S.conv];
+  if (pendingRead && readingChat(S.conv)) {
+    clearTimeout(pendingRead.timer);
+    pendingRead.commit();
+  }
+  clearTimeout(chatBackTimer); chatBackTimer = 0;
   closeNavigation(false);
   ++chatGeneration; cancelMediaPreviews(); olderCursor = null; S.loadingOlder = false;
   const generation = accountGeneration;
@@ -2221,12 +2380,29 @@ async function pollConv(conv) {
   } catch (e) { logErr('poll', e); }
 }
 async function syncChat() {
-  const conv = S.conv, generation = chatGeneration; if (!conv || !sb) return;
+  const conv = S.conv, generation = chatGeneration;
+  if (!conv || !sb || syncGeneration === generation) return;
+  syncGeneration = generation;
   try {
-    const rows = await fetchMsgs(conv); if (generation !== chatGeneration) return;
-    rows.forEach(r => { if (r.from_acc !== ME() && !S.msgs.some(x => x.id === r.id)) onIncoming(r); else upsertMsg(r); });
+    const known = new Set(S.msgs.filter(m => !m._st).map(m => m.id));
+    const pages = [];
+    let before = null;
+    while (true) {
+      const page = await fetchMsgs(conv, before);
+      if (generation !== chatGeneration) return;
+      pages.push(page);
+      if (!known.size || page.length < PAGE || page.some(m => known.has(m.id))) break;
+      if (before && compareMessages(page[0], before) >= 0) throw new Error('消息分页没有向前移动');
+      before = page[0];
+    }
+    if (!olderCursor && pages[0].length) { olderCursor = pages[pages.length - 1][0] || pages[0][0]; S.hasMore = pages[pages.length - 1].length >= PAGE; }
+    pages.reverse().forEach(page => page.forEach(r => {
+      if (r.from_acc !== ME() && !S.msgs.some(x => x.id === r.id)) onIncoming(r);
+      else upsertMsg(r);
+    }));
     fetchPeerRead(conv);
   } catch (e) { logErr('syncChat', e); }
+  finally { if (syncGeneration === generation) syncGeneration = -1; }
 }
 async function syncEdited() {
   const conv = S.conv, generation = chatGeneration; if (!conv || !sb) return;
@@ -2305,11 +2481,11 @@ function cycleSpeed() {
 function stopAudio() { if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl = null; } const id = playingId; playingId = null; if (id) markPlaying(id, false); }
 function markPlaying(id, on) {
   const el = msgElOf(id); const v = el && el.querySelector('.voice');
-  if (v) { v.classList.toggle('playing', on); if (!on) { const i = v.querySelector('.vprog i'); if (i) i.style.width = '0'; } }
+  if (v) { v.classList.toggle('playing', on); if (!on && playingId !== id) { const i = v.querySelector('.vprog i'); if (i) i.style.width = '0'; } }
   const sp = $('voice-speed'); if (sp) sp.style.display = on ? 'block' : 'none';
   if (on) paintSpeed();
 }
-let vSeekAt = 0, vSeekEl = null;
+let voicePointer = null, suppressVoiceClick = null;
 function voiceSeek(e, b) {
   if (!audioEl || !isFinite(audioEl.duration) || !audioEl.duration) return;
   const r = b.getBoundingClientRect();
@@ -2327,7 +2503,17 @@ function voiceProgress(id, a) {
   return upd;
 }
 function togglePlay(id, url) {
-  if (playingId === id) { stopAudio(); return; }
+  if (playingId === id && audioEl) {
+    const current = audioEl;
+    if (!current.paused) { current.pause(); markPlaying(id, false); }
+    else {
+      markPlaying(id, true);
+      Promise.resolve(current.play()).catch(() => {
+        if (audioEl === current) { markPlaying(id, false); toast('无法播放语音，请再点一次'); }
+      });
+    }
+    return;
+  }
   stopAudio();
   const src = disp(url);
   const a = new Audio(); audioEl = a; playingId = id; a.preload = 'auto'; a.src = src; a.playbackRate = vspeed(); markPlaying(id, true);
@@ -2906,7 +3092,7 @@ function onPcState(call) {
       if (s2 === 'disconnected' || s2 === 'failed') endCall('网络中断', true);
     }, 8000);
   } else if (st === 'failed') {
-    endCall(call.connected ? '网络中断' : '连接失败：网络受限（可能需要配置 TURN 服务器）', true);
+    endCall(call.connected ? '网络中断' : '连接失败，请双方切换网络后重拨', true);
   }
 }
 async function startCall(video) {
@@ -2916,7 +3102,7 @@ async function startCall(video) {
   if (isGroupKey(S.conv)) { gcStart(); return; }
   const pr = envProblem(); if (pr) { toast(pr); return; }
   if (PERM.mic === 'denied' || (video && PERM.cam === 'denied')) { callPermGuide(video); return; }
-  if (!S.rt.user && S.noSigDb) { toast('实时通道连不上，且还没有运行 setup-v4.sql，暂时不能通话（我的 → 环境诊断）'); return; }
+  if (!S.rt.user && S.noSigDb) { toast('通话服务暂时连不上，请换个网络重试，也可以在「我」里查看环境诊断'); return; }
   const call = mkCall(S.peer, !!video, true); S.call = call;
   showCallUI(call, '正在呼叫…'); SFX.backStart();
   try {
@@ -2935,13 +3121,13 @@ async function startCall(video) {
 }
 async function onInvite(p) {
   if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
-  if (GC.on) { sig(p.from, 'busy', { id: p.id }); return; }   // 群语音里：直接回忙，不响铃
+  if (!S.friends.includes(p.from)) return;
+  if (GC.on) { toast(peerName(p.from) + ' 来电，你正在群语音中'); sig(p.from, 'busy', { id: p.id }); return; }
   if (S.incoming && S.incoming.id === p.id) return;
   if (S.call && S.call.id === p.id) return;
-  if (!S.friends.includes(p.from)) return;
   // Use the same winning call ID on both devices when they dial each other.
   if (S.call?.caller && !S.call.connected && S.call.peer === p.from && p.id < S.call.id) endCall('', false, true);
-  if (S.call || S.incoming) { sig(p.from, 'busy', { id: p.id }); return; }
+  if (S.call || S.incoming) { if (S.call && S.call.peer !== p.from) toast(peerName(p.from) + ' 来电，你正在通话中'); sig(p.from, 'busy', { id: p.id }); return; }
   // 不再查 signals 表：该表对登录用户不可读、且信令取完即删；只认好友 + 一次性 id
   S.incoming = { id: p.id, from: p.from, video: !!p.video, sdp: p.sdp };
   musicPause();   // 来电：音乐先停（铃声和通话不跟音乐叠在一起）
@@ -2952,7 +3138,7 @@ async function onInvite(p) {
   closeNotes(t => t === 'c:' + p.from);
   if (document.hidden) localNote(peerName(p.from), p.video ? '📹 邀请你视频通话' : '📞 邀请你语音通话', 'c:' + p.from, './#call=' + p.from, true);
   SFX.ringStart();
-  clearTimeout(S.incTimer); S.incTimer = setTimeout(() => { if (S.incoming && S.incoming.id === p.id) declineCall(); }, 40000);
+  clearTimeout(S.incTimer); S.incTimer = setTimeout(() => { if (S.incoming && S.incoming.id === p.id) { clearIncoming(); delete S.pendingIce[p.id]; } }, 40000);
 }
 function clearIncoming() { SFX.ringStop(); clearTimeout(S.incTimer); S.incoming = null; $('incoming-ui').classList.remove('active'); }
 /* 通话权限：先查状态，被拒绝时给可操作的指引，而不是一句“权限不足” */
@@ -3017,7 +3203,7 @@ async function acceptCall() {
     const ok = await sig(call.peer, 'accept', { id: call.id, sdp: { type: ans.type, sdp: ans.sdp } });
     if (S.call !== call) return;
     if (!ok) throw new Error('信令发送失败，请检查网络');
-    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时：网络受限（可能需要配置 TURN 服务器）', true); }, 25000);
+    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时，请双方切换网络后重拨', true); }, 25000);
   } catch (e) {
     logErr('acceptCall', e);
     if (S.call === call) {
@@ -3028,12 +3214,15 @@ async function acceptCall() {
 }
 async function onAccept(p) {
   const call = S.call;
-  if (!call || call.id !== p.id || !call.caller || !call.pc || !p.sdp || call.pc.signalingState !== 'have-local-offer') return;
+  if (!call || call.id !== p.id || !call.caller || call.accepted || !call.pc || !p.sdp || call.pc.signalingState !== 'have-local-offer') return;
+  call.accepted = true;
   try {
     clearTimers(call); setCallStatus('连接中…');
     await call.pc.setRemoteDescription(p.sdp);
+    if (S.call !== call) return;
+    sig(call.peer, 'answered', { id: call.id });  // 已接听的设备继续，仍在响铃的设备收起界面
     await flushPendingIce(call);
-    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时：网络受限（可能需要配置 TURN 服务器）', true); }, 25000);
+    ctimer(call, () => { if (S.call === call && !call.connected) endCall('连接超时，请双方切换网络后重拨', true); }, 25000);
   } catch (e) { logErr('onAccept', e); if (S.call === call) endCall('连接失败', true); }
 }
 async function onIce(p) {
@@ -3045,7 +3234,7 @@ async function onIce(p) {
 }
 function onSig(p) {
   if (!p || typeof p !== 'object' || typeof p.from !== 'string' || typeof p.id !== 'string') return;
-  if (GC.on && p.cid && p.cid === GC.cid && typeof p.t === 'string' && p.t.indexOf('g') === 0) { gcOnSig(p); return; }   // 群语音：成员不一定互为好友，不能按好友过滤
+  if (GC.on && p.cid && p.cid === GC.cid && typeof p.t === 'string' && p.t.indexOf('g') === 0) { if (!sigDup(p)) return gcOnSig(p); return; }   // 群语音：成员不一定互为好友，不能按好友过滤
   if (!S.friends.includes(p.from)) return;
   if (S.call?.id === p.id && S.call.peer !== p.from) return;
   if (S.incoming?.id === p.id && S.incoming.from !== p.from) return;
@@ -3055,7 +3244,14 @@ function onSig(p) {
     case 'invite': return onInvite(p);
     case 'accept': return onAccept(p);
     case 'ice': return onIce(p);
-    case 'reject': case 'busy': { const c = S.call; if (c && c.id === p.id) endCall(p.t === 'busy' ? '对方忙线中' : '对方已拒绝', false); return; }
+    case 'answered':
+      if (S.incoming && S.incoming.id === p.id) { clearIncoming(); delete S.pendingIce[p.id]; }
+      return;
+    case 'reject': case 'busy': {
+      const c = S.call;
+      if (c && c.caller && !c.accepted && !c.connected && c.id === p.id) endCall(p.t === 'busy' ? '对方忙线中' : '对方已拒绝', true);
+      return;
+    }
     case 'end': {
       const c = S.call;
       if (c && c.id === p.id) endCall(c.connected ? '通话已结束' : '对方已取消', false);
@@ -3098,7 +3294,7 @@ function gcErr(e) {
   if (/最多 4 人/.test(m)) return '群语音最多 4 人，现在满了';
   if (/不在这个群/.test(m)) return '你已经不在这个群里了';
   if (/未登录/.test(m)) return '登录状态掉了，重新登录再试';
-  if (/does not exist|PGRST202|schema cache|Could not find/i.test(m)) return '数据库还没更新，请先在后台执行 sql/group-call-v1.sql';
+  if (/does not exist|PGRST202|schema cache|Could not find/i.test(m)) return '群语音服务尚未准备好，请联系管理员';
   if (/row-level security|42501/i.test(m)) return '没有权限（数据库策略拦截）';
   return m || '请重试';
 }
@@ -3120,7 +3316,7 @@ function gcAudio(acc) {
 }
 function gcClosePeer(acc) {
   const st = GC.peers[acc]; if (!st) return;
-  st.closed = true; delete GC.peers[acc];
+  st.closed = true; clearTimeout(st.retry); delete GC.peers[acc];
   if (GC.meters[acc]) { spkStop(GC.meters[acc]); delete GC.meters[acc]; }
   delete GC.speaking[acc];
   try { st.pc.onicecandidate = null; st.pc.ontrack = null; st.pc.onconnectionstatechange = null; st.pc.close(); } catch (e) {}
@@ -3172,14 +3368,24 @@ async function gcOffer(acc) {
 async function gcOnSig(p) {
   if (!GC.on || !p) return;
   const acc = p.from;
-  if (!acc || acc === ME() || !GC.roster.some(m => m.acc === acc)) return;
+  if (!acc || acc === ME()) return;
+  if (!GC.roster.some(m => m.acc === acc)) {
+    if (p.t !== 'goffer' || !p.sdp || typeof p.sdp.sdp !== 'string') return;
+    const room = GC.cid;
+    const pending = GC.checkRoster;
+    if (!pending || pending.room !== room) GC.checkRoster = { room, check: gcTick() };
+    const check = GC.checkRoster;
+    try { await check.check; } finally { if (GC.checkRoster === check) GC.checkRoster = null; }
+    if (!GC.on || GC.cid !== room || !GC.roster.some(m => m.acc === acc)) return;
+  }
   try {
     if (p.t === 'goffer') {
       if (!p.sdp || typeof p.sdp.sdp !== 'string') return;
       const old = GC.peers[acc];
-      if (old && (old.pc.connectionState === 'connected' || old.pc.signalingState !== 'stable')) return;
+      if (old && (old.offerSdp === p.sdp.sdp || old.pc.connectionState === 'connected' || old.pc.signalingState !== 'stable')) return;
       if (old) gcClosePeer(acc);
       const st = gcNewPeer(acc);
+      st.offerSdp = p.sdp.sdp;
       await st.pc.setRemoteDescription(p.sdp);
       const ans = await st.pc.createAnswer();
       await st.pc.setLocalDescription(ans);
@@ -3530,8 +3736,7 @@ function teardown() {
   iceConfigRequest = null;
   clearTimeout(searchT); clearTimeout(saveMT); clearTimeout(csT);
   pendingFriendRequests.clear(); pendingMomentLikes.clear(); cancelMediaPreviews(); olderCursor = null;
-  Object.values(readT).forEach(clearTimeout); readT = {};
-  Object.keys(peerActiveAt).forEach(acc => delete peerActiveAt[acc]);
+  Object.values(readT).forEach(entry => clearTimeout(entry.timer)); readT = {};
   closeForm(); closeActs(); closeMenu(); closeMomentCompose(); closeVis(); resetStore();
   MO.list = []; MO.likes = {}; MO.comments = {}; MO.notices = []; MO.ats = [];
   MO.cursor = null; MO.loading = false; MO.sig = ''; MO.loadAt = 0;
@@ -3565,7 +3770,7 @@ function teardown() {
   clearInterval(GRP.chatT); GRP.chatT = 0; clearInterval(GRP.muteT); GRP.muteT = 0; GRP.list = []; GRP.members = {}; GRP.membersAt = {}; GRP.count = {}; GRP.cursor = {}; GRP.done = new Set(); GRP.loadAt = 0; GRP.invAt = 0; GRP.invLoaded = false;
   S.gInvites = [];
   msgCacheClear();
-  if (outgoingUid) return idbClear(outgoingUid);
+  if (outgoingUid) return idbClear(outgoingUid, true);
 }
 
 /* ================= 登录 / 启动 ================= */
@@ -3701,7 +3906,8 @@ function raiseSheet(sheetId, backdropId) {
 function openForm(title, fields, onOk, okText, opts) {
   raiseSheet('form-sheet', 'form-backdrop');
   $('fs-title').textContent = title; $('fs-msg').textContent = '';
-  $('fs-fields').innerHTML = fields.map((f, i) => '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">' + (f.hint ? '<div class="fs-hint">' + esc(f.hint) + '</div>' : '')).join('') + ((opts && opts.after) || '');
+  $('fs-fields').innerHTML = fields.map((f, i) => f.multiline ? '<textarea id="fsf' + i + '" rows="4" style="width:100%;resize:vertical" maxlength="' + (f.max || 60) + '" placeholder="' + esc(f.ph || '') + '"></textarea>' : '<input id="fsf' + i + '" type="' + (f.type || 'text') + '" placeholder="' + esc(f.ph || '') + '" value="' + esc(f.val || '') + '" maxlength="' + (f.max || 60) + '" autocomplete="' + esc(f.ac || 'off') + '" autocapitalize="none">' + (f.hint ? '<div class="fs-hint">' + esc(f.hint) + '</div>' : '')).join('') + ((opts && opts.after) || '');
+  fields.forEach((f, i) => { if (f.multiline) $('fsf' + i).value = f.val || ''; });
   $('fs-ok').textContent = okText || '确定'; $('fs-ok').disabled = false;
   if (opts && opts.mount) { try { opts.mount(); } catch (e) { logErr('formMount', e); } }
   fsOk = async () => {
@@ -4287,10 +4493,16 @@ function renderGroupFiles(gid, list) {
     return '<div class="gi-file" data-id="' + esc(f.id) + '">' +
       '<div class="gf-ic">' + esc(ext) + '</div>' +
       '<div class="gf-main"><div class="gf-name">' + esc(f.name) + '</div><div class="gf-sub">' + gfSize(f.size) + ' · ' + esc(peerName(f.uploader)) + '</div></div>' +
-      '<a class="ie-mini" href="' + esc(gfURL(f.path)) + '" target="_blank" rel="noopener" download>下载</a>' +
+      '<button class="ie-mini gf-save" type="button">下载</button>' +
       (canDel ? '<button class="gf-del" type="button">删</button>' : '') + '</div>';
   }).join('');
   box.onclick = function (e) {
+    const save = e.target.closest('.gf-save');
+    if (save) {
+      const item = list.find(f => String(f.id) === save.closest('.gi-file').dataset.id);
+      if (item) saveToPhone(gfURL(item.path), item.name || '文件');
+      return;
+    }
     const del = e.target.closest('.gf-del'); if (!del) return;
     e.preventDefault();
     deleteGroupFile(gid, del.closest('.gi-file').dataset.id);
@@ -4861,6 +5073,7 @@ function paintMomentsHead() {
 function fmtListTime(t) {
   const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
   const diff = (n - d) / 1000;
+  if (diff < 0) return fmtTime(t);
   if (diff < 60) return '刚刚';
   if (d.toDateString() === n.toDateString()) return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   if (d.toDateString() === new Date(n.getTime() - 864e5).toDateString()) return '昨天';
@@ -4869,6 +5082,7 @@ function fmtListTime(t) {
 function fmtMomentTime(t) {
   const d = new Date(t), n = new Date(); if (isNaN(d.getTime())) return '';
   const diff = (n - d) / 1000;
+  if (diff < 0) return fmtTime(t);
   if (diff < 60) return '刚刚';
   if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
   const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
@@ -5309,10 +5523,10 @@ function exitMulti() {
 function multiDel() {
   const n = selSet.size; if (!n) return;
   selSet.forEach(function (id) {
-    hidden.add(id); S.out.delete(id);
+    hidden.add(id); removePending(id);
     const el = msgElOf(id); if (el) el.remove();
   });
-  saveHidden(); exitMulti();
+  saveHidden(); saveOutQueue(); exitMulti();
   if (!$('chat-messages').querySelector('.msg')) chatRender(true);
   notePreview(S.conv); sched('list');
   toast('已删除 ' + n + ' 条（仅在你这边）');
@@ -5369,6 +5583,13 @@ function applyTheme() {
     const tc = document.querySelectorAll('meta[name="theme-color"]');
     tc.forEach((m, i) => m.setAttribute('content', t === 'dark' ? '#12101c' : t === 'light' ? '#f6f3ee' : (i ? '#12101c' : '#f6f3ee')));
     const cs = document.querySelector('meta[name="color-scheme"]'); if (cs) cs.setAttribute('content', t === 'auto' ? 'light dark' : t);
+    const dark = t === 'dark' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    if (window.caches && 'serviceWorker' in navigator) {
+      caches.open('chatter-shell-v1').then(cache => cache.put(
+        new URL('./.chatter-launch-theme', document.baseURI).href,
+        new Response(dark ? 'dark' : 'light')
+      )).catch(() => {});
+    }
     const b = $('btn-theme');
     if (b) b.textContent = '🎨 主题：' + (t === 'auto' ? '跟随系统' : (t === 'dark' ? '深色' : '浅色'));
   } catch (e) {}
@@ -5380,6 +5601,13 @@ function cycleTheme() {
   LS.set('ch2theme', next); applyTheme();
 }
 applyTheme();
+window.addEventListener('storage', e => { if (e.key === 'ch2theme' || e.key === null) applyTheme(); });
+if (window.matchMedia) {
+  const scheme = matchMedia('(prefers-color-scheme: dark)');
+  const follow = () => { if (LS.get('ch2theme', 'auto') === 'auto') applyTheme(); };
+  if (scheme.addEventListener) scheme.addEventListener('change', follow);
+  else if (scheme.addListener) scheme.addListener(follow);
+}
 /* ================= 清空聊天记录 / 搜索 ================= */
 function clearConv(conv) {
   const c = convOf(conv); let t = c ? (Date.parse(c.last_ts || 0) || 0) : 0;
@@ -5389,7 +5617,7 @@ function clearConv(conv) {
   setClr(conv, t);
   if (c) c.unread = 0;
   if (S.conv === conv) { S.hasMore = false; chatRender(true); }
-  markReadSoon(conv); sched('list'); sched('title'); saveCache(); toast('已清空（仅在你这边，对方不受影响）');
+  markReadSoon(conv, true); sched('list'); sched('title'); saveCache(); toast('已清空（仅在你这边，对方不受影响）');
 }
 function confirmClear(conv, isList) {
   openActs(isList ? '删除这个会话？聊天记录会在你这边清空，对方不受影响，对方再发消息时会重新出现。' : '清空这个聊天的全部记录？只在你这边清空，对方不受影响。', [{ label: isList ? '删除会话' : '清空聊天记录', danger: true, fn: () => clearConv(conv) }, { label: '取消', fn: null }]);
@@ -5476,7 +5704,7 @@ function stRender(view) {
   }
   const count = files.length;
   $('store-info').textContent = count
-    ? '可管理 ' + count + ' 个聊天附件文件（含缩略图和封面），约 ' + fmtMB(size) + '。删除会影响双方打开这些附件。'
+    ? '可管理 ' + count + ' 个聊天附件文件（含缩略图和封面），约 ' + fmtMB(size) + '。删除后，所有聊天里引用同一附件的人都将无法再打开它。'
     : '暂无可清理的聊天附件。';
   ST_RANGES.forEach(([id, days]) => {
     const n = stPick(files, days).length, button = $(id);
@@ -5885,13 +6113,13 @@ function vpvPaintRange() {
   const d = VPV.dur || 0;
   $('vpv-range').textContent = vpvFmt(VPV.start) + ' - ' + vpvFmt(VPV.end) + (d ? ' / ' + vpvFmt(d) : '');
   const cut = (!d && VPV.start > 0.08) || (d && (VPV.start > 0.08 || VPV.end < d - 0.08));
-  $('vpv-tip').textContent = (VPV.compress || cut) ? '会重新编码，视频多长就等多久（可以取消）' : '两条滑杆裁开头和结尾；不裁不压就是原样发送';
+  $('vpv-tip').textContent = (VPV.compress || cut) ? '裁剪和压缩都会重新编码，可能降低画质，处理时可取消' : '两条滑杆裁开头和结尾；不裁不压就是原样发送';
 }
 function openVideoPreview(file, pr) {
   return new Promise(function (resolve) {
     VPV.file = file; VPV.resolve = resolve; VPV.poster = (pr && pr.poster) || null; VPV.cover = null;
     VPV.compress = false; VPV.busy = false; VPV.rec = null; VPV.start = 0; VPV.end = 0;
-    try { const _ct = !!(document.createElement('video').captureStream); if (!_ct) { ['vpv-start','vpv-end','vpv-compress'].forEach(function (id) { const el = document.getElementById(id); if (el) { el.disabled = true; el.style.opacity = '.35'; } }); toast('这台设备不支持裁剪/压缩，可直接发送原视频'); } } catch (e) {}
+    try { const _ct = !!(document.createElement('video').captureStream); if (!_ct) { ['vpv-start','vpv-end','vpv-compress'].forEach(function (id) { const el = document.getElementById(id); if (el) { el.disabled = true; el.style.opacity = '.35'; } }); toast(file.size > fileMax() ? '原视频过大，这台设备不能裁剪，请在系统相册里裁短后再发' : '这台设备不支持裁剪或压缩，可以直接发送原视频'); } } catch (e) {}
     try { if (VPV.url) URL.revokeObjectURL(VPV.url); } catch (e) {}
     VPV.url = URL.createObjectURL(file);
     const v = $('vpv-video'); v.src = VPV.url; try { v.load(); } catch (e) {}
@@ -5939,7 +6167,9 @@ async function vpvEncode() {
   cv.captureStream(30).getVideoTracks().forEach(function (t) { mixed.addTrack(t); });
   try { const vs = v.captureStream(); if (vs) vs.getAudioTracks().forEach(function (t) { mixed.addTrack(t); }); } catch (e) {}
   try {
-    const mime = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+    if (!window.MediaRecorder) throw new Error('这台设备不能处理视频');
+    const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+    if (!mime) throw new Error('这台设备不能编码所选视频');
     const rec = new MediaRecorder(mixed, { mimeType: mime, videoBitsPerSecond: VPV.compress ? 1600000 : 4000000, audioBitsPerSecond: 96000 });
     VPV.rec = rec; VPV.cancelEncode = false;
     const parts = [];
@@ -5966,9 +6196,10 @@ async function vpvEncode() {
     });
     await stopped;
     if (VPV.resolve !== preview || VPV.cancelEncode) throw new Error('已取消');
-    const blob = new Blob(parts, { type: 'video/webm' });
+    const outputType = (rec.mimeType || mime).split(';')[0];
+    const blob = new Blob(parts, { type: outputType });
     if (!blob.size) throw new Error('处理失败，请重试');
-    return new File([blob], 'clip.webm', { type: 'video/webm' });
+    return new File([blob], outputType === 'video/mp4' ? 'clip.mp4' : 'clip.webm', { type: outputType });
   } finally {
     stopStream(mixed);
     if (VPV.resolve === preview) {
@@ -5983,11 +6214,12 @@ async function vpvSendNow() {
   const preview = VPV.resolve, v = $('vpv-video');
   const d = VPV.dur || v.duration || 0;
   const cut = VPV.start > 0.08 || (d && VPV.end < d - 0.08);
-  if (!VPV.compress && !cut) { closeVideoPreview({ file: VPV.file, poster: VPV.cover || VPV.poster, dur: d || null }); return; }
+  if (!VPV.compress && !cut) { if (VPV.file.size > fileMax()) { toast('原视频超过 ' + fileMax() / MB + 'MB，请先裁短或压缩'); return; } closeVideoPreview({ file: VPV.file, poster: VPV.cover || VPV.poster, dur: d || null }); return; }
   VPV.busy = true;
   try {
     const f = await vpvEncode();
     if (VPV.resolve !== preview) return;
+    if (f.size > fileMax()) { VPV.busy = false; toast('处理后仍超过 ' + fileMax() / MB + 'MB，请再裁短一些'); return; }
     closeVideoPreview({ file: f, poster: VPV.cover || VPV.poster, dur: Math.max(1, Math.round(VPV.end - VPV.start)) });
   } catch (e) {
     if (VPV.resolve !== preview) return;
@@ -6028,12 +6260,12 @@ async function sendFiles(files) {
     if (generation !== chatGeneration) return;
     const k = kindOf(f);
     if (k !== 'image' && S.v6 === false) { need++; continue; }
-    if (f.size > fileMax()) { big++; continue; }
+    if (k !== 'video' && f.size > fileMax()) { big++; continue; }
     if (k === 'image') await sendImage(f); else if (k === 'video') await sendVideo(f); else sendDoc(f);
     await new Promise(r => setTimeout(r, 60));
   }
   if (need) toast(NEED_V6);
-  else if (big) toast(big + ' 个文件超过 ' + (fileMax() / MB) + 'MB，已跳过（这是 Supabase 免费版单个文件的上限）');
+  else if (big) toast(big + ' 个文件超过 ' + (fileMax() / MB) + 'MB，已跳过；请选择较小的文件');
 }
 
 /* ---- 保存到手机：先下载好，再调出系统的“存储图像 / 存储视频 / 存储到文件” ---- */
@@ -6041,19 +6273,21 @@ const stampName = t => { const d = new Date(t || now()); return 'Chatter_' + d.g
 function dlFile(f) {
   const u = URL.createObjectURL(f), a = document.createElement('a');
   a.href = u; a.download = f.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已下载：' + (f.name || '文件') + '（在浏览器的「下载」文件夹里，Ctrl+J 可查看）');
+  setTimeout(() => { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000); toast('已请求下载「' + (f.name || '文件') + '」，请在下载列表里查看');
 }
-function shareFile(f, second) {
-  navigator.share({ files: [f] }).catch(e => {
+function shareFile(f, second, generation = accountGeneration) {
+  if (generation !== accountGeneration) return;
+  return navigator.share({ files: [f] }).catch(e => {
+    if (generation !== accountGeneration) return;
     if (e && e.name === 'AbortError') return;
-    if (e && e.name === 'NotAllowedError' && !second) { openActs('文件准备好了（' + fmtSize(f.size) + '）', [{ label: '保存 / 分享', fn: () => shareFile(f, true) }, { label: '取消', fn: null }]); return; }
+    if (e && e.name === 'NotAllowedError' && !second) { openActs('文件准备好了（' + fmtSize(f.size) + '）', [{ label: '保存 / 分享', fn: () => shareFile(f, true, generation) }, { label: '取消', fn: null }]); return; }
     logErr('share', e); dlFile(f);
   });
 }
 let saving2 = false;
 async function saveToPhone(url, name) {
   if (!url || saving2) return;
-  if (url.indexOf('blob:') === 0) { toast('还在发送中，等发完再保存'); return; }
+  const generation = accountGeneration;
   const desk = (function () { try { return window.matchMedia('(hover:hover) and (pointer:fine)').matches; } catch (e) { return false; } })();
   // 电脑：先弹「另存为」（必须在点击的手势里，不能等下载完再弹，否则浏览器会拦）
   let handle = null;
@@ -6064,10 +6298,27 @@ async function saveToPhone(url, name) {
   saving2 = true; toast('正在准备…');
   let f = null;
   try {
-    const r = await fetch(disp(url)); if (!r.ok) throw new Error('HTTP ' + r.status);
-    const b = await r.blob(); f = new File([b], name, { type: b.type || 'application/octet-stream' });
-  } catch (e) { logErr('save', e); toast('下载失败：可能已被清理，或网络连不上存储服务'); }
-  saving2 = false; if (!f) return;
+    const src = disp(url).split('#')[0];
+    let r = null;
+    // 看大图时后台小助手已经下载的原件可以直接保存；缩略图不能充作原图。
+    if (isStoreUrl(canon(src)) && window.caches) {
+      try { r = await caches.match(src, { cacheName: 'chatter-img-v1' }); } catch (e) {}
+    }
+    if (!r || !r.ok) r = await fetch(src);
+    if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    const b = await r.blob(); if (!b.size) throw new Error('文件为空');
+    const ext = extOfName(name), types = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', mp4: 'video/mp4' };
+    const type = (!b.type || b.type === 'application/octet-stream') && types[ext] ? types[ext] : b.type;
+    f = new File([b], name, { type: type || 'application/octet-stream' });
+  } catch (e) {
+    if (generation === accountGeneration) {
+      logErr('save', e);
+      if (e.status === 404 || e.status === 410) toast('找不到原文件，可能已经被清理');
+      else if (e.status === 401 || e.status === 403) toast('这台设备没有读取原文件的权限');
+      else toastUndo('文件没有下载完整', '重试', () => { if (generation === accountGeneration) saveToPhone(url, name); });
+    }
+  }
+  saving2 = false; if (!f || generation !== accountGeneration) return;
   if (handle) {
     try {
       const w = await handle.createWritable(); await w.write(f); await w.close();
@@ -6075,7 +6326,12 @@ async function saveToPhone(url, name) {
     } catch (e) { logErr('save-write', e); toast('写入失败，改走浏览器下载'); }
   }
   let can = false; try { can = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] })); } catch (e) {}
-  if (can) { shareFile(f); return; }
+  if (can) {
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+      openActs('文件准备好了（' + fmtSize(f.size) + '）', [{ label: '保存 / 分享', fn: () => shareFile(f, true, generation) }, { label: '取消', fn: null }]);
+    } else shareFile(f, false, generation);
+    return;
+  }
   dlFile(f);
 }
 function saveMsg(m) {
@@ -6683,7 +6939,7 @@ async function checkStorage(force) {
     const r = S.stUsed / ST_QUOTA, day = new Date().toISOString().slice(0, 10), key = 'ch2stwarn:' + (S.uid || '');
     if (r >= 0.8 && LS.get(key, '') !== day && $('store-box').style.display !== 'block') {
       LS.set(key, day);
-      openActs('存储空间快满了：两个人一共用了 ' + Math.round(r * 100) + '%（约 ' + fmtDec(S.stUsed) + ' / 1 GB）\n满了以后图片、视频、文件都会发不出去', [
+      openActs('存储空间快满了：所有账号共用了 ' + Math.round(r * 100) + '%（约 ' + fmtDec(S.stUsed) + ' / 1 GB）\n满了以后图片、视频、文件都会发不出去', [
         { label: '管理已发送附件', fn: () => { if (generation !== accountGeneration) return; document.querySelector('.app-nav button[data-tab=me]').click(); loadStore(); } },
         { label: '知道了', fn: null }]);
     }
@@ -6755,11 +7011,21 @@ function exportHTML(peer, list, truncated) {
 let lbList = [], lbIdx = 0;
 function lbShow() {
   const it = lbList[lbIdx]; if (!it) return;
-  $('lightbox-img').src = it.url; $('lb-count').textContent = lbList.length > 1 ? (lbIdx + 1) + ' / ' + lbList.length : '';
+  const image = $('lightbox-img');
+  if (it.thumb) {
+    image.src = it.thumb;
+    const original = new Image();
+    original.onload = () => { if (lbList[lbIdx] === it && $('lightbox').classList.contains('active')) image.src = it.url; };
+    original.src = it.url;
+  } else image.src = it.url;
+  $('lb-count').textContent = lbList.length > 1 ? (lbIdx + 1) + ' / ' + lbList.length : '';
   $('lb-prev').style.display = lbIdx > 0 ? '' : 'none'; $('lb-next').style.display = lbIdx < lbList.length - 1 ? '' : 'none';
 }
 function openLightbox(id) {
-  lbList = S.msgs.filter(m => m.type === 'image' && !isHidden(m) && m.body).map(m => ({ id: m.id, url: disp(m.body) }));
+  lbList = S.msgs.filter(m => m.type === 'image' && !isHidden(m) && m.body).map(m => {
+    const url = disp(m.body);
+    return { id: m.id, url, thumb: /[#&]t=1(?:&|$)/.test(url) ? url.split('#')[0] + '.t' : '' };
+  });
   $('lb-save').style.display = '';
   lbIdx = Math.max(0, lbList.findIndex(x => x.id === id));
   if (!lbList.length) return;
@@ -6835,7 +7101,7 @@ async function fnCall(body) {
   try { const r = await sb.auth.getSession(); tok = (r && r.data && r.data.session && r.data.session.access_token) || tok; } catch (e) {}
   if (!tok || generation !== accountGeneration) throw new Error('还没有登录');
   let r;
-  try { r = await fetch(PUSH_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }); }
+  try { r = await fetch(PUSH_FN, { method: 'POST', keepalive: body.op === 'push', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }); }
   catch (e) { const er = new Error(NO_FN); er.net = true; throw er; }
   let j = null; try { j = await r.json(); } catch (e) {}
   if (!r.ok) { const er = new Error(r.status === 404 ? NO_FN : '通知服务出错（' + r.status + '）' + ((j && (j.error || j.message || j.msg)) ? '：' + (j.error || j.message || j.msg) : '')); er.status = r.status; throw er; }
@@ -7007,27 +7273,27 @@ async function firePush(kind, to, ref) {   // 请推送函数给 to 推一条（
     PUSH.last = kind + (j.skip ? '：没推（' + ({ online: '对方在线', read: '对方已经看过', nosub: '对方没开通知', dup: '已经推过', done: '都推过了', ref: '找不到这条', friend: '不是好友', member: '不是群成员', type: '这种消息不推', to: '目标不对', auth: '登录失效' }[j.skip] || j.skip) + '）' : '：已推送到 ' + (j.sent || 0) + ' 台手机');
     return j;
   } catch (e) {
-    if (e.status === 404 || e.net) { PUSH.srv = false; PUSH.srvAt = now() - (e.net ? 9 * 60000 : 0); }   // 没部署：10 分钟内不再试；网络不通：1 分钟后再试
-    PUSH.last = kind + '：失败'; logErr('push', e.message || e); return null;
+    if (e.status === 404) { PUSH.srv = false; PUSH.srvAt = now(); }
+    PUSH.last = kind + '：失败'; logErr('push', e.message || e);
+    return e.net || e.status >= 500 ? { retryable: true } : null;
   }
 }
-function pushAfterSend(m) {   // 消息发成功后：对方不在线才请求推送；连着发好几条（比如一次 9 张图）只推最后一次，通知里显示“[9条]”
+function pushAfterSend(m) {   // 消息已入库；同一会话短时间连续发送时只请求最近一条的通知。
   if (m && m.to_acc === ME()) return;   // 自己给自己（备忘）不用推
   if (!m || m.type === 'call' || m.type === 'recalled' || pushBlocked()) return;
   const gp = isGroupKey(m.conv);
-  // 以前：本机觉得对方“在线”就不推。可这个“在线”可能是几十秒前的旧消息（国内模式 40 秒才刷新一次，
-  // 对方刚切到后台也还算在线）→ 这条消息永远没有通知。现在交给服务器判断，只有对方 20 秒内刚读过这个聊天才确定不用推。
-  if (!gp && now() - (peerActiveAt[m.to_acc] || 0) < 20000) return;
+  // 上一条的已读时间无法说明对方看过新消息，由服务端按本条消息判断。
   const key = gp ? m.conv : m.to_acc;
   const q = PUSH.q[key] || (PUSH.q[key] = {});
-  q.kind = gp ? 'gmsg' : 'msg'; q.to = key; q.ref = m.id;
+  q.kind = gp ? 'gmsg' : 'msg'; q.to = key; q.ref = m.id; q.msg = m;
   clearTimeout(q.t);
-  q.t = setTimeout(() => { delete PUSH.q[key]; firePushRetry(q.kind, q.to, q.ref, m); }, 300);
+  const dispatch = () => { delete PUSH.q[key]; firePushRetry(q.kind, q.to, q.ref, m); };
+  if (document.hidden) dispatch(); else q.t = setTimeout(dispatch, 300);
 }
 function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”就先不推；对方其实刚离开的话，30 秒、80 秒后再问一次（已读了就不推）
   // 群消息：服务器按成员记录推没推过。推出去一部分时，可能还有当时在线的成员，也要过一会儿再问（服务器回“都推过了”就停）
   const generation = accountGeneration, grp = kind === 'gmsg';
-  const more = j => !!j && (j.skip === 'online' || (grp && !j.skip && !j.error));
+  const more = j => !!j && (j.retryable || j.skip === 'online' || (grp && !j.skip && !j.error));
   firePush(kind, to, ref).then(function (j) {
     if (!more(j)) return;
     let n = 0;
@@ -7037,7 +7303,7 @@ function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”�
         if (generation !== accountGeneration || !S.me || pushBlocked()) return;
         if (m && !isGroupKey(m.conv)) {
           try { await fetchPeerRead(m.conv); } catch (e) {}   // 先问服务器对方读到哪了：读过就不补推（以前会在“已编辑”通知之外又补一条旧消息通知）
-          if (generation !== accountGeneration || isRead(m) || now() - (peerActiveAt[to] || 0) < 20000) return;
+          if (generation !== accountGeneration || isRead(m)) return;
         }
         firePush(kind, to, ref).then(function (j2) { if (more(j2)) again(); });
       }, (PUSH.retryMs || [30000, 50000])[n - 1]);
@@ -7046,7 +7312,7 @@ function firePushRetry(kind, to, ref, m) {   // 服务器说“对方在线”�
   });
 }
 function flushPush() {   // 发完消息马上切走 App：等不了 1.2 秒，立刻把还没发出的推送请求发掉（手机切到后台后几秒内还能发请求）
-  Object.keys(PUSH.q).forEach(k => { const q = PUSH.q[k]; clearTimeout(q.t); delete PUSH.q[k]; firePush(q.kind || 'msg', q.to || k, q.ref); });
+  Object.keys(PUSH.q).forEach(k => { const q = PUSH.q[k]; clearTimeout(q.t); delete PUSH.q[k]; firePushRetry(q.kind, q.to, q.ref, q.msg); });
 }
 async function pushPub() {
   const j = await fnCall({ op: 'key' });
@@ -7198,6 +7464,12 @@ function showNBar(o) {   // o: { key, acc, title, body, go }
   clearTimeout(nbT); nbT = setTimeout(hideNBar, 4500);
 }
 function hideNBar() { clearTimeout(nbT); const el = $('nbar'); if (el) { el.classList.remove('show'); el.setAttribute('aria-hidden', 'true'); } nbCur = null; }
+function clearChatNotes(key) {
+  if (!readingChat(key)) return;
+  const peer = S.peer;
+  closeNotes(tag => readingChat(key) && (tag === 'm:' + peer || tag === 'c:' + peer || tag === peer || tag === key));
+  if (nbCur && nbCur.acc === peer) hideNBar();
+}
 function openChatWith(acc) {
   if (!S.me || !S.friends.includes(acc)) return;
   const key = convKeyOf(ME(), acc);
@@ -7211,7 +7483,7 @@ function goRequests() {   // 好友请求、群邀请：在通讯录顶上的“
 }
 function goTab(name) {
   if (name === 'requests') name = 'contacts';   // 以前的“请求”页并进了通讯录
-  if (S.conv) { if (S.hist) { try { history.back(); } catch (e) { closeChat(); } } else closeChat(); }
+  if (S.conv) backFromChat();
   const b = document.querySelector('.app-nav button[data-tab="' + name + '"]'); if (b) b.click();
 }
 function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天、免打扰的不会走到这里）
@@ -7222,7 +7494,7 @@ function noteIncoming(m) {   // 别的聊天来了新消息（开着这个聊天
     if (gp) { localNote(title, body, m.conv, './#g=' + gidOf(m.conv)); return; }
     localNote(title, body, 'm:' + m.from_acc, './#c=' + m.from_acc); return;
   }
-  if (!S.conv && $('tab-convs').classList.contains('active')) return;   // 正看着消息列表：列表本身已经更新
+  if (!S.conv && $('tab-convs').classList.contains('active')) { inAppBanner(m); return; }
   showNBar({ key: gp ? m.conv : 'm:' + m.from_acc, acc: gp ? m.conv : m.from_acc, title, body, go: () => gp ? openConv(m.conv, m.conv) : openChatWith(m.from_acc) });
 }
 function noteRequest(r) {
@@ -7306,57 +7578,51 @@ let viewportApply = null;
 function bindViewport() {
   const vv = window.visualViewport; if (!vv) return;
   const desktop = window.matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)');
+  const root = document.documentElement;
+  const editing = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  let suspendedField = null;
   const apply = () => {
-    const root = document.documentElement;
-    // 只有真正的鼠标桌面才切成双栏；平板/触屏即使宽度够，也按手机的可视区处理。
-    if (desktop.matches) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt'); document.body.classList.remove('kb'); return; }
-    if (!vv.height) return;
-    // 聊天页始终贴合“看得见的那块屏幕”：键盘、浏览器地址栏、下拉都算在内。
-    // 没在输入框里打字时一律按整屏算，避免 iPhone 报个“半屏高度”
-    const typing = (function () { const a = document.activeElement; return !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)); })();
-    const h = typing ? vv.height : Math.max(window.innerHeight || 0, vv.height || 0);
-    root.style.setProperty('--vvh', h + 'px');
-    root.style.setProperty('--vvt', (typing ? Math.max(0, vv.offsetTop || 0) : 0) + 'px');
-    const kb = typing && ((window.innerHeight - vv.height > 100) || (vv.height < (window.screen.height || 0) * 0.68));
-    document.body.classList.toggle('kb', kb);
-    if (S.conv && S.stick) requestAnimationFrame(function () { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; });
+    const typing = !desktop.matches && editing(document.activeElement) && vv.height > 0;
+    if (typing) {
+      root.style.setProperty('--vvh', vv.height + 'px');
+      root.style.setProperty('--vvt', Math.max(0, vv.offsetTop || 0) + 'px');
+    } else {
+      // WebKit 恢复时两个 JS 高度可能都暂时停在键盘尺寸。由 CSS 动态视口重新布局。
+      root.style.removeProperty('--vvh');
+      root.style.removeProperty('--vvt');
+    }
+    document.body.classList.toggle('kb', !!typing && (innerHeight - vv.height > 100 || vv.height < screen.height * 0.68));
+    if (S.conv && S.stick) requestAnimationFrame(() => {
+      const box = $('chat-messages'); if (box && S.stick) box.scrollTop = box.scrollHeight;
+    });
   };
   viewportApply = apply; window.__vvApply = apply;
-  const resync = () => { [0, 120, 420, 1000].forEach(function (ms) { setTimeout(function () { try { apply(); } catch (e) {} }, ms); }); };
-  // 从后台回来：iOS 有时会保留“键盘打开时的高度”，聊天页只占半屏、输入栏悬在中间
-  const resumeFix = () => {
-    try {
-      // 从后台回来：先让输入框失焦，否则 iOS 会继续用“键盘打开时”的旧高度
-      const ae = document.activeElement;
-      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) { try { ae.blur(); } catch (e) {} }
-      const root = document.documentElement;
-      if (!desktop.matches) {
-        root.style.setProperty('--vvh', window.innerHeight + 'px');
-        root.style.setProperty('--vvt', '0px');
-      }
-      document.body.classList.remove('kb');
-    } catch (e) {}
-    resync();
-    setTimeout(function () {
-      try {
-        if (document.hidden || desktop.matches) return;
-        const v = window.visualViewport;
-        if (v && v.height < window.innerHeight * 0.7) {
-          const root = document.documentElement;
-          root.style.setProperty('--vvh', window.innerHeight + 'px');
-          root.style.setProperty('--vvt', '0px');
-          document.body.classList.remove('kb');
-        }
-        if (S.conv && S.stick) { const b = $('chat-messages'); if (b) b.scrollTop = b.scrollHeight; }
-      } catch (e) {}
-    }, 900);
+  let timers = [];
+  const measureAfterTransition = () => {
+    timers.forEach(clearTimeout);
+    apply();
+    timers = [140, 420, 1000].map(ms => setTimeout(apply, ms));
   };
-  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); window.addEventListener('resize', apply); window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { resumeFix(); try { if (S.typingUntil && S.typingUntil <= now()) { S.typingUntil = 0; } renderChatTitle(); } catch (e) {} } });
-  window.addEventListener('pageshow', resumeFix);
-  // 回到前台/切回应用时把聊天背景重新贴一次，避免偶发丢失
-  window.addEventListener('pageshow', function () { try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {} });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {} } }); window.addEventListener('focus', resumeFix);
+  function rememberFocus() {
+    suspendedField = editing(document.activeElement) ? document.activeElement : null;
+  }
+  function resume() {
+    if (suspendedField && document.activeElement === suspendedField) suspendedField.blur();
+    suspendedField = null;
+    measureAfterTransition();
+    try { applyChatFor(S.conv || '', S.peer || ''); } catch (e) {}
+  }
+  vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply);
+  window.addEventListener('resize', apply); window.addEventListener('orientationchange', measureAfterTransition);
+  window.addEventListener('pagehide', rememberFocus); window.addEventListener('pageshow', resume);
+  document.addEventListener('focusin', () => { if (!document.hidden) suspendedField = null; });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { rememberFocus(); return; }
+    resume();
+    if (S.typingUntil && S.typingUntil <= now()) S.typingUntil = 0;
+    renderChatTitle();
+  });
+  window.addEventListener('focus', measureAfterTransition);
   apply();
 }
 /* 请求根本没发出去（网络拦截、不稳定、没联网）：不能说成“密码错误”或“没运行 SQL” */
@@ -7574,32 +7840,33 @@ function bindUI() {
   $('search-btn').onclick = () => { clearTimeout(searchT); runSearch(si.value).catch(x => logErr('search', x)); };
 
   /* 聊天窗口 */
-  $('chat-back').onclick = () => { if (S.hist) { try { history.back(); return; } catch (e) {} } closeChat(); };
-  // 历史记录：
-  // ① 打开聊天时加一条，所以在聊天里边缘滑 / 按安卓返回键 = 回到消息列表；
-  // ② 主页面：在浏览器里打开时（安卓的返回手势、浏览器的边缘滑会直接离开网站 → 白屏），或者这次打开前已经有别的历史（比如刚自动更新过），
-  //    垫一条“守卫”历史，被吃掉马上补一条，保证滑了也留在 Chatter；
-  //    从桌面图标新打开的（前面没有页面）不垫——垫了以后 iOS 边缘滑会先显示一张点不动的旧截图，一秒多才弹回来。
-  const needGuard = !isStandaloneApp() || history.length > 1;
+  $('chat-back').onclick = backFromChat;
+  // 仅在已安装的独立窗口且确实存在旧页面时保护根页面。浏览器自己的“返回”仍可离开站点。
+  const needGuard = isStandaloneApp() ? history.length > 1 : !document.referrer;
   function armGuard() { try { history.pushState({ app: 1 }, '', location.href); } catch (e) {} }
   if (needGuard && !(history.state && (history.state.app || history.state.chat))) armGuard();
-  // 边缘滑退：iOS 的系统手势拦不住，但 Safari 有一部分版本会被 preventDefault 拦下，先尽力拦；
-  // 真拦不住也没关系——上面的历史守卫保证滑回去还是本页，不会离开应用。
-  (function () {
-    let sx = 0, sy = 0, edge = false;
-    document.addEventListener('touchstart', function (e) {
-      const t = e.touches && e.touches[0]; if (!t) return;
-      edge = t.clientX <= 14; sx = t.clientX; sy = t.clientY;
-    }, { passive: true });
-    document.addEventListener('touchmove', function (e) {
-      if (!edge) return;
-      const t = e.touches && e.touches[0]; if (!t) return;
-      const dx = t.clientX - sx, dy = Math.abs(t.clientY - sy);
-      if (dx > 12 && dy < 30) { try { e.preventDefault(); } catch (x) {} }   // 只拦贴着左边缘、明显横向的那一段
-    }, { passive: false });
-    document.addEventListener('touchend', function () { edge = false; }, { passive: true });
-    document.addEventListener('touchcancel', function () { edge = false; }, { passive: true });
-  })();
+  // WebKit 能交给网页处理的左侧手势只在聊天层消费。地图、弹层和浏览器保留自己的手势。
+  let edgeSwipe = null;
+  const chatView = $('chat-view');
+  chatView.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    edgeSwipe = S.conv && e.touches.length === 1 && t.clientX <= 18
+      ? { x: t.clientX, y: t.clientY, chat: S.conv, taken: false } : null;
+  }, { passive: true });
+  chatView.addEventListener('touchmove', e => {
+    if (!edgeSwipe) return;
+    if (e.touches.length !== 1 || !e.cancelable) { edgeSwipe = null; return; }
+    const t = e.touches[0], dx = t.clientX - edgeSwipe.x, dy = Math.abs(t.clientY - edgeSwipe.y);
+    if (!edgeSwipe.taken && dy > 10 && dy >= dx) { edgeSwipe = null; return; }
+    if (dx > 14 && dx > dy * 2) edgeSwipe.taken = true;
+    if (edgeSwipe.taken) e.preventDefault();
+  }, { passive: false });
+  chatView.addEventListener('touchend', e => {
+    const swipe = edgeSwipe, t = e.changedTouches[0]; edgeSwipe = null;
+    if (!swipe || !swipe.taken || !t || swipe.chat !== S.conv) return;
+    if (t.clientX - swipe.x >= 64 && t.clientX - swipe.x > Math.abs(t.clientY - swipe.y) * 2) backFromChat();
+  }, { passive: true });
+  chatView.addEventListener('touchcancel', () => { edgeSwipe = null; }, { passive: true });
   window.addEventListener('popstate', (e) => {
     if (navPanel) { closeNavigation(false); return; }
     if (S.call) { armGuard(); return; }   // 通话界面不让滑走
@@ -7654,7 +7921,7 @@ function bindUI() {
     const im = el; if (im.tagName !== 'IMG' || !im.closest('.bubble.img')) return;
     const u = im.getAttribute('src') || ''; if (/^blob:/.test(u)) return;
     const full = im.dataset.full || '';
-    if (full && /\.t(\?|$)/.test(u) && !im.dataset.tf) { im.dataset.tf = '1'; im.src = full; return; }   // 小图取不到（老消息/没传上）：直接换原图
+    const preview = full && /\.t(\?|$)/.test(u);
     const n = +(im.dataset.rty || 0);
     if (n < 3) {   // 国内网络时好时坏：隔 1.2 秒、3.5 秒、8 秒各再试一次，别一次失败就说“已被清理”
       im.dataset.rty = String(n + 1);
@@ -7662,22 +7929,57 @@ function bindUI() {
       setTimeout(function () { if (im.isConnected) im.src = b0 + (b0.indexOf('?') < 0 ? '?' : '&') + 'r=' + now(); }, [1200, 3500, 8000][n]);
       return;
     }
+    if (preview) {
+      if (im.dataset.checking) return;
+      im.dataset.checking = '1';
+      const previewUrl = u.replace(/[?&]r=\d+$/, '');
+      fetch(previewUrl, { method: 'HEAD', cache: 'no-store' }).then(function (r) {
+        if (!im.isConnected) return;
+        if (r.status === 400 || r.status === 404 || r.status === 410) { im.dataset.rty = '0'; im.src = full; }
+        else imgFailed(im, full);
+      }, function () { if (im.isConnected) imgFailed(im, full); });
+      return;
+    }
     imgFailed(im, full || u.replace(/[?&]r=\d+$/, ''));
   }, true);
   box.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG' && S.stick) box.scrollTop = box.scrollHeight; }, true);
   box.addEventListener('loadedmetadata', e => { if (e.target && e.target.tagName === 'VIDEO' && S.stick) box.scrollTop = box.scrollHeight; }, true);
   box.addEventListener('pointerdown', e => {
-    const b = e.target.closest('.bubble.voice'); if (!b || !audioEl || !playingId) return;
-    vSeekAt = now(); vSeekEl = b; voiceSeek(e, b);
+    if (e.button !== 0 || e.isPrimary === false) return;
+    suppressVoiceClick = null;
+    const bubble = e.target.closest('.bubble.voice');
+    voicePointer = bubble && audioEl && bubble.closest('.msg').dataset.id === playingId
+      ? { id: e.pointerId, bubble, x: e.clientX, y: e.clientY, dragging: false } : null;
   });
-  box.addEventListener('pointermove', e => { if (vSeekEl) voiceSeek(e, vSeekEl); });
-  window.addEventListener('pointerup', () => { vSeekEl = null; });
+  box.addEventListener('pointermove', e => {
+    const p = voicePointer;
+    if (!p || p.id !== e.pointerId) return;
+    const dx = Math.abs(e.clientX - p.x), dy = Math.abs(e.clientY - p.y);
+    if (!p.dragging) {
+      if (dy >= 8 && dy >= dx) { voicePointer = null; suppressVoiceClick = p.bubble; return; }
+      if (dx < 8) return;
+      p.dragging = true;
+      clearTimeout(pressT);
+      try { p.bubble.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    voiceSeek(e, p.bubble);
+  });
+  window.addEventListener('pointerup', e => {
+    const p = voicePointer;
+    if (!p || p.id !== e.pointerId) return;
+    if (p.dragging) { voiceSeek(e, p.bubble); suppressVoiceClick = p.bubble; }
+    voicePointer = null;
+  });
+  window.addEventListener('pointercancel', e => {
+    if (voicePointer && voicePointer.id === e.pointerId) { voicePointer = null; suppressVoiceClick = null; }
+  });
   box.addEventListener('click', e => {
     const av = e.target.closest('.msg .avatar-wrapper'); if (av && av.dataset.acc) { if (av.dataset.acc === ME()) showSelfCard(isGroupKey(S.conv) ? gidOf(S.conv) : ''); else openProfile(av.dataset.acc); return; }
     const retry = e.target.closest('.st.failed'); if (retry) { retryMsg(retry.closest('.msg').dataset.id); return; }
-    const v = e.target.closest('.bubble.voice'); if (v) { if (now() - vSeekAt < 600) return; togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
+    const v = e.target.closest('.bubble.voice'); if (v) { if (suppressVoiceClick === v && e.detail !== 0) { suppressVoiceClick = null; return; } togglePlay(v.closest('.msg').dataset.id, v.dataset.url); return; }
     const q = e.target.closest('.quote'); if (q) { jumpTo(q.dataset.qid); return; }
-    const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; delete IMGBAD[u]; const bm = bad.closest('.msg'); if (bm) bm._h = ''; const holder = bad.parentNode; holder.innerHTML = '<img src="' + esc(u + (u.indexOf('?') < 0 ? '?' : '&') + 'r=' + now()) + '" alt="" decoding="async">'; return; }
+    const bad = e.target.closest('.imgfail'); if (bad) { const u = bad.dataset.src || ''; delete IMGBAD[u]; const bm = bad.closest('.msg'), m = bm && S.msgs.find(x => x.id === bm.dataset.id);
+      if (m) { bm._h = ''; chatReplace(m); } return; }
     const im = e.target.closest('.bubble.img img'); if (im) { openLightbox(im.closest('.msg').dataset.id); return; }
     const vb = e.target.closest('.bubble.video'); if (vb && !vb.classList.contains('playing')) { const u = vb.dataset.v || ''; if (!u || /^blob:/.test(u) || vb.querySelector('.vup') || vb.querySelector('.vfail')) return; vb.classList.add('playing'); vb.innerHTML = '<video src="' + esc(u) + '" controls autoplay playsinline webkit-playsinline></video>'; const pv = vb.querySelector('video'); try { const pp = pv.play(); if (pp && pp.catch) pp.catch(() => {}); } catch (x) {} return; }
     const fb = e.target.closest('.bubble.file'); if (fb) { const u = fb.dataset.u || ''; if (u && !/^blob:/.test(u)) { try { window.open(disp(u), '_blank', 'noopener'); } catch (x) {} } return; }
@@ -8329,12 +8631,12 @@ $('btn-copylog').onclick = () => { const t = $('diag').textContent + '\n\n' + LO
   const wake = () => {
     if (document.hidden || !sb || !S.me) return;
     if (!S.rt.db || !S.rt.user) startRealtime();
-    resyncSoon(); retryFailed();
+    resyncSoon(); retryFailed(true);
     grpLoad(true); grpInvitesLoad(true); grpPoll().catch(() => {});
     momentNotifyCheck();
     if (S.v8 !== true) checkSchema();   // 刚在 Supabase 运行完新的 SQL 回来：直接查，不等同步（同步正忙时会跳过）
   };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { try { verCheck('fg'); } catch (e) {} try { if (now() - kickAt > 20000) checkKick(); } catch (e) {} heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { recAbort(); flushPush(); if (!S.call && S.me) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } } else { try { verCheck('fg'); } catch (e) {} try { if (now() - kickAt > 20000) checkKick(); } catch (e) {} heartbeat(true).then(() => announcePresence(true)); if (S.me && sb && !S.noSigDb) pollSignals().catch(() => {}); lastSigPoll = 0; lastMsgPoll = 0; fbKick(); stopFlash(); wake(); if (S.call) wakeOn(); if (S.conv) { setAtMe(S.conv, false); clearChatNotes(S.conv); markReadSoon(S.conv); sendReadAck(S.conv, true); } } });
   window.addEventListener('pagehide', () => { flushPush(); if (GC.on && GC.cid) restRpc('group_call_leave', { p_cid: GC.cid }); if (S.me && !S.call) { restRpc('heartbeat', { p_online: false }); announcePresence(false, true); } });
   window.addEventListener('online', wake); window.addEventListener('focus', wake);
 }
@@ -8348,9 +8650,10 @@ const verNewer = (a, b) => !!a && !!b && a.localeCompare(b, 'en', { numeric: tru
 let verAt = 0, verBusy = false, verFg = 0, verPend = '';
 function verSafe() {   // 现在换页面会不会打断正在做的事
   try {
-    if (S.call || GC.on || rec.state !== 'idle' || exporting || playingId) return false;
+    if (S.call || GC.on || rec.state !== 'idle' || exporting || (audioEl && !audioEl.paused)) return false;
     const i = $('chat-input'); if (i && i.value.trim()) return false;
-    if ((S.msgs || []).some(m => m && m._st === 'sending')) return false;
+    if (IPV.resolve || IE.resolve || VPV.resolve || saving2 || $('moment-sheet').classList.contains('active')) return false;
+    for (const m of S.out.values()) if (m._st === 'sending' || m._st === 'failed') return false;
     if (document.querySelector('#lightbox.open, #lightbox.active, #call-ui.active, #incoming-ui.active')) return false;
     return true;
   } catch (e) { return false; }
@@ -8363,7 +8666,10 @@ function verGo(v, manual) {
   LS.set('ch2updTry', { v: v, n: n + 1, at: now(), from: APP_V, tab: tab, manual: !!manual });   // 记下在哪一页，换完回到这一页
   const url = location.pathname + '?v=' + Date.now() + verHash();
   toast('发现新版本（' + v + '），正在更新…');   // 以前不提示直接刷新，看起来像“版本检测消失了、跳回消息页”
-  setTimeout(function () { location.replace(url); }, 800);
+  setTimeout(function () {
+    if (!manual && (document.hidden || !verSafe())) { LS.set('ch2updTry', t); verPend = v; return; }
+    location.replace(url);
+  }, 800);
   return true;
 }
 var verLink = { h: '', at: 0 };   // 刚点过的通知/链接（换新版后接着打开它）

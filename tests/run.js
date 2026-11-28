@@ -175,7 +175,7 @@ test('编辑：自己的消息只能改一次，改完发一条 kind=edit 的推
 });
 
 // ---------------- 推送 ----------------
-test('推送：本机以为对方在线也照样问服务器（以前直接不推）；对方刚读过这个聊天就不推', async () => {
+test('推送：本机以为对方在线也照样问服务器（以前直接不推）；刚读过上一条仍为新消息询问服务器', async () => {
   const t = Date.now(), db = baseDb(t); const calls = [];
   let readNow = false;
   const env = makeEnv({ db, onRpc: n => n === 'peer_read' ? { data: readNow ? new Date().toISOString() : null, error: null } : null,
@@ -189,7 +189,8 @@ test('推送：本机以为对方在线也照样问服务器（以前直接不�
     env.T.closeChat(); await sleep(100); readNow = true;
     await env.T.openConv('bob::me', 'bob'); await sleep(600);
     env.$('chat-input').value = '第二条'; env.T.sendText(); await sleep(800);
-    ok(calls.filter(c => c.op === 'push').length === 1, '对方刚读过这个聊天还在推');
+    const requests = calls.filter(c => c.op === 'push');
+    ok(requests.length === 2 && requests[0].ref !== requests[1].ref, '上一条消息的已读抑制了新的推送请求');
   } finally { env.close(); }
 });
 
@@ -418,7 +419,7 @@ test('关聊天存缓存：不存“发送中/失败”的消息（重开不会�
   } finally { env.close(); }
 });
 
-test('图片：先显示小图；小图失败换原图；多次失败先说“网络不好”，服务器确认没了才说“已被清理”；网络恢复自动重试', async () => {
+test('图片：先显示小图；小图重试并确认不存在后换原图；多次失败先说“网络不好”，服务器确认没了才说“已被清理”；网络恢复自动重试', async () => {
   const t = Date.now(); let head = 400;
   const db = baseDb(t, { messages: [msg(1, 'bob', 'bob::me', IMG + '#w=800&h=600&t=1', t - 5000, 'image'), msg(2, 'bob', 'bob::me', IMG.replace('abcde', 'fghij') + '#w=800&h=600', t - 4000, 'image')] });
   const env = makeEnv({ db, before: w => { const of = w.fetch; w.fetch = async (u, o) => (o && o.method === 'HEAD') ? { ok: head < 400, status: head } : of(u, o); } });
@@ -427,7 +428,11 @@ test('图片：先显示小图；小图失败换原图；多次失败先说“�
     const im = id => msgEl(env, id).querySelector('.bubble.img img'), failTxt = id => { const f = msgEl(env, id).querySelector('.imgfail'); return f ? f.textContent : ''; };
     const err = el => el.dispatchEvent(new env.w.Event('error'));
     ok(/\.jpg\.t$/.test(im(uid(1)).getAttribute('src')), '带小图的消息没先显示小图');
-    err(im(uid(1))); await sleep(50);
+    for (let i = 0; i < 3; i++) {
+      err(im(uid(1))); await sleep([1300, 3600, 8100][i]);
+      ok(/\.jpg\.t(?:\?|$)/.test(im(uid(1)).getAttribute('src')), '网络波动时没有先重试小图');
+    }
+    err(im(uid(1))); await sleep(100);
     ok(/abcde\.jpg$/.test(im(uid(1)).getAttribute('src')), '小图失败后没换原图');
     for (let i = 0; i < 4; i++) { err(im(uid(1))); await sleep(i < 3 ? [1300, 3600, 8100][i] : 300); }
     ok(/已被清理/.test(failTxt(uid(1))), '服务器确认文件没了，却没显示“已被清理”：' + failTxt(uid(1)));
