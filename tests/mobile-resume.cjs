@@ -54,6 +54,12 @@ async function session(run, options = {}) {
 }
 async function ready(page) {
   await page.waitForFunction(() => window.__T && document.querySelector('#auth-view.active'));
+  // 等初始化会话回调完成，再设置独立夹具的聊天状态。
+  await page.evaluate(async () => {
+    await __T.getReady();
+    await __T.sb.auth.getSession();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
 }
 async function chat(page) {
   await page.evaluate(() => {

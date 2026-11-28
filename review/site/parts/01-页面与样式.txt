@@ -7,6 +7,11 @@
 <meta name="theme-color" content="#12101c" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <title>Chatter</title>
+<style id="launch-colors">
+  :where(html) { background-color: #f6f3ee; }
+  @media (prefers-color-scheme: dark) { :where(html:not([data-theme="light"])) { background-color: #12101c; } }
+  :where(html[data-theme="dark"]) { background-color: #12101c; }
+</style>
 <script>
 /* 先定主题，再画第一帧：避免重进时“先深色一下再变回来” */
 (function () {
@@ -54,7 +59,7 @@
 })();
 </script>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="app.js?v=20261120m">
+<link rel="preload" as="script" href="app.js?v=20261128a">
 <link rel="preconnect" href="https://uaoiqbxptnbrvkzjwguc.supabase.co" crossorigin>
 <link rel="dns-prefetch" href="https://uaoiqbxptnbrvkzjwguc.supabase.co">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 512 512%22%3E%3Crect width=%22512%22 height=%22512%22 rx=%22115%22 fill=%22%235B3BD8%22/%3E%3Cg transform=%22translate%28256 256%29 scale%281.0%29 translate%28-256 -256%29%22%3E%0A%3Cg fill=%22%23fff%22%3E%3Crect x=%2296%22 y=%22120%22 width=%22320%22 height=%22236%22 rx=%2296%22/%3E%3Cpath d=%22M158 340 L132 416 L236 350 Z%22/%3E%3C/g%3E%0A%3Ccircle cx=%22180%22 cy=%22238%22 r=%2220%22 fill=%22%236C4DF0%22 fill-opacity=%22.45%22/%3E%3Ccircle cx=%22256%22 cy=%22238%22 r=%2227%22 fill=%22%236C4DF0%22 fill-opacity=%22.75%22/%3E%3Ccircle cx=%22342%22 cy=%22238%22 r=%2235%22 fill=%22%23FF4F8B%22/%3E%0A%3C/g%3E%3C/svg%3E">
@@ -399,7 +404,7 @@
   .me-diag pre { background: var(--surface2); box-shadow: none; margin: 10px 0 4px; }
 
   /* ---------- 聊天页 ---------- */
-  .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); background: var(--bg); background-image: var(--chat-bg, none); background-size: cover; background-position: center; background-repeat: no-repeat; display: none; flex-direction: column; z-index: 50; }
+  .chat-view { position: fixed; left: 0; right: 0; top: var(--vvt, 0px); height: 100vh; height: var(--vvh, 100dvh); background: var(--bg); background-image: var(--chat-bg, none); background-size: cover; background-position: center; background-repeat: no-repeat; display: none; flex-direction: column; z-index: 50; }
   /* 键盘弹出动画的一瞬间，聊天页会先缩、键盘还没盖上来；用一块纯背景垫住，避免露出下面的会话列表 */
   #chat-underlay { display: none; position: fixed; inset: 0; z-index: 49; background: var(--bg); background-image: var(--doodle); background-size: 180px 180px; pointer-events: none; }
   body.chat-open #chat-underlay { display: block; }
@@ -786,7 +791,7 @@
   @keyframes toastin { from { opacity: 0; transform: translate(-50%, -12px); } }
 
   /* ---------- 顶部横幅（App 开着时别的聊天来消息） ---------- */
-  #nbar { position: fixed; left: 10px; right: 10px; top: calc(8px + env(safe-area-inset-top)); max-width: 520px; margin: 0 auto; z-index: 2600; display: flex; align-items: center; gap: 11px; padding: 10px 14px 10px 10px; border-radius: 20px; background: var(--glass); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); color: var(--ink); box-shadow: 0 14px 36px rgba(18,14,40,.24), 0 0 0 1px var(--line); cursor: pointer; transform: translateY(calc(-100% - 30px)); visibility: hidden; transition: transform .34s cubic-bezier(.2,1.25,.4,1), visibility 0s linear .34s; }
+  #nbar { position: fixed; left: 10px; right: 10px; top: calc(var(--vvt, 0px) + 8px + env(safe-area-inset-top)); max-width: 520px; margin: 0 auto; z-index: 2600; display: flex; align-items: center; gap: 11px; padding: 10px 14px 10px 10px; border-radius: 20px; background: var(--glass); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); color: var(--ink); box-shadow: 0 14px 36px rgba(18,14,40,.24), 0 0 0 1px var(--line); cursor: pointer; transform: translateY(calc(-100% - 30px)); visibility: hidden; transition: transform .34s cubic-bezier(.2,1.25,.4,1), visibility 0s linear .34s; }
   #nbar.show { transform: none; visibility: visible; transition: transform .34s cubic-bezier(.2,1.25,.4,1), visibility 0s; }
   #nbar .avatar { width: 42px; height: 42px; border-radius: 15px; font-size: 16px; }
   .nb-tx { flex: 1; min-width: 0; }
@@ -1113,7 +1118,7 @@
   <div id="app-view" class="view">
     <div id="banner"></div>
 <style>
-  #msg-banner{position:fixed;left:50%;top:calc(env(safe-area-inset-top, 0px) + 10px);transform:translate(-50%,-140%);z-index:2600;max-width:min(92vw,420px);
+  #msg-banner{position:fixed;left:50%;top:calc(var(--vvt, 0px) + env(safe-area-inset-top, 0px) + 10px);transform:translate(-50%,-140%);z-index:2600;max-width:min(92vw,420px);
     background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;
     box-shadow:0 10px 30px rgba(0,0,0,.22);padding:10px 14px;display:flex;gap:8px;align-items:baseline;
     font-size:13px;line-height:1.45;transition:transform .22s cubic-bezier(.2,.8,.3,1),opacity .22s;opacity:0;pointer-events:none;cursor:pointer}
@@ -1478,6 +1483,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261120m" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261120m&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
+<script src="app.js?v=20261128a" defer onerror="this.onerror=null;var s=document.createElement('script');s.src='app.js?v=20261128a&retry='+Date.now();s.defer=true;document.body.appendChild(s);"></script>
 </body>
 </html>

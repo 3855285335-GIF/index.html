@@ -4,7 +4,8 @@
   "description": "Chatter 的自动检查：代码检查 + 用假手机把 App 跑一遍。改完先跑，全部通过再推送。",
   "scripts": {
     "test": "node run.js",
-    "quick": "node run.js --quick"
+    "quick": "node run.js --quick",
+    "repair": "node --test --test-concurrency=2 background-notification.cjs chat-background-review.cjs chat-reliability.cjs chat-time.cjs media-call-regressions.cjs mobile-resume.cjs sw-notification-delivery.cjs && node chat-touch-ui.cjs"
   },
   "devDependencies": {
     "eslint": "9.39.5",

@@ -634,6 +634,7 @@ test('半屏：键盘开着时切出去再回来、或者 iPhone 没通知就收
     const full = () => !/^4/.test(root.style.getPropertyValue('--vvh')) && (root.style.getPropertyValue('--vvt') === '0px' || !root.style.getPropertyValue('--vvt')) && !kb();
     env.$('chat-input').focus(); vv.height = 462; vv.offsetTop = 47; vv.fire('resize'); await sleep(50);
     ok(kb(), '键盘弹出时页面不知道');
+    env.w.dispatchEvent(new env.w.Event('pagehide'));
     env.w.dispatchEvent(new env.w.Event('pageshow')); await sleep(1300);
     ok(full(), '切出去再回来没恢复整屏：' + root.style.getPropertyValue('--vvh'));
     env.$('chat-input').focus(); vv.fire('resize'); env.$('chat-input').blur(); await sleep(1000);

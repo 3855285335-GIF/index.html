@@ -7615,7 +7615,11 @@ function bindViewport() {
   vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply);
   window.addEventListener('resize', apply); window.addEventListener('orientationchange', measureAfterTransition);
   window.addEventListener('pagehide', rememberFocus); window.addEventListener('pageshow', resume);
-  document.addEventListener('focusin', () => { if (!document.hidden) suspendedField = null; });
+  document.addEventListener('focusin', () => {
+    if (!document.hidden) suspendedField = null;
+    apply();
+  });
+  document.addEventListener('focusout', () => requestAnimationFrame(apply));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { rememberFocus(); return; }
     resume();
